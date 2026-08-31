@@ -740,24 +740,80 @@ define('format_mnemo/vr', [], function() {
         }
     }
 
+    /**
+     * Load Three.js as a native ES module.
+     *
+     * Moodle's JS build rewrites a literal import() into a RequireJS call,
+     * which cannot load a real ES module. So instead of importing here, inject
+     * the plain (unbuilt) loader script as a native module; it performs the
+     * dynamic import and hands the module namespace back via a window event.
+     *
+     * @param {Object} config The scene configuration (needs loaderurl, threeurl).
+     * @return {Promise} Resolves with the Three.js module namespace.
+     */
+    function loadThree(config) {
+        return new Promise(function(resolve, reject) {
+            var settled = false;
+            var onReady = function(e) {
+                settled = true;
+                resolve(e.detail);
+            };
+            var onError = function(e) {
+                settled = true;
+                reject((e && e.detail) || new Error('Three.js failed to load'));
+            };
+            window.addEventListener('format_mnemo:three-ready', onReady, {once: true});
+            window.addEventListener('format_mnemo:three-error', onError, {once: true});
+
+            var separator = config.loaderurl.indexOf('?') >= 0 ? '&' : '?';
+            var script = document.createElement('script');
+            script.type = 'module';
+            script.src = config.loaderurl + separator + 'src=' + encodeURIComponent(config.threeurl);
+            script.onerror = function() {
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('Three.js loader script failed to load'));
+                }
+            };
+            document.head.appendChild(script);
+
+            window.setTimeout(function() {
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('Three.js load timed out'));
+                }
+            }, 20000);
+        });
+    }
+
     return {
         /**
-         * Entry point invoked from PHP with the scene configuration.
+         * Entry point invoked from PHP with the scene root's DOM id.
          *
-         * @param {Object} config The scene configuration.
+         * The scene configuration itself is read from the root element's
+         * data-mnemo-config attribute rather than passed as an argument, to
+         * avoid shipping a large payload through js_call_amd.
+         *
+         * @param {String} rootid The DOM id of the scene root element.
          */
-        init: function(config) {
-            var root = document.getElementById(config.rootid);
+        init: function(rootid) {
+            var root = document.getElementById(rootid);
             if (!root) {
+                return;
+            }
+            var config;
+            try {
+                config = JSON.parse(root.getAttribute('data-mnemo-config') || '{}');
+            } catch (e) {
                 return;
             }
             var container = root.closest('.format-mnemo') || root.parentNode;
             container.classList.add('format-mnemo--active');
             bindToggle(container);
 
-            // Dynamically import Three.js as an ES module from the configured
-            // URL. Kept out of the AMD dependency graph on purpose.
-            import(config.threeurl).then(function(THREE) {
+            // Load Three.js as a native ES module (see loadThree), then build
+            // the scene. Kept out of the AMD dependency graph on purpose.
+            loadThree(config).then(function(THREE) {
                 var loading = root.querySelector('[data-mnemo-loading]');
                 if (loading) {
                     loading.remove();

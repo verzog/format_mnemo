@@ -48,12 +48,13 @@ class renderer extends section_renderer {
      */
     public function render_cyberspace(\core_courseformat\base $format): string {
         $scene = new scene($format);
-        $config = $scene->get_scene_config($this);
+        $data = $scene->export_for_template($this);
 
-        // Hand the full scene graph to the browser module. Rendering happens
-        // client-side against WebXR; PHP only ships the data and the fallback.
-        $this->page->requires->js_call_amd('format_mnemo/vr', 'init', [$config]);
+        // Pass only the root element id; the browser module reads the full
+        // scene graph from that element's data-mnemo-config attribute. This
+        // keeps the js_call_amd payload small.
+        $this->page->requires->js_call_amd('format_mnemo/vr', 'init', [$data->rootid]);
 
-        return $this->render_from_template('format_mnemo/scene', $scene->export_for_template($this));
+        return $this->render_from_template('format_mnemo/scene', $data);
     }
 }
