@@ -1,0 +1,174 @@
+/* Mnemo course format styles. */
+
+.format-mnemo {
+    position: relative;
+    margin-top: 1rem;
+}
+
+.format-mnemo__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.format-mnemo__controls {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #7c8aa5;
+}
+
+/* Stage: the WebGL canvas mounts here. Hidden until JS activates. */
+.format-mnemo__stage {
+    position: relative;
+    width: 100%;
+    height: 70vh;
+    min-height: 420px;
+    border: 1px solid #10263b;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #02060f;
+    display: none;
+}
+
+.format-mnemo__stage canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    cursor: grab;
+}
+
+.format-mnemo--active .format-mnemo__stage {
+    display: block;
+}
+
+.format-mnemo--active.format-mnemo--listview .format-mnemo__stage {
+    display: none;
+}
+
+/* Fallback list: shown when JS is off, on failure, or when toggled. */
+.format-mnemo--active .format-mnemo__fallback {
+    display: none;
+}
+
+.format-mnemo--active.format-mnemo--listview .format-mnemo__fallback {
+    display: block;
+}
+
+.format-mnemo--active:not(.format-mnemo--listview) .format-mnemo__toggle {
+    /* When in 3D view the toggle offers the list. */
+}
+
+.format-mnemo__loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: #00e5ff;
+    font-family: "Courier New", monospace;
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 12px currentColor;
+    pointer-events: none;
+    text-align: center;
+    padding: 1rem;
+}
+
+.format-mnemo__spinner {
+    width: 42px;
+    height: 42px;
+    border: 3px solid rgba(0, 229, 255, 0.25);
+    border-top-color: #00e5ff;
+    border-radius: 50%;
+    animation: format-mnemo-spin 0.9s linear infinite;
+}
+
+@keyframes format-mnemo-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .format-mnemo__spinner {
+        animation-duration: 3s;
+    }
+}
+
+/* Enter VR button, floating over the stage. */
+.format-mnemo__vr-btn {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 5;
+    padding: 0.5rem 1rem;
+    font-family: "Courier New", monospace;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #02060f;
+    background: #00e5ff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.6);
+}
+
+.format-mnemo__vr-btn:disabled {
+    background: #24405a;
+    color: #8aa;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+/* Accessible fallback list styling. */
+.format-mnemo__sections {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.format-mnemo__section {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.format-mnemo__section-name {
+    margin: 0 0 0.5rem;
+}
+
+.format-mnemo__activities {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.format-mnemo__activity {
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    border-left: 4px solid #0066ff;
+    background: rgba(0, 102, 255, 0.06);
+}
+
+.format-mnemo__activity--complete {
+    border-left-color: #2e7d32;
+    background: rgba(46, 125, 50, 0.08);
+}
+
+.format-mnemo__activity--restricted {
+    border-left-color: #b3261e;
+    background: rgba(179, 38, 30, 0.06);
+}
+
+.format-mnemo__empty {
+    margin: 0;
+    color: #888;
+    font-style: italic;
+}
