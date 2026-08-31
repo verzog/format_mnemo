@@ -22,7 +22,7 @@
  * immersive WebXR cyberspace scene is rendered instead.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -54,5 +54,5 @@ if ($PAGE->user_is_editing()) {
     echo $renderer->render($widget);
 } else {
     // Learners fly through the course as cyberspace.
-    echo $renderer->render_scene($format);
+    echo $renderer->render_cyberspace($format);
 }

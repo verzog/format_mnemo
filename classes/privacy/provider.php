@@ -15,18 +15,28 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Version details for the Mnemo (VR cyberspace) course format.
+ * Privacy Subsystem implementation for format_mnemo.
  *
  * @package    format_mnemo
  * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
+namespace format_mnemo\privacy;
 
-$plugin->version   = 2026083101;
-$plugin->requires  = 2025041400; // Moodle 5.0.
-$plugin->supported = [500, 502]; // Moodle 5.0 - 5.2.
-$plugin->component = 'format_mnemo';
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = 'v0.1.0';
+/**
+ * Privacy provider for format_mnemo.
+ *
+ * The Mnemo course format renders existing course data spatially; it stores no
+ * personal data of its own, so it implements the null provider.
+ */
+class provider implements \core_privacy\local\metadata\null_provider {
+    /**
+     * Get the language string identifier explaining why this plugin stores no data.
+     *
+     * @return string the name of a string in this plugin's lang file
+     */
+    public static function get_reason(): string {
+        return 'privacy:metadata';
+    }
+}

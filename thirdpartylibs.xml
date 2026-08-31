@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<libraries>
+  <library>
+    <location>thirdparty/three.module.min.js</location>
+    <name>Three.js</name>
+    <description>WebXR / WebGL 3D library used to render the cyberspace scene.</description>
+    <version>0.160.1</version>
+    <license>MIT</license>
+    <repository>https://github.com/mrdoob/three.js</repository>
+    <copyrights>
+      <copyright>2010-2023 three.js authors</copyright>
+    </copyrights>
+  </library>
+</libraries>

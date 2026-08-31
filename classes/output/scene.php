@@ -33,11 +33,10 @@ use templatable;
  * the mustache template as a fallback / non-VR alternative.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class scene implements renderable, templatable {
-
     /** @var course_format The course format instance. */
     protected $format;
 
@@ -56,8 +55,6 @@ class scene implements renderable, templatable {
      * @return array{sections: array, nodecount: int}
      */
     protected function build_nodes(): array {
-        global $CFG;
-
         $course = $this->format->get_course();
         $context = context_course::instance($course->id);
         $modinfo = get_fast_modinfo($course);
@@ -139,11 +136,17 @@ class scene implements renderable, templatable {
         $options = $this->format->get_format_options();
         $nodes = $this->build_nodes();
 
+        // Default to the Three.js copy bundled with the plugin; an admin can
+        // override the URL (e.g. a CDN or a shared local copy) in settings.
+        $threeurl = get_config('format_mnemo', 'threeurl');
+        if (empty($threeurl)) {
+            $threeurl = (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
+        }
+
         return [
             'courseid' => (int)$course->id,
             'rootid' => $this->rootid(),
-            'threeurl' => get_config('format_mnemo', 'threeurl') ?:
-                'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.min.js',
+            'threeurl' => $threeurl,
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'layout' => $options['mnemolayout'] ?? 'ring',
@@ -185,7 +188,7 @@ class scene implements renderable, templatable {
         $data->rootid = $this->rootid();
         $data->environment = $options['mnemoenvironment'] ?? 'cyberspace';
         $data->palette = $options['mnemopalette'] ?? 'cyan';
-        $data->sections = array_values(array_map(function($section) {
+        $data->sections = array_values(array_map(function ($section) {
             $section['activities'] = array_values($section['activities']);
             return (object)$section;
         }, $nodes['sections']));
