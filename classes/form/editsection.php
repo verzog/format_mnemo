@@ -47,7 +47,12 @@ class editsection extends \editsection_form {
                 'format_mnemo',
                 'sectionimage',
                 (int)$defaultvalues->id,
-                ['subdirs' => 0, 'maxfiles' => 1, 'maxbytes' => 1048576, 'accepted_types' => ['web_image']]
+                [
+                    'subdirs' => 0,
+                    'maxfiles' => 1,
+                    'maxbytes' => \format_mnemo::TOPIC_IMAGE_MAXBYTES,
+                    'accepted_types' => ['web_image'],
+                ]
             );
             $defaultvalues->topicimage = $draftitemid;
         }

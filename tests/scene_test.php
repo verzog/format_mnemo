@@ -49,7 +49,7 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
-     * Default section names follow the cyberspace "node" naming.
+     * Unnamed sections fall back to the default "Section N" naming.
      */
     public function test_default_section_name(): void {
         $this->resetAfterTest();
@@ -69,6 +69,38 @@ final class scene_test extends \advanced_testcase {
             get_string('sectionname', 'format_mnemo'),
             $format->get_default_section_name($sections[1])
         );
+    }
+
+    /**
+     * A named section shows its title alone on the sign, but title + number in
+     * the editing interface.
+     */
+    public function test_named_section_title_and_number(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 2],
+            ['createsections' => true]
+        );
+        $format = course_get_format($course);
+        // Give section 1 a real title.
+        $modinfo = get_fast_modinfo($course);
+        $section1 = $modinfo->get_section_info(1);
+        course_update_section($course, $section1, ['name' => 'Wetwire']);
+
+        // Editing interface: title followed by the topic number.
+        $this->assertSame('Wetwire (1)', $format->get_section_name(1));
+        // Cyberspace sign: the plain title only.
+        $this->assertSame('Wetwire', $format->get_section_title_plain(1));
+
+        // The scene exposes the plain title (no number).
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $names = array_column($config['sections'], 'name', 'number');
+        $this->assertSame('Wetwire', $names[1]);
     }
 
     /**
