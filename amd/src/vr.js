@@ -650,8 +650,8 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         var activities = section.activities || [];
         var streetHalf = 4.5; // Half-width of the side street (along z).
-        var first = 5; // x-offset (past the mouth) of the first building.
-        var step = 6.5; // x-spacing between building slots down the street.
+        var first = 5; // X-offset (past the mouth) of the first building.
+        var step = 6.5; // X-spacing between building slots down the street.
         var slots = Math.ceil(activities.length / 2);
         var streetLen = first + Math.max(1, slots) * step + 3;
         var mouthX = side * roadHalf;
