@@ -246,18 +246,20 @@ define('format_mnemo/vr', [], function() {
         }));
         this.scene.add(stars);
 
-        if (this.config.environment === 'void') {
+        // The full city skyline belongs to Cyberspace only. Grid stays a clean,
+        // flat data-plane (just the lit ground and the streets), and Void keeps
+        // only the streets in the dark, so each environment matches what the
+        // course setting promises.
+        if (!dense) {
             return;
         }
 
         // The city proper: corporate mega-towers behind the streets, elevated
         // highways casting the slums below into shadow, and giant holo-ads.
-        this.buildMegaTowers(dense ? 30 : 14);
-        if (dense) {
-            this.buildElevatedHighways();
-            this.buildHoloAds();
-            this.buildBeams();
-        }
+        this.buildMegaTowers(30);
+        this.buildElevatedHighways();
+        this.buildHoloAds();
+        this.buildBeams();
     };
 
     /**
