@@ -147,6 +147,7 @@ class scene implements renderable, templatable {
             'courseid' => (int)$course->id,
             'rootid' => $this->rootid(),
             'threeurl' => $threeurl,
+            'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'layout' => $options['mnemolayout'] ?? 'ring',
@@ -181,18 +182,20 @@ class scene implements renderable, templatable {
      * @return stdClass
      */
     public function export_for_template(renderer_base $output): stdClass {
-        $nodes = $this->build_nodes();
-        $options = $this->format->get_format_options();
+        $config = $this->get_scene_config($output);
 
         $data = new stdClass();
-        $data->rootid = $this->rootid();
-        $data->environment = $options['mnemoenvironment'] ?? 'cyberspace';
-        $data->palette = $options['mnemopalette'] ?? 'cyan';
+        $data->rootid = $config['rootid'];
+        $data->environment = $config['environment'];
+        $data->palette = $config['palette'];
+        // The full scene graph is handed to the browser via a data attribute
+        // (read in JS) instead of a large js_call_amd argument.
+        $data->configjson = json_encode($config);
         $data->sections = array_values(array_map(function ($section) {
             $section['activities'] = array_values($section['activities']);
             return (object)$section;
-        }, $nodes['sections']));
-        $data->hassections = !empty($nodes['sections']);
+        }, $config['sections']));
+        $data->hassections = !empty($config['sections']);
 
         // UI strings for the template.
         $data->str_loading = get_string('loadingscene', 'format_mnemo');
