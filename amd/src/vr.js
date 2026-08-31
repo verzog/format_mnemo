@@ -2196,6 +2196,11 @@ define('format_mnemo/vr', [], function() {
     }
 
     return {
+        // Exposed for the headless WebXR smoke test (tests/webxr) so the
+        // gesture manager's input->action mapping can be driven with scripted
+        // controller/hand input. Not used by the plugin itself.
+        _GestureManager: GestureManager,
+
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
          *
