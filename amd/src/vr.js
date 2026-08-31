@@ -537,7 +537,9 @@ define('format_mnemo/vr', [], function() {
             } else if (self.root.requestFullscreen) {
                 var req = self.root.requestFullscreen();
                 if (req && req.catch) {
-                    req.catch(function() {});
+                    req.catch(function() {
+                        // Fullscreen request was rejected; nothing to do.
+                    });
                 }
             }
         });
