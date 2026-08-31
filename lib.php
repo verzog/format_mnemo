@@ -209,7 +209,12 @@ class format_mnemo extends core_courseformat\base {
                 'element_type' => 'filemanager',
                 'element_attributes' => [
                     null,
-                    ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']],
+                    [
+                        'subdirs' => 0,
+                        'maxfiles' => 1,
+                        'maxbytes' => 1048576,
+                        'accepted_types' => ['web_image'],
+                    ],
                 ],
                 'help' => 'topicimage',
                 'help_component' => 'format_mnemo',
@@ -250,7 +255,7 @@ class format_mnemo extends core_courseformat\base {
                 'format_mnemo',
                 'sectionimage',
                 (int)$data['id'],
-                ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+                ['subdirs' => 0, 'maxfiles' => 1, 'maxbytes' => 1048576, 'accepted_types' => ['web_image']]
             );
             // Not a stored scalar option; the file area is the source of truth.
             unset($data['topicimage']);
@@ -380,6 +385,25 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
     require_login($course);
 
     $itemid = (int)array_shift($args);
+
+    // The itemid is a course_sections id. Confirm it belongs to this course and
+    // is visible to the user before serving, so a retained URL to a since-hidden
+    // section's image cannot be used to bypass section visibility.
+    $modinfo = get_fast_modinfo($course);
+    $sectioninfo = null;
+    foreach ($modinfo->get_section_info_all() as $section) {
+        if ((int)$section->id === $itemid) {
+            $sectioninfo = $section;
+            break;
+        }
+    }
+    if ($sectioninfo === null) {
+        return false;
+    }
+    if (!$sectioninfo->uservisible && empty($sectioninfo->availableinfo)) {
+        return false;
+    }
+
     $filename = array_pop($args);
     $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
 

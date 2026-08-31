@@ -24,19 +24,28 @@
 
 namespace format_mnemo\privacy;
 
+use core_privacy\local\metadata\collection;
+
 /**
  * Privacy provider for format_mnemo.
  *
- * The Mnemo course format renders existing course data spatially; it stores no
- * personal data of its own, so it implements the null provider.
+ * The format keeps no data in its own tables. It stores teacher-uploaded topic
+ * images as course content via the files subsystem, which is declared here; the
+ * files subsystem handles their export and deletion.
  */
-class provider implements \core_privacy\local\metadata\null_provider {
+class provider implements \core_privacy\local\metadata\provider {
     /**
-     * Get the language string identifier explaining why this plugin stores no data.
+     * Describe the data this plugin stores.
      *
-     * @return string the name of a string in this plugin's lang file
+     * @param collection $collection the metadata collection to add to
+     * @return collection the updated collection
      */
-    public static function get_reason(): string {
-        return 'privacy:metadata';
+    public static function get_metadata(collection $collection): collection {
+        $collection->add_subsystem_link(
+            'core_files',
+            [],
+            'privacy:metadata:core_files'
+        );
+        return $collection;
     }
 }

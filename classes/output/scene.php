@@ -60,6 +60,7 @@ class scene implements renderable, templatable {
         $modinfo = get_fast_modinfo($course);
         $completion = new completion_info($course);
         $completionenabled = $completion->is_enabled();
+        $imagefiles = $this->preload_section_images($context);
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -113,7 +114,7 @@ class scene implements renderable, templatable {
                 'name' => format_string($name, true, ['context' => $context]),
                 'visible' => (bool)$section->visible,
                 'current' => $this->format->is_section_current($section),
-                'image' => $this->section_image_url((int)$section->id, $context),
+                'image' => $this->section_image_url($imagefiles[(int)$section->id] ?? null, $context),
                 'activities' => $activities,
                 'activitycount' => count($activities),
                 'hasactivities' => !empty($activities),
@@ -127,31 +128,48 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * The pluginfile URL of a section's topic image, or null when there is none.
+     * Load every topic-image file for the course in one query, keyed by the
+     * section id, so building the scene does not do one query per section.
      *
-     * @param int $sectionid the course_sections id
      * @param context_course $context the course context
-     * @return string|null
+     * @return \stored_file[] map of section id => the first image file
      */
-    protected function section_image_url(int $sectionid, context_course $context): ?string {
+    protected function preload_section_images(context_course $context): array {
         $fs = get_file_storage();
         $files = $fs->get_area_files(
             $context->id,
             'format_mnemo',
             'sectionimage',
-            $sectionid,
+            false,
             'itemid, filepath, filename',
             false
         );
-        if (empty($files)) {
+        $map = [];
+        foreach ($files as $file) {
+            $itemid = (int)$file->get_itemid();
+            if (!isset($map[$itemid])) {
+                $map[$itemid] = $file;
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * The pluginfile URL for a preloaded topic-image file, or null when none.
+     *
+     * @param \stored_file|null $file the section's image file, if any
+     * @param context_course $context the course context
+     * @return string|null
+     */
+    protected function section_image_url(?\stored_file $file, context_course $context): ?string {
+        if ($file === null) {
             return null;
         }
-        $file = reset($files);
         return moodle_url::make_pluginfile_url(
             $context->id,
             'format_mnemo',
             'sectionimage',
-            $sectionid,
+            $file->get_itemid(),
             $file->get_filepath(),
             $file->get_filename()
         )->out(false);

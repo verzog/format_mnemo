@@ -280,6 +280,36 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Load a topic image, downscaled to a safe maximum dimension, as a texture.
+     *
+     * @param {String} url The image URL.
+     * @param {Function} onReady Called with (texture, naturalWidth, naturalHeight).
+     */
+    Cyberspace.prototype.loadSignImage = function(url, onReady) {
+        var THREE = this.THREE;
+        var image = new Image();
+        image.onload = function() {
+            var max = 1024;
+            var scale = Math.min(1, max / Math.max(image.width, image.height));
+            var cw = Math.max(1, Math.round(image.width * scale));
+            var ch = Math.max(1, Math.round(image.height * scale));
+            var canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            canvas.getContext('2d').drawImage(image, 0, 0, cw, ch);
+            var texture = new THREE.CanvasTexture(canvas);
+            if (texture.colorSpace !== undefined) {
+                texture.colorSpace = THREE.SRGBColorSpace;
+            }
+            onReady(texture, image.width, image.height);
+        };
+        image.onerror = function() {
+            // Ignore a broken topic image; the sign still shows its name.
+        };
+        image.src = url;
+    };
+
+    /**
      * Build a neon street sign: a dark panel with a glowing frame, the text,
      * an optional image, and a support post. Interactive signs (with a url)
      * are registered for raycasting.
@@ -307,23 +337,25 @@ define('format_mnemo/vr', [], function() {
         panel.position.z = 0.03;
         frame.add(panel);
 
-        // Optional topic image occupies the upper part of the panel.
+        // Optional topic image occupies the upper part of the panel. It is
+        // downscaled on load and contained within its slot, so arbitrary
+        // uploads neither distort nor exceed the GPU's max texture size.
         var hasimage = !!opts.imageurl;
         if (hasimage) {
             var imgH = h * 0.55;
+            var slotW = w * 0.9;
             var imgMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff, transparent: true, opacity: 0
             });
-            var img = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, imgH), imgMat);
+            var img = new THREE.Mesh(new THREE.PlaneGeometry(slotW, imgH), imgMat);
             img.position.set(0, h * 0.5 - imgH * 0.5 - 0.15, 0.03);
             panel.add(img);
-            new THREE.TextureLoader().load(opts.imageurl, function(tex) {
-                if (tex.colorSpace !== undefined) {
-                    tex.colorSpace = THREE.SRGBColorSpace;
-                }
-                imgMat.map = tex;
+            this.loadSignImage(opts.imageurl, function(texture, iw, ih) {
+                imgMat.map = texture;
                 imgMat.opacity = 1;
                 imgMat.needsUpdate = true;
+                var fit = Math.min(slotW / iw, imgH / ih);
+                img.scale.set((iw * fit) / slotW, (ih * fit) / imgH, 1);
             });
         }
 

@@ -14,19 +14,30 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
+namespace format_mnemo;
+
 /**
- * Version details for the Mnemo (VR cyberspace) course format.
+ * Event observers for the Mnemo course format.
  *
  * @package    format_mnemo
  * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
-defined('MOODLE_INTERNAL') || die();
-
-$plugin->version   = 2026083105;
-$plugin->requires  = 2025041400; // Moodle 5.0.
-$plugin->supported = [500, 502]; // Moodle 5.0 - 5.2.
-$plugin->component = 'format_mnemo';
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = 'v0.1.0';
+class observer {
+    /**
+     * Delete a section's topic image when the section is deleted.
+     *
+     * The delete targets this plugin's file area for the section only, so it is
+     * a harmless no-op for sections and courses that never had a topic image.
+     *
+     * @param \core\event\course_section_deleted $event the section deletion event
+     */
+    public static function course_section_deleted(\core\event\course_section_deleted $event): void {
+        get_file_storage()->delete_area_files(
+            $event->contextid,
+            'format_mnemo',
+            'sectionimage',
+            $event->objectid
+        );
+    }
+}
