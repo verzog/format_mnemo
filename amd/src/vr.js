@@ -450,7 +450,7 @@ define('format_mnemo/vr', [], function() {
         navigator.xr.isSessionSupported('immersive-vr').then(function(supported) {
             if (!supported) {
                 button.textContent = self.config.strings.vrnotsupported;
-                return;
+                return null;
             }
             button.disabled = false;
             button.addEventListener('click', function() {
@@ -463,6 +463,7 @@ define('format_mnemo/vr', [], function() {
                     self.enterVr();
                 }
             });
+            return null;
         }).catch(function() {
             button.textContent = self.config.strings.vrnotsupported;
         });
