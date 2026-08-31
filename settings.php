@@ -63,4 +63,13 @@ if ($ADMIN->fulltree) {
             'green' => get_string('palette_green', 'format_mnemo'),
         ]
     ));
+
+    // Default drag-to-look direction for newly created courses. Teachers can
+    // override this per course, so the direction never needs a code change.
+    $settings->add(new admin_setting_configcheckbox(
+        'format_mnemo/defaultinvertlook',
+        get_string('setting_defaultinvertlook', 'format_mnemo'),
+        get_string('setting_defaultinvertlook_desc', 'format_mnemo'),
+        0
+    ));
 }

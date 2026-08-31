@@ -138,14 +138,18 @@ class format_mnemo extends core_courseformat\base {
                     'default' => get_config('format_mnemo', 'defaultpalette') ?: 'cyan',
                     'type' => PARAM_ALPHA,
                 ],
+                'mnemoinvertlook' => [
+                    'default' => get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0,
+                    'type' => PARAM_INT,
+                ],
             ];
         }
         if ($foreditform && !isset($courseformatoptions['coursedisplay']['label'])) {
             $courseformatoptionsedit = [
                 'hiddensections' => [
                     'label' => new lang_string('hiddensections'),
-                    'help' => 'hiddensections',
-                    'help_component' => 'moodle',
+                    // No 'help' key: core deprecated the hiddensections_help string,
+                    // so referencing it here would emit a deprecation warning.
                     'element_type' => 'select',
                     'element_attributes' => [
                         [
@@ -191,6 +195,18 @@ class format_mnemo extends core_courseformat\base {
                         ],
                     ],
                     'help' => 'palette',
+                    'help_component' => 'format_mnemo',
+                ],
+                'mnemoinvertlook' => [
+                    'label' => new lang_string('invertlook', 'format_mnemo'),
+                    'element_type' => 'select',
+                    'element_attributes' => [
+                        [
+                            0 => new lang_string('no'),
+                            1 => new lang_string('yes'),
+                        ],
+                    ],
+                    'help' => 'invertlook',
                     'help_component' => 'format_mnemo',
                 ],
             ];

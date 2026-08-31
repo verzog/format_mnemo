@@ -201,6 +201,7 @@ class scene implements renderable, templatable {
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
+            'invertlook' => !empty($options['mnemoinvertlook']),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),

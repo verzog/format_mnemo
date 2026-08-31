@@ -136,6 +136,9 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame((int)$course->id, $config['courseid']);
         $this->assertNotEmpty($config['threeurl']);
         $this->assertArrayHasKey('sections', $config);
+        // The mouse-look direction is exposed to the client (off by default).
+        $this->assertArrayHasKey('invertlook', $config);
+        $this->assertFalse($config['invertlook']);
 
         // Find section 1 and confirm the page is present and the label is not.
         $sectionone = null;
