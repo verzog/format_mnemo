@@ -18,22 +18,22 @@
  * Site wide settings for the Mnemo (VR cyberspace) course format.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
 if ($ADMIN->fulltree) {
-    // URL of the Three.js ES module. Point this to a locally hosted copy for
-    // offline / air-gapped installations or to satisfy a strict Content
-    // Security Policy. It must be an ES module build that exports the THREE
-    // namespace as a default/named export set.
+    // URL of the Three.js ES module. Left blank, the plugin loads the copy it
+    // bundles (thirdparty/three.module.min.js). Override only to point at a
+    // shared or newer hosted copy; it must be an ES module build that exports
+    // the THREE namespace.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/threeurl',
         get_string('setting_threeurl', 'format_mnemo'),
         get_string('setting_threeurl_desc', 'format_mnemo'),
-        'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.min.js',
+        '',
         PARAM_URL
     ));
 

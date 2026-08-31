@@ -26,7 +26,7 @@ use core_courseformat\output\section_renderer;
  * helper for rendering the immersive cyberspace scene for learners.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class renderer extends section_renderer {

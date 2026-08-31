@@ -18,7 +18,7 @@
  * Main library for the Mnemo (VR cyberspace) course format.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 

@@ -19,6 +19,7 @@ namespace format_mnemo\output;
 use completion_info;
 use context_course;
 use core_courseformat\base as course_format;
+use moodle_url;
 use renderable;
 use renderer_base;
 use stdClass;
@@ -32,7 +33,7 @@ use templatable;
  * the mustache template as a fallback / non-VR alternative.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class scene implements renderable, templatable {
@@ -54,8 +55,6 @@ class scene implements renderable, templatable {
      * @return array{sections: array, nodecount: int}
      */
     protected function build_nodes(): array {
-        global $CFG;
-
         $course = $this->format->get_course();
         $context = context_course::instance($course->id);
         $modinfo = get_fast_modinfo($course);
@@ -137,11 +136,17 @@ class scene implements renderable, templatable {
         $options = $this->format->get_format_options();
         $nodes = $this->build_nodes();
 
+        // Default to the Three.js copy bundled with the plugin; an admin can
+        // override the URL (e.g. a CDN or a shared local copy) in settings.
+        $threeurl = get_config('format_mnemo', 'threeurl');
+        if (empty($threeurl)) {
+            $threeurl = (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
+        }
+
         return [
             'courseid' => (int)$course->id,
             'rootid' => $this->rootid(),
-            'threeurl' => get_config('format_mnemo', 'threeurl') ?:
-                'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.min.js',
+            'threeurl' => $threeurl,
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'layout' => $options['mnemolayout'] ?? 'ring',

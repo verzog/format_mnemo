@@ -18,11 +18,9 @@
  * Strings for component 'format_mnemo'.
  *
  * @package    format_mnemo
- * @copyright  2026 format_mnemo contributors
+ * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
-defined('MOODLE_INTERNAL') || die();
 
 $string['addsection'] = 'Add node';
 $string['addsections'] = 'Add node';
@@ -71,7 +69,7 @@ $string['setting_defaultenvironment_desc'] = 'The environment applied to newly c
 $string['setting_defaultpalette'] = 'Default neon palette';
 $string['setting_defaultpalette_desc'] = 'The neon palette applied to newly created courses. Teachers can override this per course.';
 $string['setting_threeurl'] = 'Three.js module URL';
-$string['setting_threeurl_desc'] = 'URL of the Three.js ES module used to render the 3D scene. The default loads Three.js from a public CDN. For offline or air-gapped installations, or to satisfy a strict Content Security Policy, host a copy of <code>three.module.min.js</code> yourself and put its URL here.';
+$string['setting_threeurl_desc'] = 'URL of the Three.js ES module used to render the 3D scene. Leave this blank to use the copy bundled with the plugin. Set it only to load Three.js from a shared or newer hosted copy; it must be an ES module build of <code>three.module.min.js</code>.';
 $string['showfromothers'] = 'Show node';
 $string['stateavailable'] = 'Available';
 $string['statecomplete'] = 'Completed';

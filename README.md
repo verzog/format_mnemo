@@ -35,9 +35,12 @@ off).
 - **Per-course look** — teachers choose the environment (Cyberspace / Grid /
   Void), the neon palette (Cyan / Amber / Magenta / Green), and the node layout
   (Ring around the learner / City grid / Ascending spiral) in course settings.
-- **No framework** — the scene is hand-rolled on [Three.js](https://threejs.org)
-  with the browser's native WebXR API. Three.js is the only third-party
-  dependency and it is loaded as an ES module from an admin-configurable URL.
+- **No framework, self-contained** — the scene is hand-rolled on
+  [Three.js](https://threejs.org) with the browser's native WebXR API. Three.js
+  is the only third-party dependency; it is **bundled with the plugin**
+  (`thirdparty/three.module.min.js`) and loaded as a same-origin ES module, so
+  the plugin needs no external CDN. An admin can override the source URL if they
+  prefer a shared or newer hosted copy.
 
 ## Requirements
 
@@ -80,20 +83,20 @@ Alternatively install the ZIP via
 
 Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
 
-- **Three.js module URL** — where the browser loads Three.js from. Defaults to a
-  public CDN (jsDelivr). For **offline / air-gapped** sites, or to satisfy a
-  strict **Content Security Policy**, host `three.module.min.js` yourself and put
-  its URL here.
+- **Three.js module URL** — where the browser loads Three.js from. **Leave blank**
+  (the default) to use the copy bundled with the plugin. Set it only to load
+  Three.js from a shared or newer hosted copy.
 - **Default environment** / **Default neon palette** — the defaults applied to
   newly created courses (teachers can override per course).
 
 ### Content Security Policy note
 
-The scene loads Three.js with a dynamic ES-module `import()` from the configured
-URL. If your site sets a CSP, allow that origin in `script-src`
-(the default is `https://cdn.jsdelivr.net`), or host Three.js on your own domain
-and point the setting at it. If the module cannot load, the plugin automatically
-falls back to the accessible list view and shows a short message.
+By default the scene loads its bundled Three.js with a dynamic ES-module
+`import()` from the **plugin's own (same) origin**, so a typical `script-src
+'self'` CSP already allows it — no external origin to allow-list. If you override
+the module URL to an external host, allow that origin in `script-src`. If the
+module cannot load for any reason, the plugin automatically falls back to the
+accessible list view and shows a short message.
 
 ## How it works
 
@@ -105,6 +108,8 @@ falls back to the accessible list view and shows a short message.
 | `classes/output/scene.php` | Builds the section/activity graph (JSON for the client + accessible list). |
 | `templates/scene.mustache` | Scene container, loading state, and the fallback list. |
 | `amd/src/vr.js` | Hand-rolled Three.js + WebXR renderer with gestural navigation. |
+| `thirdparty/three.module.min.js` | Bundled Three.js (see Third-party libraries). |
+| `classes/privacy/provider.php` | Null privacy provider — the plugin stores no personal data. |
 | `settings.php` | Site-wide settings (Three.js URL, defaults). |
 
 The server never renders 3D; it only ships the course graph and the fallback.
@@ -115,15 +120,31 @@ All rendering, raycasting and locomotion happen client-side against WebXR.
 - The immersive scene is a progressive enhancement over a fully accessible,
   keyboard-navigable HTML list that is always present in the page.
 - Respects `prefers-reduced-motion` for the loading indicator.
-- The plugin stores **no personal data** (see `privacy` provider string).
+- The plugin stores **no personal data** — it implements the Moodle Privacy API
+  null provider (`classes/privacy/provider.php`).
 
 ## Development
 
-The AMD module is authored in `amd/src/vr.js` and shipped minified in
-`amd/build/vr.min.js`. Inside a full Moodle tree you can rebuild it with the
-standard `grunt amd` task; the committed build was produced with Terser and is
-functionally identical to the source.
+The AMD module is authored in `amd/src/vr.js` and shipped as the Moodle-built
+`amd/build/vr.min.js` (+ source map). After editing the source, rebuild it
+inside a full Moodle tree with `grunt amd` and commit both build files.
+
+## Third-party libraries
+
+- **Three.js** `0.160.1` — MIT licence, © Three.js authors,
+  <https://threejs.org>. Bundled unmodified at
+  `thirdparty/three.module.min.js`; upstream licence at
+  `thirdparty/three.js-LICENSE.txt`. Declared in `thirdpartylibs.xml`.
 
 ## Licence
 
-GNU GPL v3 or later, matching Moodle.
+GNU GPL v3 or later, matching Moodle — see the file headers.
+
+Copyright © 2026 Vernon Spain.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See <https://www.gnu.org/licenses/> for details.
