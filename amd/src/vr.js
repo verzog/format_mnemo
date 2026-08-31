@@ -67,6 +67,7 @@ define('format_mnemo/vr', [], function() {
         this.keys = {}; // Held keyboard keys.
         this.yaw = 0; // Desktop look yaw.
         this.pitch = 0; // Desktop look pitch.
+        this.invertlook = !!config.invertlook; // Invert drag-to-look direction.
         this.dragging = false;
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
@@ -663,9 +664,11 @@ define('format_mnemo/vr', [], function() {
                 self.lastPointer.x = e.clientX;
                 self.lastPointer.y = e.clientY;
                 self.pointerMoved += Math.abs(dx) + Math.abs(dy);
-                // Reversed mouse look: drag moves the view the same way.
-                self.yaw += dx * 0.0032;
-                self.pitch += dy * 0.0032;
+                // Drag to look. The direction is configurable per course (and via
+                // a site default) so it can be changed without editing code.
+                var sign = self.invertlook ? 1 : -1;
+                self.yaw += dx * 0.0032 * sign;
+                self.pitch += dy * 0.0032 * sign;
                 var lim = Math.PI / 2 - 0.05;
                 self.pitch = Math.max(-lim, Math.min(lim, self.pitch));
             }
