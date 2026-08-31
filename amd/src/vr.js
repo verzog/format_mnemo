@@ -121,9 +121,12 @@ define('format_mnemo/vr', [], function() {
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
         this.tmp = new THREE.Vector3();
+        this.tmp2 = new THREE.Vector3(); // Scratch for measuring per-frame motion.
         this.pointerNdc = new THREE.Vector2(-2, -2); // Off-screen by default.
         this.clock = new THREE.Clock();
         this.time = 0; // Accumulated seconds, for cheap animation.
+        this.brake = false; // Open-palm brake: suppress locomotion this frame.
+        this.gestures = null; // XR gesture manager (built after the renderer).
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.ads = []; // Holographic billboards that flicker.
@@ -173,6 +176,7 @@ define('format_mnemo/vr', [], function() {
         this.buildRaycaster();
         this.buildCity();
         this.buildControllers();
+        this.gestures = new GestureManager(this);
         this.buildVrButton();
         this.buildFullscreenButton();
         this.bindDesktopControls();
@@ -1252,12 +1256,16 @@ define('format_mnemo/vr', [], function() {
             controller.addEventListener('selectend', function(e) {
                 self.onSelectEnd(e.target);
             });
-            // Squeeze acts as an explicit "thrust" for controllers that map it.
-            controller.addEventListener('squeezestart', function(e) {
-                e.target.userData.selecting = true;
+            // Remember which physical input source (and hand) drives this
+            // controller, so the gesture manager can read its thumbstick,
+            // buttons and haptics and tell left from right.
+            controller.addEventListener('connected', function(e) {
+                e.target.userData.inputSource = e.data;
+                e.target.userData.handedness = e.data && e.data.handedness;
             });
-            controller.addEventListener('squeezeend', function(e) {
-                e.target.userData.selecting = false;
+            controller.addEventListener('disconnected', function(e) {
+                e.target.userData.inputSource = null;
+                e.target.userData.handedness = null;
             });
 
             // A small glowing marker so the hand/controller is visible.
@@ -1288,6 +1296,10 @@ define('format_mnemo/vr', [], function() {
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
         if (target && target.userData && target.userData.url) {
+            // A firm confirmation buzz before navigating away.
+            if (this.gestures) {
+                this.gestures.pulse(controller.userData.handedness, 0.6, 40);
+            }
             this.open(target.userData.url);
         }
     };
@@ -1512,11 +1524,25 @@ define('format_mnemo/vr', [], function() {
         }
 
         if (presenting) {
+            // Measure how far the rig travels this frame so the comfort
+            // vignette can respond to real motion from every locomotion path.
+            this.tmp2.copy(this.player.position);
+            this.brake = false;
+            if (this.gestures) {
+                this.gestures.update(dt);
+            }
             this.updateXrLocomotion(dt);
             this.updateXrHighlight();
+            if (this.gestures) {
+                var travelled = this.player.position.distanceTo(this.tmp2);
+                this.gestures.updateVignette(travelled / Math.max(dt, 0.0001), dt);
+            }
         } else {
             this.updateDesktop(dt);
             this.updateDesktopHighlight();
+            if (this.gestures) {
+                this.gestures.updateVignette(0, dt);
+            }
         }
 
         this.clampToWorld();
@@ -1547,6 +1573,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.updateXrLocomotion = function(dt) {
         var THREE = this.THREE;
         var speed = 6;
+        if (this.brake) {
+            // An open palm this frame is an explicit stop; hold position.
+            return;
+        }
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {
@@ -1641,6 +1671,10 @@ define('format_mnemo/vr', [], function() {
             mesh.scale.setScalar(1.12);
             mesh.userData.material.color.setHex(0xffffff);
             this.renderer.domElement.style.cursor = 'pointer';
+            // A light tick when a node first lights up under the pointer/ray.
+            if (this.gestures && this.renderer.xr.isPresenting) {
+                this.gestures.pulse(null, 0.3, 18);
+            }
         } else {
             this.renderer.domElement.style.cursor = 'grab';
         }
@@ -1652,6 +1686,435 @@ define('format_mnemo/vr', [], function() {
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h, false);
+    };
+
+    /**
+     * Central manager for immersive (XR) gestures. It owns the one place where
+     * raw input - thumbsticks, buttons and haptics on controllers, and tracked
+     * hand joints - is read each frame and mapped to actions, plus the comfort
+     * features (snap turn and a motion vignette).
+     *
+     * Input map:
+     *   - Thumbstick (either hand): glide, head-relative.
+     *   - Right thumbstick X: snap-turn in fixed steps.
+     *   - Grip button / closed fist: "grab the world" and pull yourself along.
+     *   - Open palm: brake - an explicit stop.
+     *   - Trigger / pinch: open the node you are pointing at (handled by the
+     *     existing select events; this class only adds the confirming haptic).
+     *   - Both thumbstick clicks together: recenter to the avenue mouth.
+     *
+     * Everything is feature-detected, so controller-only, hand-only and plain
+     * desktop sessions all degrade gracefully.
+     *
+     * @param {Object} cs The owning Cyberspace instance.
+     */
+    function GestureManager(cs) {
+        var THREE = cs.THREE;
+        this.cs = cs;
+        this.THREE = THREE;
+        this.renderer = cs.renderer;
+        this.player = cs.player;
+        this.camera = cs.camera;
+
+        // Tunables.
+        this.deadzone = 0.15; // Thumbstick centre deadzone.
+        this.glideSpeed = 4.5; // Metres per second at full stick.
+        this.snapAngle = Math.PI / 6; // 30 degrees per snap.
+        this.snapThreshold = 0.7; // Stick X magnitude that triggers a snap.
+        this.snapRelease = 0.3; // Fall back below this to re-arm the snap.
+        this.pinchDist = 0.025; // Not used directly (pinch = select event).
+        this.fistDist = 0.075; // Fingertip-to-wrist under this reads as a fist.
+        this.palmDist = 0.13; // Fingertip-to-wrist over this reads as open.
+
+        // State.
+        this.snapArmed = true; // Debounce so one flick is one snap.
+        this.recenterArmed = true; // Debounce the recenter chord.
+        this.grabbing = false; // Mid grab-the-world pull.
+        this.grabAnchor = new THREE.Vector3();
+        this.vignetteOpacity = 0; // Smoothed current vignette strength.
+        this.home = new THREE.Vector3(0, 0, 12); // Avenue mouth.
+
+        // Scratch vectors, reused to avoid per-frame allocation.
+        this.vForward = new THREE.Vector3();
+        this.vRight = new THREE.Vector3();
+        this.vSum = new THREE.Vector3();
+        this.vDelta = new THREE.Vector3();
+        this.vTip = new THREE.Vector3();
+        this.up = new THREE.Vector3(0, 1, 0);
+        this.handWrist = [new THREE.Vector3(), new THREE.Vector3()];
+        this.ctrlPos = [new THREE.Vector3(), new THREE.Vector3()];
+
+        this.hands = [];
+        this.buildHands();
+        this.buildVignette();
+    }
+
+    /**
+     * Attach the two tracked-hand objects so their joints update each frame.
+     */
+    GestureManager.prototype.buildHands = function() {
+        for (var i = 0; i < 2; i++) {
+            var hand = this.renderer.xr.getHand(i);
+            this.player.add(hand);
+            this.hands.push(hand);
+        }
+    };
+
+    /**
+     * Build the comfort vignette: a soft dark ring fixed to the camera that
+     * fades in with motion to shrink the field of view and reduce sim sickness.
+     */
+    GestureManager.prototype.buildVignette = function() {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        var ctx = canvas.getContext('2d');
+        var g = ctx.createRadialGradient(128, 128, 128 * 0.5, 128, 128, 128);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(0.7, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,0,0,1)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 256, 256);
+
+        var tex = new THREE.CanvasTexture(canvas);
+        var mat = new THREE.MeshBasicMaterial({
+            map: tex, transparent: true, opacity: 0,
+            depthTest: false, depthWrite: false
+        });
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat);
+        mesh.position.set(0, 0, -1);
+        mesh.renderOrder = 999;
+        mesh.frustumCulled = false;
+        this.camera.add(mesh);
+        this.vignette = mesh;
+        this.vignetteMat = mat;
+    };
+
+    /**
+     * Read and act on all XR input for this frame.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.update = function(dt) {
+        var session = this.renderer.xr.getSession();
+        if (!session) {
+            return;
+        }
+
+        // Reset the grab accumulator, then gather input from hands and
+        // controllers. An open palm on either hand brakes the whole frame.
+        this.vSum.set(0, 0, 0);
+        var hands = this.readHandGestures();
+        this.cs.brake = hands.palm;
+        var ctrl = this.readControllers();
+        var grabCount = hands.grabCount + ctrl.grabCount;
+
+        this.handleRecenter(ctrl.thumbClicks);
+        this.handleSnapTurn(ctrl.turnX);
+
+        if (this.cs.brake) {
+            // Braking cancels translation this frame; a fresh grab must re-anchor.
+            this.grabbing = false;
+            return;
+        }
+
+        this.applyGrab(grabCount);
+        this.applyGlide(ctrl.glideX, ctrl.glideZ, dt);
+    };
+
+    /**
+     * Scan both tracked hands for the brake (open palm) and grab (fist)
+     * gestures, accumulating fist wrist positions into the grab sum.
+     *
+     * @return {Object} {palm, grabCount}.
+     */
+    GestureManager.prototype.readHandGestures = function() {
+        var palm = false;
+        var grabCount = 0;
+        for (var h = 0; h < this.hands.length; h++) {
+            var g = this.handGesture(this.hands[h], h);
+            if (!g) {
+                continue;
+            }
+            if (g.palm) {
+                palm = true;
+            }
+            if (g.fist) {
+                this.vSum.add(this.handWrist[h]);
+                grabCount++;
+            }
+        }
+        return {palm: palm, grabCount: grabCount};
+    };
+
+    /**
+     * Read both controllers' thumbsticks, thumbstick clicks and grip buttons,
+     * accumulating grip world positions into the grab sum.
+     *
+     * @return {Object} {glideX, glideZ, turnX, thumbClicks, grabCount}.
+     */
+    GestureManager.prototype.readControllers = function() {
+        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0};
+        var controllers = this.cs.controllers;
+        for (var c = 0; c < controllers.length; c++) {
+            var ctrl = controllers[c];
+            var src = ctrl.userData.inputSource;
+            var gp = src && src.gamepad;
+            if (!gp) {
+                continue;
+            }
+            var stick = this.readStick(gp);
+            if (src.handedness === 'right') {
+                out.turnX = stick.x;
+            } else {
+                out.glideX += stick.x;
+                out.glideZ += stick.y;
+            }
+            if (this.buttonPressed(gp, 3)) {
+                out.thumbClicks++;
+            }
+            if (this.buttonPressed(gp, 1)) { // Grip.
+                ctrl.getWorldPosition(this.ctrlPos[c]);
+                this.vSum.add(this.ctrlPos[c]);
+                out.grabCount++;
+            }
+        }
+        return out;
+    };
+
+    /**
+     * Recenter when both thumbsticks are clicked together, debounced so the
+     * chord fires once per press.
+     *
+     * @param {Number} thumbClicks How many thumbsticks are currently clicked.
+     */
+    GestureManager.prototype.handleRecenter = function(thumbClicks) {
+        if (thumbClicks >= 2 && this.recenterArmed) {
+            this.recenter();
+            this.recenterArmed = false;
+        } else if (thumbClicks === 0) {
+            this.recenterArmed = true;
+        }
+    };
+
+    /**
+     * Snap-turn on a firm right-stick flick, debounced so one flick is one snap.
+     *
+     * @param {Number} turnX The right thumbstick X value.
+     */
+    GestureManager.prototype.handleSnapTurn = function(turnX) {
+        if (Math.abs(turnX) > this.snapThreshold && this.snapArmed) {
+            this.rotatePlayer(turnX < 0 ? this.snapAngle : -this.snapAngle);
+            this.snapArmed = false;
+        } else if (Math.abs(turnX) < this.snapRelease) {
+            this.snapArmed = true;
+        }
+    };
+
+    /**
+     * Grab-the-world pull: keep the average grabbed point under the hand(s),
+     * which moves the player the opposite way.
+     *
+     * @param {Number} grabCount How many hands/controllers are gripping.
+     */
+    GestureManager.prototype.applyGrab = function(grabCount) {
+        if (grabCount <= 0) {
+            this.grabbing = false;
+            return;
+        }
+        this.vSum.multiplyScalar(1 / grabCount);
+        if (!this.grabbing) {
+            this.grabbing = true;
+            this.grabAnchor.copy(this.vSum);
+            return;
+        }
+        this.vDelta.subVectors(this.vSum, this.grabAnchor);
+        this.player.position.sub(this.vDelta);
+        // The grabbed objects moved with the rig; predict their new pose.
+        this.grabAnchor.copy(this.vSum).sub(this.vDelta);
+    };
+
+    /**
+     * Thumbstick glide, head-relative and level with the ground.
+     *
+     * @param {Number} glideX Strafe axis in [-1, 1].
+     * @param {Number} glideZ Forward axis in [-1, 1] (stick up is negative).
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.applyGlide = function(glideX, glideZ, dt) {
+        if (glideX === 0 && glideZ === 0) {
+            return;
+        }
+        this.camera.getWorldDirection(this.vForward);
+        this.vForward.y = 0;
+        if (this.vForward.lengthSq() < 1e-4) {
+            this.vForward.set(0, 0, -1);
+        }
+        this.vForward.normalize();
+        this.vRight.crossVectors(this.vForward, this.up).normalize();
+        var step = this.glideSpeed * dt;
+        this.player.position.addScaledVector(this.vForward, -glideZ * step);
+        this.player.position.addScaledVector(this.vRight, glideX * step);
+    };
+
+    /**
+     * Read a thumbstick (or trackpad) pair from a gamepad, with deadzone.
+     *
+     * @param {Object} gp The XR input source gamepad.
+     * @return {Object} {x, y} in the range [-1, 1], centred at 0.
+     */
+    GestureManager.prototype.readStick = function(gp) {
+        var ax = gp.axes || [];
+        // Prefer the thumbstick pair (2,3); fall back to a trackpad (0,1).
+        var x = ax.length > 3 ? ax[2] : (ax[0] || 0);
+        var y = ax.length > 3 ? ax[3] : (ax[1] || 0);
+        if (Math.abs(x) < this.deadzone) {
+            x = 0;
+        }
+        if (Math.abs(y) < this.deadzone) {
+            y = 0;
+        }
+        return {x: x, y: y};
+    };
+
+    /**
+     * Whether a gamepad button index is currently pressed.
+     *
+     * @param {Object} gp The XR input source gamepad.
+     * @param {Number} index The button index.
+     * @return {Boolean} True when that button reports pressed.
+     */
+    GestureManager.prototype.buttonPressed = function(gp, index) {
+        var b = gp.buttons && gp.buttons[index];
+        return !!(b && b.pressed);
+    };
+
+    /**
+     * Classify a tracked hand as a fist and/or an open palm, and record its
+     * wrist world position for grab-the-world locomotion.
+     *
+     * @param {Object} hand The tracked-hand object from the XR manager.
+     * @param {Number} index The hand index (0 or 1), selecting a scratch slot.
+     * @return {Object|null} {fist, palm} or null when the hand is not tracked.
+     */
+    GestureManager.prototype.handGesture = function(hand, index) {
+        var wrist = this.jointPos(hand, 'wrist', this.handWrist[index]);
+        if (!wrist) {
+            return null;
+        }
+        var tips = [
+            'index-finger-tip', 'middle-finger-tip',
+            'ring-finger-tip', 'pinky-finger-tip'
+        ];
+        var near = 0;
+        var far = 0;
+        var count = 0;
+        for (var i = 0; i < tips.length; i++) {
+            var p = this.jointPos(hand, tips[i], this.vTip);
+            if (!p) {
+                continue;
+            }
+            count++;
+            var d = p.distanceTo(wrist);
+            if (d < this.fistDist) {
+                near++;
+            } else if (d > this.palmDist) {
+                far++;
+            }
+        }
+        if (count < 3) {
+            return null;
+        }
+        return {fist: near >= count, palm: far >= count};
+    };
+
+    /**
+     * World position of a named hand joint, or null when it is not tracked.
+     *
+     * @param {Object} hand The tracked-hand object.
+     * @param {String} name The joint name (e.g. "index-finger-tip").
+     * @param {Object} out A Three.Vector3 to write into.
+     * @return {Object|null} The out vector, or null when unavailable.
+     */
+    GestureManager.prototype.jointPos = function(hand, name, out) {
+        var joints = hand && hand.joints;
+        var j = joints && joints[name];
+        if (!j || j.visible === false) {
+            return null;
+        }
+        return j.getWorldPosition(out);
+    };
+
+    /**
+     * Rotate the player rig around the head by an angle, so a snap turn pivots
+     * about the viewer rather than the world origin.
+     *
+     * @param {Number} angle Radians to rotate (positive is left).
+     */
+    GestureManager.prototype.rotatePlayer = function(angle) {
+        var pivot = this.camera.getWorldPosition(this.vForward);
+        this.player.position.sub(pivot);
+        this.player.position.applyAxisAngle(this.up, angle);
+        this.player.position.add(pivot);
+        this.player.rotateOnWorldAxis(this.up, angle);
+        // A turn is motion too; give the vignette a brief pulse.
+        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.4);
+    };
+
+    /**
+     * Return the player to the avenue mouth, upright and facing down the street.
+     */
+    GestureManager.prototype.recenter = function() {
+        this.player.position.copy(this.home);
+        this.player.rotation.set(0, 0, 0);
+        this.grabbing = false;
+        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.5);
+        this.pulse(null, 0.5, 40);
+    };
+
+    /**
+     * Fire a short haptic pulse on matching controllers.
+     *
+     * @param {String|null} handedness "left"/"right" to target one hand, or
+     *     null for any controller that supports haptics.
+     * @param {Number} intensity Pulse strength in [0, 1].
+     * @param {Number} ms Duration in milliseconds.
+     */
+    GestureManager.prototype.pulse = function(handedness, intensity, ms) {
+        var controllers = this.cs.controllers;
+        for (var c = 0; c < controllers.length; c++) {
+            var src = controllers[c].userData.inputSource;
+            if (!src || (handedness && src.handedness !== handedness)) {
+                continue;
+            }
+            var gp = src.gamepad;
+            var act = gp && gp.hapticActuators && gp.hapticActuators[0];
+            if (act && act.pulse) {
+                act.pulse(intensity, ms);
+            }
+        }
+    };
+
+    /**
+     * Ease the comfort vignette toward a strength set by the current speed.
+     *
+     * @param {Number} speed Metres per second the rig moved this frame.
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.updateVignette = function(speed, dt) {
+        if (!this.vignetteMat) {
+            return;
+        }
+        // Ramp in over the first few m/s, capped so peripheral vision stays.
+        var target = Math.min(0.6, speed * 0.12);
+        // Ease toward the target, and let a turn pulse decay smoothly.
+        var k = Math.min(1, dt * 8);
+        this.vignetteOpacity += (target - this.vignetteOpacity) * k;
+        if (this.vignetteOpacity < 0.01) {
+            this.vignetteOpacity = 0;
+        }
+        this.vignetteMat.opacity = this.vignetteOpacity;
     };
 
     /**
