@@ -61,12 +61,12 @@ define('format_mnemo/vr', [], function() {
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
 
-        this.interactive = [];      // Meshes that can be gazed/clicked to open.
-        this.hovered = null;        // Currently highlighted mesh.
-        this.controllers = [];      // XR controller target-ray spaces.
-        this.keys = {};             // Held keyboard keys.
-        this.yaw = 0;               // Desktop look yaw.
-        this.pitch = 0;             // Desktop look pitch.
+        this.interactive = []; // Meshes that can be gazed/clicked to open.
+        this.hovered = null; // Currently highlighted mesh.
+        this.controllers = []; // XR controller target-ray spaces.
+        this.keys = {}; // Held keyboard keys.
+        this.yaw = 0; // Desktop look yaw.
+        this.pitch = 0; // Desktop look pitch.
         this.dragging = false;
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
@@ -83,7 +83,9 @@ define('format_mnemo/vr', [], function() {
         // Renderer.
         var renderer = new THREE.WebGLRenderer({antialias: true, alpha: false});
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.setSize(this.root.clientWidth, this.root.clientHeight || 480);
+        // Do not let Three.js write inline width/height on the canvas; the
+        // stylesheet sizes it responsively to the stage instead.
+        renderer.setSize(this.root.clientWidth, this.root.clientHeight || 480, false);
         renderer.xr.enabled = true;
         this.root.appendChild(renderer.domElement);
         this.renderer = renderer;
@@ -461,7 +463,6 @@ define('format_mnemo/vr', [], function() {
                     self.enterVr();
                 }
             });
-            return supported;
         }).catch(function() {
             button.textContent = self.config.strings.vrnotsupported;
         });
@@ -568,7 +569,6 @@ define('format_mnemo/vr', [], function() {
      * Per-frame update: locomotion, spinning, highlighting, rendering.
      */
     Cyberspace.prototype.tick = function() {
-        var THREE = this.THREE;
         var dt = Math.min(0.05, this.clock.getDelta());
         var presenting = this.renderer.xr.isPresenting;
 
@@ -704,7 +704,7 @@ define('format_mnemo/vr', [], function() {
         var h = this.root.clientHeight || 480;
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(w, h);
+        this.renderer.setSize(w, h, false);
     };
 
     /**
@@ -765,12 +765,16 @@ define('format_mnemo/vr', [], function() {
                     new Cyberspace(THREE, root, config);
                 } catch (e) {
                     failGracefully(container, root, config.strings.failed);
-                    window.console && window.console.error(e);
+                    if (window.console) {
+                        window.console.error(e);
+                    }
                 }
                 return THREE;
             }).catch(function(e) {
                 failGracefully(container, root, config.strings.failed);
-                window.console && window.console.error(e);
+                if (window.console) {
+                    window.console.error(e);
+                }
             });
         }
     };
