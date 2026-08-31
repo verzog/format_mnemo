@@ -128,10 +128,6 @@ class format_mnemo extends core_courseformat\base {
                     'default' => get_config('format_mnemo', 'defaultpalette') ?: 'cyan',
                     'type' => PARAM_ALPHA,
                 ],
-                'mnemolayout' => [
-                    'default' => 'ring',
-                    'type' => PARAM_ALPHA,
-                ],
             ];
         }
         if ($foreditform && !isset($courseformatoptions['coursedisplay']['label'])) {
@@ -187,19 +183,6 @@ class format_mnemo extends core_courseformat\base {
                     'help' => 'palette',
                     'help_component' => 'format_mnemo',
                 ],
-                'mnemolayout' => [
-                    'label' => new lang_string('layout', 'format_mnemo'),
-                    'element_type' => 'select',
-                    'element_attributes' => [
-                        [
-                            'ring' => new lang_string('layout_ring', 'format_mnemo'),
-                            'grid' => new lang_string('layout_grid', 'format_mnemo'),
-                            'spiral' => new lang_string('layout_spiral', 'format_mnemo'),
-                        ],
-                    ],
-                    'help' => 'layout',
-                    'help_component' => 'format_mnemo',
-                ],
             ];
             $courseformatoptions = array_merge_recursive($courseformatoptions, $courseformatoptionsedit);
         }
@@ -209,11 +192,70 @@ class format_mnemo extends core_courseformat\base {
     /**
      * Definitions of the additional options that this course format uses for section.
      *
+     * A per-section "topic image" filemanager is offered on the section editing
+     * form only. It is not stored as a scalar option; the uploaded file lives in
+     * the 'sectionimage' file area and is saved in update_section_format_options().
+     *
      * @param bool $foreditform
      * @return array
      */
     public function section_format_options($foreditform = false) {
-        return [];
+        if (!$foreditform) {
+            return [];
+        }
+        return [
+            'topicimage' => [
+                'label' => new lang_string('topicimage', 'format_mnemo'),
+                'element_type' => 'filemanager',
+                'element_attributes' => [
+                    null,
+                    ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']],
+                ],
+                'help' => 'topicimage',
+                'help_component' => 'format_mnemo',
+            ],
+        ];
+    }
+
+    /**
+     * Return an instance of the section editing form that prepares the topic
+     * image draft area.
+     *
+     * @param mixed $action the action attribute for the form
+     * @param array $customdata the array with custom data to be passed to the form
+     * @return \moodleform
+     */
+    public function editsection_form($action, $customdata = []) {
+        global $CFG;
+        require_once($CFG->dirroot . '/course/editsection_form.php');
+        if (!array_key_exists('course', $customdata)) {
+            $customdata['course'] = $this->get_course();
+        }
+        return new \format_mnemo\form\editsection($action, $customdata);
+    }
+
+    /**
+     * Save the section format options, storing the topic image file separately.
+     *
+     * @param stdClass|array $data return value from moodleform::get_data() or array with data
+     * @return bool whether there were any changes to the options values
+     */
+    public function update_section_format_options($data) {
+        $data = (array)$data;
+        if (isset($data['topicimage']) && !empty($data['id'])) {
+            $context = context_course::instance($this->get_courseid());
+            file_save_draft_area_files(
+                $data['topicimage'],
+                $context->id,
+                'format_mnemo',
+                'sectionimage',
+                (int)$data['id'],
+                ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+            );
+            // Not a stored scalar option; the file area is the source of truth.
+            unset($data['topicimage']);
+        }
+        return parent::update_section_format_options($data);
     }
 
     /**
@@ -314,4 +356,39 @@ function format_mnemo_inplace_editable($itemtype, $itemid, $newvalue) {
         );
         return course_get_format($section->course)->inplace_editable_update_section_name($section, $itemtype, $newvalue);
     }
+}
+
+/**
+ * Serve the per-section topic image files.
+ *
+ * @param stdClass $course the course object
+ * @param stdClass $cm the course module object
+ * @param context $context the context
+ * @param string $filearea the name of the file area
+ * @param array $args extra arguments (itemid, path)
+ * @param bool $forcedownload whether or not force download
+ * @param array $options additional options affecting the file serving
+ * @return bool false if the file was not found, just send the file otherwise and do not return anything
+ */
+function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options = []) {
+    if ($context->contextlevel != CONTEXT_COURSE) {
+        return false;
+    }
+    if ($filearea !== 'sectionimage') {
+        return false;
+    }
+    require_login($course);
+
+    $itemid = (int)array_shift($args);
+    $filename = array_pop($args);
+    $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
+
+    $fs = get_file_storage();
+    $file = $fs->get_file($context->id, 'format_mnemo', 'sectionimage', $itemid, $filepath, $filename);
+    if (!$file || $file->is_directory()) {
+        return false;
+    }
+
+    send_stored_file($file, null, 0, $forcedownload, $options);
+    return true;
 }

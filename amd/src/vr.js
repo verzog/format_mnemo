@@ -113,7 +113,7 @@ define('format_mnemo/vr', [], function() {
 
         this.buildEnvironment();
         this.buildRaycaster();
-        this.buildNodes();
+        this.buildCity();
         this.buildControllers();
         this.buildVrButton();
         this.bindDesktopControls();
@@ -177,133 +177,219 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Compute the world position for a section index given the layout mode.
+     * Line both sides of the main street with wireframe neon buildings.
      *
-     * @param {Number} index Section index (0 based).
-     * @param {Number} total Total number of sections.
-     * @return {Object} Three.Vector3 position.
+     * @param {Number} roadHalf Half-width of the main street.
+     * @param {Number} nearZ The near (entrance) z of the street.
+     * @param {Number} farZ The far end z of the street.
      */
-    Cyberspace.prototype.sectionPosition = function(index, total) {
+    Cyberspace.prototype.buildBuildings = function(roadHalf, nearZ, farZ) {
         var THREE = this.THREE;
-        var layout = this.config.layout || 'ring';
-
-        if (layout === 'grid') {
-            var cols = Math.max(1, Math.ceil(Math.sqrt(total)));
-            var col = index % cols;
-            var rowg = Math.floor(index / cols);
-            var spacing = 9;
-            var offset = (cols - 1) * spacing / 2;
-            return new THREE.Vector3(col * spacing - offset, 2.2, -12 - rowg * spacing);
-        }
-
-        if (layout === 'spiral') {
-            var ang = index * 0.9;
-            var rad = 10 + index * 0.6;
-            return new THREE.Vector3(
-                Math.sin(ang) * rad, 1.6 + index * 1.4, -Math.cos(ang) * rad
+        for (var i = 0; i < 60; i++) {
+            var side = Math.random() < 0.5 ? -1 : 1;
+            var x = side * (roadHalf + 3 + Math.random() * 22);
+            var z = nearZ - Math.random() * (nearZ - farZ);
+            var hgt = 6 + Math.random() * 26;
+            var w = 3 + Math.random() * 5;
+            var d = 3 + Math.random() * 5;
+            var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
+            var box = new THREE.Mesh(
+                new THREE.BoxGeometry(w, hgt, d),
+                new THREE.MeshBasicMaterial({
+                    color: colour, wireframe: true, transparent: true, opacity: 0.28
+                })
             );
+            box.position.set(x, hgt / 2, z);
+            this.scene.add(box);
         }
-
-        // Ring (default): surround the learner.
-        var radius = Math.max(11, total * 2.6);
-        var a = (index / Math.max(1, total)) * Math.PI * 2;
-        return new THREE.Vector3(Math.sin(a) * radius, 2.4, -Math.cos(a) * radius);
     };
 
     /**
-     * Build all section structures and their activity nodes.
+     * Build the cyberpunk city: a main street the learner flies down, lined
+     * with buildings, with each topic branching off as a side street whose big
+     * neon sign stands at the corner and whose activities are signs down the
+     * branch.
      */
-    Cyberspace.prototype.buildNodes = function() {
+    Cyberspace.prototype.buildCity = function() {
         var THREE = this.THREE;
         var sections = this.config.sections || [];
         var self = this;
 
-        sections.forEach(function(section, index) {
-            var pos = self.sectionPosition(index, sections.length);
-            var group = new THREE.Group();
-            group.position.copy(pos);
-            // Face the group toward the origin (where the learner starts).
-            group.lookAt(0, pos.y, 0);
-            self.scene.add(group);
+        // Start at the mouth of the street, looking down it (-Z).
+        this.player.position.set(0, 0, 12);
 
-            // Section core: a slowly spinning wireframe monolith.
-            var coreColour = section.current ? 0xffffff : self.palette.secondary;
-            var core = new THREE.Mesh(
-                new THREE.IcosahedronGeometry(1.6, 1),
-                new THREE.MeshBasicMaterial({color: coreColour, wireframe: true})
-            );
-            core.userData.spin = 0.2 + Math.random() * 0.2;
-            group.add(core);
-            self.spinners = self.spinners || [];
-            self.spinners.push(core);
+        var roadHalf = 4.5;
+        var spacing = 16;
+        var startZ = -16;
+        var endZ = startZ - Math.max(1, sections.length) * spacing - 8;
 
-            // Section label.
-            var label = self.makeLabel(section.name, self.palette.primary, 1.0);
-            label.position.set(0, 3.0, 0);
-            group.add(label);
+        // Road surface with glowing edge lines.
+        var road = new THREE.Mesh(
+            new THREE.PlaneGeometry(roadHalf * 2, 12 - endZ),
+            new THREE.MeshBasicMaterial({color: 0x04060c, transparent: true, opacity: 0.85})
+        );
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, 0.02, (12 + endZ) / 2);
+        this.scene.add(road);
+        [-roadHalf, roadHalf].forEach(function(x) {
+            var geo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(x, 0.05, 12),
+                new THREE.Vector3(x, 0.05, endZ)
+            ]);
+            self.scene.add(new THREE.Line(
+                geo, new THREE.LineBasicMaterial({color: self.palette.primary})
+            ));
+        });
 
-            // Activity nodes arranged in an arc facing the learner.
-            var activities = section.activities || [];
-            var arc = Math.min(Math.PI * 1.2, 0.5 + activities.length * 0.32);
-            activities.forEach(function(activity, ai) {
-                var t = activities.length === 1
-                    ? 0
-                    : (ai / (activities.length - 1) - 0.5) * arc;
-                var nodeRadius = 3.4;
-                var np = new THREE.Vector3(
-                    Math.sin(t) * nodeRadius,
-                    0.2 + Math.sin(ai * 1.3) * 0.6,
-                    Math.cos(t) * nodeRadius - 1.2
-                );
-                group.add(self.makeActivityNode(activity, np));
+        this.buildBuildings(roadHalf, 12, endZ);
+
+        sections.forEach(function(section, i) {
+            var z = startZ - i * spacing;
+            var side = (i % 2 === 0) ? -1 : 1;
+            var cornerX = side * roadHalf;
+
+            // Big topic sign at the corner, facing back up the street.
+            var topic = self.makeSign({
+                text: section.name,
+                colour: section.current ? 0xffffff : self.palette.primary,
+                width: 6,
+                height: 3.4,
+                imageurl: section.image || null
+            });
+            topic.group.position.set(side * (roadHalf + 1.2), 3.4, z);
+            topic.group.lookAt(side * (roadHalf + 1.2), 3.4, z + 10);
+            self.scene.add(topic.group);
+
+            // Activities recede outward as signs down the branch.
+            (section.activities || []).forEach(function(act, k) {
+                var ax = side * (roadHalf + 3.5 + k * 3.4);
+                var az = z + (k % 2 === 0 ? -1.6 : 1.6);
+                var sign = self.makeSign({
+                    text: act.name,
+                    colour: STATE_COLOURS[act.state] || STATE_COLOURS.available,
+                    width: 2.8,
+                    height: 1.5,
+                    url: act.url
+                });
+                sign.group.position.set(ax, 2.3, az);
+                sign.group.lookAt(cornerX, 2.3, z);
+                self.scene.add(sign.group);
             });
         });
     };
 
     /**
-     * Create an interactive activity node.
+     * Build a neon street sign: a dark panel with a glowing frame, the text,
+     * an optional image, and a support post. Interactive signs (with a url)
+     * are registered for raycasting.
      *
-     * @param {Object} activity Activity descriptor.
-     * @param {Object} position Local Three.Vector3 within the section group.
-     * @return {Object} Three.Group.
+     * @param {Object} opts {text, colour, width, height, imageurl?, url?}
+     * @return {Object} {group, panel} where panel is the raycast target.
      */
-    Cyberspace.prototype.makeActivityNode = function(activity, position) {
+    Cyberspace.prototype.makeSign = function(opts) {
         var THREE = this.THREE;
-        var colour = STATE_COLOURS[activity.state] || STATE_COLOURS.available;
+        var group = new THREE.Group();
+        var w = opts.width;
+        var h = opts.height;
 
-        var node = new THREE.Group();
-        node.position.copy(position);
+        // Neon frame glow (slightly larger, behind the panel).
+        var frameMat = new THREE.MeshBasicMaterial({
+            color: opts.colour, transparent: true, opacity: 0.9
+        });
+        var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, h + 0.3), frameMat);
 
-        var mat = new THREE.MeshBasicMaterial({color: colour, wireframe: true});
-        var mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), mat);
-        mesh.userData = {
-            url: activity.url,
-            name: activity.name,
-            baseColour: colour,
-            baseScale: 1,
-            material: mat,
-            interactive: true
-        };
-        node.add(mesh);
-
-        // Faint solid inner shell so it reads as a volume, not just lines.
-        var inner = new THREE.Mesh(
-            new THREE.OctahedronGeometry(0.55, 0),
-            new THREE.MeshBasicMaterial({
-                color: colour, transparent: true, opacity: 0.12
-            })
+        // Dark readable face; also the raycast target.
+        var panel = new THREE.Mesh(
+            new THREE.PlaneGeometry(w, h),
+            new THREE.MeshBasicMaterial({color: 0x05070d, transparent: true, opacity: 0.92})
         );
-        node.add(inner);
+        panel.position.z = 0.03;
+        frame.add(panel);
 
-        var label = this.makeLabel(activity.name, colour, 0.55);
-        label.position.set(0, 1.15, 0);
-        node.add(label);
+        // Optional topic image occupies the upper part of the panel.
+        var hasimage = !!opts.imageurl;
+        if (hasimage) {
+            var imgH = h * 0.55;
+            var imgMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff, transparent: true, opacity: 0
+            });
+            var img = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.9, imgH), imgMat);
+            img.position.set(0, h * 0.5 - imgH * 0.5 - 0.15, 0.03);
+            panel.add(img);
+            new THREE.TextureLoader().load(opts.imageurl, function(tex) {
+                if (tex.colorSpace !== undefined) {
+                    tex.colorSpace = THREE.SRGBColorSpace;
+                }
+                imgMat.map = tex;
+                imgMat.opacity = 1;
+                imgMat.needsUpdate = true;
+            });
+        }
 
-        this.interactive.push(mesh);
-        this.spinners = this.spinners || [];
-        mesh.userData.spin = 0.6;
-        this.spinners.push(mesh);
-        return node;
+        // Text plane.
+        var textMat = new THREE.MeshBasicMaterial({
+            map: this.makeTextTexture(opts.text, opts.colour),
+            transparent: true,
+            depthWrite: false
+        });
+        var textPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(w * 0.92, Math.min(h, 1.0)),
+            textMat
+        );
+        textPlane.position.set(0, hasimage ? -h * 0.3 : 0, 0.05);
+        panel.add(textPlane);
+
+        // Support post down to the ground.
+        var post = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 24, 0.12),
+            new THREE.MeshBasicMaterial({color: opts.colour, transparent: true, opacity: 0.5})
+        );
+        post.position.set(0, -h / 2 - 12, -0.05);
+        frame.add(post);
+
+        group.add(frame);
+
+        if (opts.url) {
+            panel.userData = {
+                url: opts.url,
+                name: opts.text,
+                material: frameMat,
+                baseColour: opts.colour,
+                interactive: true
+            };
+            this.interactive.push(panel);
+        }
+        return {group: group, panel: panel};
+    };
+
+    /**
+     * Build a neon text texture on a transparent canvas for a sign face.
+     *
+     * @param {String} text The label text.
+     * @param {Number} colour Hex int colour.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.makeTextTexture = function(text, colour) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        var ctx = canvas.getContext('2d');
+        var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
+
+        ctx.font = 'bold 52px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 22;
+        ctx.fillStyle = hex;
+        var clipped = text.length > 24 ? text.slice(0, 23) + '…' : text;
+        ctx.fillText(clipped, 256, 64);
+        ctx.fillText(clipped, 256, 64);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        texture.anisotropy = 4;
+        return texture;
     };
 
     /**
@@ -692,7 +778,7 @@ define('format_mnemo/vr', [], function() {
         }
         this.hovered = mesh;
         if (mesh) {
-            mesh.scale.setScalar(1.4);
+            mesh.scale.setScalar(1.12);
             mesh.userData.material.color.setHex(0xffffff);
             this.renderer.domElement.style.cursor = 'pointer';
         } else {

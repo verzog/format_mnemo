@@ -113,6 +113,7 @@ class scene implements renderable, templatable {
                 'name' => format_string($name, true, ['context' => $context]),
                 'visible' => (bool)$section->visible,
                 'current' => $this->format->is_section_current($section),
+                'image' => $this->section_image_url((int)$section->id, $context),
                 'activities' => $activities,
                 'activitycount' => count($activities),
                 'hasactivities' => !empty($activities),
@@ -123,6 +124,37 @@ class scene implements renderable, templatable {
             'sections' => $sections,
             'nodecount' => count($sections),
         ];
+    }
+
+    /**
+     * The pluginfile URL of a section's topic image, or null when there is none.
+     *
+     * @param int $sectionid the course_sections id
+     * @param context_course $context the course context
+     * @return string|null
+     */
+    protected function section_image_url(int $sectionid, context_course $context): ?string {
+        $fs = get_file_storage();
+        $files = $fs->get_area_files(
+            $context->id,
+            'format_mnemo',
+            'sectionimage',
+            $sectionid,
+            'itemid, filepath, filename',
+            false
+        );
+        if (empty($files)) {
+            return null;
+        }
+        $file = reset($files);
+        return moodle_url::make_pluginfile_url(
+            $context->id,
+            'format_mnemo',
+            'sectionimage',
+            $sectionid,
+            $file->get_filepath(),
+            $file->get_filename()
+        )->out(false);
     }
 
     /**
@@ -150,7 +182,6 @@ class scene implements renderable, templatable {
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
-            'layout' => $options['mnemolayout'] ?? 'ring',
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
