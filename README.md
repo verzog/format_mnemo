@@ -1,12 +1,16 @@
 # Mnemo — VR cyberspace course format for Moodle
 
 `format_mnemo` renders a Moodle course as an interactive 3D **cyberpunk city**
-inspired by the gestural VR navigation of *Johnny Mnemonic*. Each topic is a
-large neon **sign** — its name and, optionally, an uploaded topic image —
-standing at the corner where its **side street branches** off a main street the
-learner flies down; the topic's activities are smaller signs along that branch.
-Learners explore it on any screen and can **jack in with a WebXR headset** to
-fly the streets and reach out to open activities.
+inspired by the gestural VR navigation of *Johnny Mnemonic* and the neon skyline
+of Night City. The course is a main avenue the learner flies down; each topic is
+a neon **side street** branching off it, marked by a glowing gate and a tall
+Japanese-style pylon carrying the topic name (and, optionally, an uploaded topic
+image). The topic's activities are **buildings and shops** lining both sides of
+that street, each rendered in one of Cyberpunk's architectural styles according
+to what kind of activity it is. Behind the streets rise corporate **mega-towers**,
+**elevated highways** over shadowed vertical slums, and giant **holographic ads**.
+Learners explore it on any screen and can **jack in with a WebXR headset** to fly
+the streets and reach out to open activities.
 
 Teachers keep the familiar Moodle experience: whenever **editing is turned on**,
 the standard 2D section/activity editor is shown, so the course is built exactly
@@ -26,10 +30,16 @@ off).
 - **On-screen fallback** — no headset needed. Drag to look, `W`/`S` to fly,
   `A`/`D` to strafe, `R`/`F` (or `Space`) for altitude, and click a node to open
   it. `Shift` to boost.
-- **Live course data** — every section becomes a node; every activity becomes a
-  glowing octahedron colour-coded by state: **green = complete**,
-  **palette colour = available**, **red = restricted**. Completion and access
-  restrictions are respected per user.
+- **Live course data** — every section becomes a side street; every activity
+  becomes a building or shop with a lit signboard colour-coded by state:
+  **green = complete**, **palette colour = available**, **red = restricted**.
+  Completion and access restrictions are respected per user.
+- **Architectural styles by activity type** — activities are built in the four
+  Night-City movements: assessment/serious tools (quiz, assignment, lesson…) as
+  cold **Neo-Militarist** corporate towers; social/communication tools (forum,
+  chat, wiki…) as bright plastic **Kitsch** shops; content and reference (page,
+  book, resource…) as elite **Neo-Kitsch** pavilions; everything else as
+  survival-era **Entropist** blocks.
 - **Accessible list view** — a full, semantic list of every section and activity
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers
@@ -111,7 +121,7 @@ accessible list view and shows a short message.
 | `classes/output/renderer.php` | Extends the core section renderer; queues the WebXR module. |
 | `classes/output/scene.php` | Builds the section/activity graph (JSON for the client + accessible list). |
 | `templates/scene.mustache` | Scene container, loading state, and the fallback list. |
-| `amd/src/vr.js` | Hand-rolled Three.js + WebXR renderer with gestural navigation. |
+| `amd/src/vr.js` | Hand-rolled Three.js + WebXR renderer: the avenue, per-topic side streets, styled activity buildings, and the mega-city skyline. |
 | `thirdparty/three.module.min.js` | Bundled Three.js (see Third-party libraries). |
 | `classes/privacy/provider.php` | Null privacy provider — the plugin stores no personal data. |
 | `settings.php` | Site-wide settings (Three.js URL, defaults). |
