@@ -28,7 +28,6 @@ use context_course;
  * @covers     \format_mnemo\output\scene
  */
 final class scene_test extends \advanced_testcase {
-
     /**
      * The format exposes the expected default format options.
      */

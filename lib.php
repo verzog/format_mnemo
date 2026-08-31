@@ -22,8 +22,6 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-
 use core\output\inplace_editable;
 
 /**
@@ -35,7 +33,6 @@ use core\output\inplace_editable;
  * teachers can build the course in the usual 2D interface.
  */
 class format_mnemo extends core_courseformat\base {
-
     /**
      * Returns true. This format uses sections.
      *
@@ -81,7 +78,7 @@ class format_mnemo extends core_courseformat\base {
      *      'sr' (int) used by multipage formats to specify to which section to return
      * @return null|moodle_url
      */
-    public function get_view_url($section, $options = array()) {
+    public function get_view_url($section, $options = []) {
         global $CFG;
         $course = $this->get_course();
         $url = new moodle_url('/course/view.php', ['id' => $course->id]);
@@ -141,8 +138,9 @@ class format_mnemo extends core_courseformat\base {
         // If section is specified in course/view.php, make sure it is expanded in navigation.
         if ($navigation->includesectionnum === false) {
             $selectedsection = optional_param('section', null, PARAM_INT);
-            if ($selectedsection !== null && (!defined('AJAX_SCRIPT') || AJAX_SCRIPT == '0') &&
-                    $PAGE->url->compare(new moodle_url('/course/view.php'), URL_MATCH_BASE)) {
+            $iscourseview = $PAGE->url->compare(new moodle_url('/course/view.php'), URL_MATCH_BASE);
+            $notajax = !defined('AJAX_SCRIPT') || AJAX_SCRIPT == '0';
+            if ($selectedsection !== null && $notajax && $iscourseview) {
                 $navigation->includesectionnum = $selectedsection;
             }
         }

@@ -17,7 +17,6 @@
 namespace format_mnemo\output;
 
 use core_courseformat\output\section_renderer;
-use moodle_page;
 
 /**
  * Renderer for the Mnemo course format.
@@ -31,17 +30,6 @@ use moodle_page;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class renderer extends section_renderer {
-
-    /**
-     * Constructor.
-     *
-     * @param moodle_page $page
-     * @param string $target one of rendering target constants
-     */
-    public function __construct(moodle_page $page, $target) {
-        parent::__construct($page, $target);
-    }
-
     /**
      * Render the immersive cyberspace scene for learners.
      *

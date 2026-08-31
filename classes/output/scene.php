@@ -19,7 +19,6 @@ namespace format_mnemo\output;
 use completion_info;
 use context_course;
 use core_courseformat\base as course_format;
-use moodle_url;
 use renderable;
 use renderer_base;
 use stdClass;
@@ -37,7 +36,6 @@ use templatable;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class scene implements renderable, templatable {
-
     /** @var course_format The course format instance. */
     protected $format;
 
@@ -185,7 +183,7 @@ class scene implements renderable, templatable {
         $data->rootid = $this->rootid();
         $data->environment = $options['mnemoenvironment'] ?? 'cyberspace';
         $data->palette = $options['mnemopalette'] ?? 'cyan';
-        $data->sections = array_values(array_map(function($section) {
+        $data->sections = array_values(array_map(function ($section) {
             $section['activities'] = array_values($section['activities']);
             return (object)$section;
         }, $nodes['sections']));

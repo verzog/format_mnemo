@@ -25,7 +25,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 if ($ADMIN->fulltree) {
-
     // URL of the Three.js ES module. Point this to a locally hosted copy for
     // offline / air-gapped installations or to satisfy a strict Content
     // Security Policy. It must be an ES module build that exports the THREE
