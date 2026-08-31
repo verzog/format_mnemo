@@ -16,8 +16,14 @@
 /**
  * Mnemo course format - WebXR cyberspace renderer.
  *
- * Hand-rolled Three.js (no framework) scene that lays out the course sections
- * and activities as neon data-structures in a Johnny Mnemonic style void.
+ * Hand-rolled Three.js (no framework) scene that lays out the course as a
+ * Night-City-style megalopolis. The course is a main avenue; each topic is a
+ * neon side street branching off it, and each activity is a building or shop
+ * lining that street, styled after Cyberpunk's architectural movements
+ * (Entropism, Kitsch, Neo-Militarism, Neo-Kitsch) according to what kind of
+ * activity it is. The skyline behind is dressed with corporate mega-buildings,
+ * elevated highways over shadowed vertical slums, and giant holographic ads.
+ *
  * Learners fly through it on screen (drag + WASD, click to open) or in a WebXR
  * headset with gestural navigation: point and pinch / squeeze the trigger to
  * glide toward what you are looking at, and pinch on a node to open it.
@@ -31,12 +37,14 @@
  */
 define('format_mnemo/vr', [], function() {
 
-    // Neon palettes: [primary, secondary] hex ints.
+    // Neon palettes: [primary, secondary] hex ints. Drives wayfinding colour
+    // (topic gates, interactive highlights) so the admin choice still reads
+    // through the architectural styling.
     var PALETTES = {
-        cyan: {primary: 0x00e5ff, secondary: 0x0066ff, sky: 0x02060f},
-        amber: {primary: 0xffb300, secondary: 0xff5722, sky: 0x0a0600},
-        magenta: {primary: 0xff2bd6, secondary: 0x7c1fff, sky: 0x0a0210},
-        green: {primary: 0x39ff14, secondary: 0x00b3a4, sky: 0x00080a}
+        cyan: {primary: 0x00e5ff, secondary: 0x0066ff, sky: 0x03060f, haze: 0x0a1830},
+        amber: {primary: 0xffb300, secondary: 0xff5722, sky: 0x0a0600, haze: 0x2a1400},
+        magenta: {primary: 0xff2bd6, secondary: 0x7c1fff, sky: 0x0a0210, haze: 0x24072a},
+        green: {primary: 0x39ff14, secondary: 0x00b3a4, sky: 0x00080a, haze: 0x04241c}
     };
 
     // Activity state colours.
@@ -44,6 +52,47 @@ define('format_mnemo/vr', [], function() {
         complete: 0x39ff14,
         available: null, // Filled from the palette primary at build time.
         restricted: 0xff3b6b
+    };
+
+    // The four Night-City architectural movements, each a small material recipe.
+    //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
+    //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
+    //   neomilitarism  - mega-corp power: cold black steel, titanium, imposing.
+    //   neokitsch      - the wealthy elite: smooth curves, warm marble and wood.
+    var STYLES = {
+        entropism: {
+            edge: 0x8a5a2b, glow: 0xffa042, face: 0x0b0805, faceOpacity: 0.92,
+            lit: 0xffb454, density: 0.32, wireframe: true, form: 'block',
+            footprint: [4.2, 4.4], height: [5, 9]
+        },
+        kitsch: {
+            edge: 0xff3cc7, glow: 0x00e5ff, face: 0x11041a, faceOpacity: 0.82,
+            lit: 0xff5bd0, density: 0.62, wireframe: false, form: 'shop',
+            footprint: [5.2, 4.4], height: [4.5, 6.5]
+        },
+        neomilitarism: {
+            edge: 0x33404e, glow: 0xff2b4e, face: 0x04060a, faceOpacity: 0.97,
+            lit: 0x9fb4c9, density: 0.14, wireframe: false, form: 'tower',
+            footprint: [3.2, 3.2], height: [15, 24]
+        },
+        neokitsch: {
+            edge: 0xffe6a8, glow: 0xffcf7a, face: 0x14100a, faceOpacity: 0.86,
+            lit: 0xfff2cf, density: 0.28, wireframe: false, form: 'pavilion',
+            footprint: [4.6, 4.4], height: [8, 12]
+        }
+    };
+
+    // Which architectural style an activity's module speaks in. Assessment and
+    // "serious" tools read as cold corporate towers; social/communication tools
+    // as bright plastic kitsch shops; content/reference as elite neo-kitsch
+    // pavilions; anything else falls to survival-era entropism.
+    var MOD_STYLE = {
+        quiz: 'neomilitarism', assign: 'neomilitarism', workshop: 'neomilitarism',
+        lesson: 'neomilitarism', scorm: 'neomilitarism', bigbluebuttonbn: 'neomilitarism',
+        forum: 'kitsch', chat: 'kitsch', choice: 'kitsch', feedback: 'kitsch',
+        wiki: 'kitsch', glossary: 'kitsch', data: 'kitsch', survey: 'kitsch',
+        page: 'neokitsch', book: 'neokitsch', resource: 'neokitsch', url: 'neokitsch',
+        folder: 'neokitsch', imscp: 'neokitsch', h5pactivity: 'neokitsch', lti: 'neokitsch'
     };
 
     /**
@@ -74,6 +123,12 @@ define('format_mnemo/vr', [], function() {
         this.tmp = new THREE.Vector3();
         this.pointerNdc = new THREE.Vector2(-2, -2); // Off-screen by default.
         this.clock = new THREE.Clock();
+        this.time = 0; // Accumulated seconds, for cheap animation.
+
+        this.spinners = []; // Rooftop holo elements that rotate.
+        this.ads = []; // Holographic billboards that flicker.
+        this.beacons = []; // Rooftop lights that blink.
+        this.texCache = {}; // Cached window/ad canvas textures, keyed by string.
 
         this.build();
     }
@@ -95,12 +150,14 @@ define('format_mnemo/vr', [], function() {
         var scene = new THREE.Scene();
         scene.background = new THREE.Color(this.palette.sky);
         if (this.config.environment !== 'void') {
-            scene.fog = new THREE.FogExp2(this.palette.sky, 0.012);
+            // A hazy, coloured fog band is what gives the city its smoggy,
+            // light-bleeding depth.
+            scene.fog = new THREE.FogExp2(this.palette.haze, 0.016);
         }
         this.scene = scene;
 
         var camera = new THREE.PerspectiveCamera(
-            70, this.aspect(), 0.1, 400
+            72, this.aspect(), 0.1, 600
         );
         camera.position.set(0, 1.6, 0);
         this.camera = camera;
@@ -131,47 +188,414 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Build the neon grid floor, an optional ceiling grid and a starfield.
+     * Build the world around the streets: the wet neon ground, a smoggy sky
+     * with a low corporate moon, the corporate mega-building skyline, elevated
+     * highways over shadowed vertical slums, giant holographic ads and distant
+     * search beams. The density scales with the chosen environment.
      */
     Cyberspace.prototype.buildEnvironment = function() {
         var THREE = this.THREE;
         var primary = this.palette.primary;
         var secondary = this.palette.secondary;
+        var dense = this.config.environment === 'cyberspace';
 
         if (this.config.environment !== 'void') {
-            var floor = new THREE.GridHelper(400, 160, primary, secondary);
-            floor.material.opacity = 0.35;
-            floor.material.transparent = true;
-            floor.position.y = 0;
-            this.scene.add(floor);
+            // Wet, near-black ground so the neon reads as reflected light. A
+            // faint grid gives the surface scale without stealing contrast.
+            var ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(1200, 1200),
+                new THREE.MeshBasicMaterial({color: 0x020306})
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.02;
+            this.scene.add(ground);
 
-            if (this.config.environment === 'cyberspace') {
-                var ceiling = new THREE.GridHelper(400, 160, secondary, secondary);
-                ceiling.material.opacity = 0.12;
+            var grid = new THREE.GridHelper(600, 240, primary, secondary);
+            grid.material.opacity = 0.18;
+            grid.material.transparent = true;
+            this.scene.add(grid);
+
+            if (dense) {
+                var ceiling = new THREE.GridHelper(600, 120, secondary, secondary);
+                ceiling.material.opacity = 0.06;
                 ceiling.material.transparent = true;
-                ceiling.position.y = 40;
+                ceiling.position.y = 60;
                 this.scene.add(ceiling);
             }
         }
 
-        // Starfield: cheap Points cloud far out.
-        var count = this.config.environment === 'void' ? 900 : 1400;
+        // Low corporate moon on the horizon, and a soft horizon glow.
+        this.buildSky();
+
+        // Smog particles / distant lights.
+        var count = this.config.environment === 'void' ? 900 : 1600;
         var positions = new Float32Array(count * 3);
         for (var i = 0; i < count; i++) {
-            var r = 120 + Math.random() * 160;
+            var r = 140 + Math.random() * 220;
             var theta = Math.random() * Math.PI * 2;
             var phi = Math.acos(2 * Math.random() - 1);
             positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-            positions[i * 3 + 1] = r * Math.cos(phi);
+            positions[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6;
             positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
         }
         var geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         var stars = new THREE.Points(geo, new THREE.PointsMaterial({
-            color: primary, size: 0.7, sizeAttenuation: true,
-            transparent: true, opacity: 0.7
+            color: primary, size: 0.6, sizeAttenuation: true,
+            transparent: true, opacity: 0.6
         }));
         this.scene.add(stars);
+
+        if (this.config.environment === 'void') {
+            return;
+        }
+
+        // The city proper: corporate mega-towers behind the streets, elevated
+        // highways casting the slums below into shadow, and giant holo-ads.
+        this.buildMegaTowers(dense ? 30 : 14);
+        if (dense) {
+            this.buildElevatedHighways();
+            this.buildHoloAds();
+            this.buildBeams();
+        }
+    };
+
+    /**
+     * A low, hazy corporate moon and a bleed of horizon light. Purely
+     * atmospheric; not interactive.
+     */
+    Cyberspace.prototype.buildSky = function() {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        var ctx = canvas.getContext('2d');
+        var g = ctx.createRadialGradient(128, 128, 10, 128, 128, 128);
+        g.addColorStop(0, 'rgba(255,240,220,0.95)');
+        g.addColorStop(0.35, 'rgba(255,190,150,0.45)');
+        g.addColorStop(1, 'rgba(255,120,80,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 256, 256);
+        var tex = new THREE.CanvasTexture(canvas);
+        var moon = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: tex, transparent: true, depthWrite: false, opacity: 0.9
+        }));
+        moon.scale.set(90, 90, 1);
+        moon.position.set(-120, 70, -320);
+        this.scene.add(moon);
+    };
+
+    /**
+     * A canvas texture of a lit window grid for a building facade, cached per
+     * style/scale so many buildings share one GPU texture.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @param {Number} cols Approximate window columns.
+     * @param {Number} rows Approximate window rows.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.windowTexture = function(style, cols, rows) {
+        var key = 'win_' + style.face + '_' + style.lit + '_' + cols + 'x' + rows;
+        if (this.texCache[key]) {
+            return this.texCache[key];
+        }
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 256;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#' + ('000000' + style.face.toString(16)).slice(-6);
+        ctx.fillRect(0, 0, 128, 256);
+
+        var lit = '#' + ('000000' + style.lit.toString(16)).slice(-6);
+        var cw = 128 / cols;
+        var ch = 256 / rows;
+        var pad = Math.min(cw, ch) * 0.22;
+        for (var y = 0; y < rows; y++) {
+            for (var x = 0; x < cols; x++) {
+                var on = Math.random() < style.density;
+                if (!on) {
+                    continue;
+                }
+                // Entropism has broken, dim and mismatched panes.
+                var dim = style.wireframe && Math.random() < 0.5;
+                ctx.globalAlpha = dim ? 0.3 : 0.85;
+                ctx.shadowColor = lit;
+                ctx.shadowBlur = dim ? 0 : 6;
+                ctx.fillStyle = lit;
+                ctx.fillRect(x * cw + pad, y * ch + pad, cw - pad * 2, ch - pad * 2);
+            }
+        }
+        ctx.globalAlpha = 1;
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.anisotropy = 4;
+        this.texCache[key] = tex;
+        return tex;
+    };
+
+    /**
+     * Corporate mega-buildings: massive slab apartment complexes far behind the
+     * streets, their faces a wall of tiny window lights receding into smog.
+     *
+     * @param {Number} n How many slabs to raise.
+     */
+    Cyberspace.prototype.buildMegaTowers = function(n) {
+        var THREE = this.THREE;
+        // Alternate the two coldest, most monumental styles.
+        var styleKeys = ['neomilitarism', 'entropism'];
+        for (var i = 0; i < n; i++) {
+            var style = STYLES[styleKeys[i % styleKeys.length]];
+            var side = Math.random() < 0.5 ? -1 : 1;
+            var x = side * (34 + Math.random() * 120);
+            var z = 30 - Math.random() * 320;
+            var w = 8 + Math.random() * 16;
+            var d = 8 + Math.random() * 16;
+            var h = 26 + Math.random() * 60;
+
+            var body = new THREE.Mesh(
+                new THREE.BoxGeometry(w, h, d),
+                new THREE.MeshBasicMaterial({
+                    color: style.face, transparent: true, opacity: 0.96
+                })
+            );
+            body.position.set(x, h / 2, z);
+            this.scene.add(body);
+
+            // Window wall on the two faces most likely to be seen.
+            var winTex = this.windowTexture(style, 10, 22);
+            var facing = [
+                {rot: 0, off: [0, 0, d / 2 + 0.05]},
+                {rot: side < 0 ? Math.PI / 2 : -Math.PI / 2,
+                    off: [side < 0 ? w / 2 + 0.05 : -w / 2 - 0.05, 0, 0]}
+            ];
+            for (var f = 0; f < facing.length; f++) {
+                var wall = new THREE.Mesh(
+                    new THREE.PlaneGeometry(f === 0 ? w : d, h),
+                    new THREE.MeshBasicMaterial({
+                        map: winTex, transparent: true, opacity: 0.9, depthWrite: false
+                    })
+                );
+                wall.position.set(
+                    x + facing[f].off[0], h / 2, z + facing[f].off[2]
+                );
+                wall.rotation.y = facing[f].rot;
+                this.scene.add(wall);
+            }
+
+            // Crown edge glow and an occasional blinking aviation beacon.
+            var edges = new THREE.LineSegments(
+                new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+                new THREE.LineBasicMaterial({
+                    color: style.edge, transparent: true, opacity: 0.5
+                })
+            );
+            edges.position.copy(body.position);
+            this.scene.add(edges);
+
+            if (Math.random() < 0.5) {
+                var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+                    color: 0xff2b4e, transparent: true, depthWrite: false, opacity: 0.9
+                }));
+                beacon.scale.set(1.4, 1.4, 1);
+                beacon.position.set(x, h + 0.6, z);
+                this.beacons.push(beacon);
+                this.scene.add(beacon);
+            }
+        }
+    };
+
+    /**
+     * Elevated highways slung over the avenue on pillars, with cramped vertical
+     * slums huddled in the shadow beneath them.
+     */
+    Cyberspace.prototype.buildElevatedHighways = function() {
+        var THREE = this.THREE;
+        var self = this;
+        var primary = this.palette.primary;
+
+        // A couple of ribbons crossing the avenue at different heights.
+        var ribbons = [
+            {y: 15, z: -30, len: 220, dir: 'x'},
+            {y: 22, z: -150, len: 260, dir: 'x'}
+        ];
+        ribbons.forEach(function(r) {
+            var deck = new THREE.Mesh(
+                new THREE.BoxGeometry(r.len, 1.2, 7),
+                new THREE.MeshBasicMaterial({color: 0x05070c})
+            );
+            deck.position.set(0, r.y, r.z);
+            self.scene.add(deck);
+            // Neon underglow tube lines along both edges.
+            [-3.2, 3.2].forEach(function(zoff) {
+                var line = new THREE.Mesh(
+                    new THREE.BoxGeometry(r.len, 0.12, 0.12),
+                    new THREE.MeshBasicMaterial({
+                        color: primary, transparent: true, opacity: 0.8
+                    })
+                );
+                line.position.set(0, r.y - 0.55, r.z + zoff);
+                self.scene.add(line);
+            });
+            // Support pillars every ~40 units, straddling the avenue.
+            for (var px = -r.len / 2 + 20; px < r.len / 2; px += 42) {
+                if (Math.abs(px) < 10) {
+                    continue; // Keep the avenue mouth clear.
+                }
+                var pillar = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.6, r.y, 1.6),
+                    new THREE.MeshBasicMaterial({color: 0x04050a})
+                );
+                pillar.position.set(px, r.y / 2, r.z);
+                self.scene.add(pillar);
+                // A knot of slum boxes crammed against the pillar's shadow.
+                self.buildSlumCluster(px, r.z);
+            }
+        });
+    };
+
+    /**
+     * A cramped stack of weathered entropism boxes - a vertical slum - built in
+     * deep shadow at the given ground spot.
+     *
+     * @param {Number} cx Ground x.
+     * @param {Number} cz Ground z.
+     */
+    Cyberspace.prototype.buildSlumCluster = function(cx, cz) {
+        var THREE = this.THREE;
+        var style = STYLES.entropism;
+        var winTex = this.windowTexture(style, 4, 6);
+        var y = 0;
+        var boxes = 3 + Math.floor(Math.random() * 4);
+        for (var b = 0; b < boxes; b++) {
+            var w = 2.4 + Math.random() * 2.2;
+            var d = 2.4 + Math.random() * 2.2;
+            var h = 2 + Math.random() * 2.4;
+            var jx = (Math.random() - 0.5) * 2.2;
+            var jz = (Math.random() - 0.5) * 2.2;
+            var box = new THREE.Mesh(
+                new THREE.BoxGeometry(w, h, d),
+                new THREE.MeshBasicMaterial({
+                    color: style.face, transparent: true, opacity: 0.95
+                })
+            );
+            box.position.set(cx + jx, y + h / 2, cz + jz);
+            box.rotation.y = Math.random() * 0.5;
+            this.scene.add(box);
+            var face = new THREE.Mesh(
+                new THREE.PlaneGeometry(w, h),
+                new THREE.MeshBasicMaterial({
+                    map: winTex, transparent: true, opacity: 0.7, depthWrite: false
+                })
+            );
+            face.position.set(cx + jx, y + h / 2, cz + jz + d / 2 + 0.03);
+            face.rotation.y = box.rotation.y;
+            this.scene.add(face);
+            y += h * (0.7 + Math.random() * 0.2);
+        }
+    };
+
+    /**
+     * Giant holographic advertisements: huge emissive banners plastered on the
+     * skyline, blaring corporate colour. Registered for a flicker in tick().
+     */
+    Cyberspace.prototype.buildHoloAds = function() {
+        var THREE = this.THREE;
+        var adColours = [0xff2bd6, 0x00e5ff, 0xffb300, 0x39ff14, 0xff3b6b];
+        var glyphs = 'アキサナ企正力未来電';
+        for (var i = 0; i < 8; i++) {
+            var colour = adColours[i % adColours.length];
+            var tex = this.adTexture(colour, glyphs, i);
+            var vertical = Math.random() < 0.5;
+            var w = vertical ? 6 : 16;
+            var h = vertical ? 20 : 9;
+            var mat = new THREE.MeshBasicMaterial({
+                map: tex, transparent: true, opacity: 0.85,
+                depthWrite: false, blending: THREE.AdditiveBlending
+            });
+            var ad = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+            var side = Math.random() < 0.5 ? -1 : 1;
+            ad.position.set(
+                side * (24 + Math.random() * 70),
+                12 + Math.random() * 34,
+                -20 - Math.random() * 220
+            );
+            ad.lookAt(0, ad.position.y, ad.position.z + 10);
+            this.scene.add(ad);
+            this.ads.push({mat: mat, base: 0.85, phase: Math.random() * 6.28});
+        }
+    };
+
+    /**
+     * A canvas texture for a holographic ad: bands of neon and stacked glyphs.
+     *
+     * @param {Number} colour Hex int neon colour.
+     * @param {String} glyphs A pool of glyphs to stamp.
+     * @param {Number} seed Variation seed.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.adTexture = function(colour, glyphs, seed) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 384;
+        var ctx = canvas.getContext('2d');
+        var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
+        ctx.fillStyle = 'rgba(4,2,10,0.9)';
+        ctx.fillRect(0, 0, 256, 384);
+
+        // Scanline bands.
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = hex;
+        for (var y = 0; y < 384; y += 6) {
+            ctx.fillRect(0, y, 256, 2);
+        }
+        ctx.globalAlpha = 1;
+
+        // Frame.
+        ctx.strokeStyle = hex;
+        ctx.lineWidth = 8;
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 24;
+        ctx.strokeRect(8, 8, 240, 368);
+
+        // A stack of glyphs down the centre.
+        ctx.fillStyle = hex;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 64px "Noto Sans JP", "Yu Gothic", sans-serif';
+        var n = 4 + (seed % 3);
+        for (var i = 0; i < n; i++) {
+            var ch = glyphs.charAt((seed * 3 + i * 2) % glyphs.length);
+            ctx.fillText(ch, 128, 70 + i * 74);
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.anisotropy = 4;
+        return tex;
+    };
+
+    /**
+     * Distant vertical search beams that rake the smog above the skyline.
+     */
+    Cyberspace.prototype.buildBeams = function() {
+        var THREE = this.THREE;
+        for (var i = 0; i < 8; i++) {
+            var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
+            var beam = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.15, 1.6, 90, 6, 1, true),
+                new THREE.MeshBasicMaterial({
+                    color: colour, transparent: true, opacity: 0.06,
+                    side: THREE.DoubleSide, depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                })
+            );
+            var side = Math.random() < 0.5 ? -1 : 1;
+            beam.position.set(
+                side * (30 + Math.random() * 90), 45,
+                -40 - Math.random() * 240
+            );
+            beam.rotation.z = (Math.random() - 0.5) * 0.5;
+            this.scene.add(beam);
+        }
     };
 
     Cyberspace.prototype.buildRaycaster = function() {
@@ -179,105 +603,405 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Line both sides of the main street with wireframe neon buildings.
-     *
-     * @param {Number} roadHalf Half-width of the main street.
-     * @param {Number} nearZ The near (entrance) z of the street.
-     * @param {Number} farZ The far end z of the street.
-     */
-    Cyberspace.prototype.buildBuildings = function(roadHalf, nearZ, farZ) {
-        var THREE = this.THREE;
-        for (var i = 0; i < 60; i++) {
-            var side = Math.random() < 0.5 ? -1 : 1;
-            var x = side * (roadHalf + 3 + Math.random() * 22);
-            var z = nearZ - Math.random() * (nearZ - farZ);
-            var hgt = 6 + Math.random() * 26;
-            var w = 3 + Math.random() * 5;
-            var d = 3 + Math.random() * 5;
-            var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
-            var box = new THREE.Mesh(
-                new THREE.BoxGeometry(w, hgt, d),
-                new THREE.MeshBasicMaterial({
-                    color: colour, wireframe: true, transparent: true, opacity: 0.28
-                })
-            );
-            box.position.set(x, hgt / 2, z);
-            this.scene.add(box);
-        }
-    };
-
-    /**
-     * Build the cyberpunk city: a main street the learner flies down, lined
-     * with buildings, with each topic branching off as a side street whose big
-     * neon sign stands at the corner and whose activities are signs down the
-     * branch.
+     * Build the city grid: a main avenue the learner flies down, with each
+     * topic branching off as its own neon side street. A glowing gate and a
+     * tall Japanese-style pylon stand at the mouth of each side street, and the
+     * topic's activities line both sides of it as buildings and shops.
      */
     Cyberspace.prototype.buildCity = function() {
-        var THREE = this.THREE;
         var sections = this.config.sections || [];
         var self = this;
 
-        // Start at the mouth of the street, looking down it (-Z).
+        // Start at the mouth of the avenue, looking down it (-Z).
         this.player.position.set(0, 0, 12);
 
-        var roadHalf = 4.5;
-        var spacing = 16;
-        var startZ = -16;
-        var endZ = startZ - Math.max(1, sections.length) * spacing - 8;
+        var roadHalf = 5.5;
+        var spacing = 26; // Distance between side-street mouths down the avenue.
+        var startZ = -20;
+        var endZ = startZ - Math.max(1, sections.length) * spacing - 10;
 
-        // Road surface with glowing edge lines.
-        var road = new THREE.Mesh(
-            new THREE.PlaneGeometry(roadHalf * 2, 12 - endZ),
-            new THREE.MeshBasicMaterial({color: 0x04060c, transparent: true, opacity: 0.85})
-        );
-        road.rotation.x = -Math.PI / 2;
-        road.position.set(0, 0.02, (12 + endZ) / 2);
-        this.scene.add(road);
+        // Main avenue surface with glowing edge lines.
+        this.paveStrip(0, (12 + endZ) / 2, roadHalf * 2, 12 - endZ, 0);
         [-roadHalf, roadHalf].forEach(function(x) {
-            var geo = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(x, 0.05, 12),
-                new THREE.Vector3(x, 0.05, endZ)
-            ]);
-            self.scene.add(new THREE.Line(
-                geo, new THREE.LineBasicMaterial({color: self.palette.primary})
-            ));
+            self.neonEdge(x, 0.05, 12, x, 0.05, endZ);
         });
-
-        this.buildBuildings(roadHalf, 12, endZ);
+        // A few reflected-light streaks down the wet avenue.
+        for (var s = 0; s < 5; s++) {
+            var sx = (Math.random() - 0.5) * roadHalf * 1.4;
+            self.wetStreak(sx, (12 + endZ) / 2 + (Math.random() - 0.5) * 40, 0.5 + Math.random());
+        }
 
         sections.forEach(function(section, i) {
             var z = startZ - i * spacing;
             var side = (i % 2 === 0) ? -1 : 1;
-            var cornerX = side * roadHalf;
-
-            // Big topic sign at the corner, facing back up the street.
-            var topic = self.makeSign({
-                text: section.name,
-                colour: section.current ? 0xffffff : self.palette.primary,
-                width: 6,
-                height: 3.4,
-                imageurl: section.image || null
-            });
-            topic.group.position.set(side * (roadHalf + 1.2), 3.4, z);
-            topic.group.lookAt(side * (roadHalf + 1.2), 3.4, z + 10);
-            self.scene.add(topic.group);
-
-            // Activities recede outward as signs down the branch.
-            (section.activities || []).forEach(function(act, k) {
-                var ax = side * (roadHalf + 3.5 + k * 3.4);
-                var az = z + (k % 2 === 0 ? -1.6 : 1.6);
-                var sign = self.makeSign({
-                    text: act.name,
-                    colour: STATE_COLOURS[act.state] || STATE_COLOURS.available,
-                    width: 2.8,
-                    height: 1.5,
-                    url: act.url
-                });
-                sign.group.position.set(ax, 2.3, az);
-                sign.group.lookAt(cornerX, 2.3, z);
-                self.scene.add(sign.group);
-            });
+            self.buildSideStreet(section, z, side, roadHalf);
         });
+    };
+
+    /**
+     * Build one topic as a side street branching off the avenue.
+     *
+     * @param {Object} section The section node (name, current, image, activities).
+     * @param {Number} z The avenue z at which this street branches.
+     * @param {Number} side -1 for the left of the avenue, +1 for the right.
+     * @param {Number} roadHalf Half-width of the main avenue.
+     */
+    Cyberspace.prototype.buildSideStreet = function(section, z, side, roadHalf) {
+        var self = this;
+        var activities = section.activities || [];
+        var streetHalf = 4.5; // Half-width of the side street (along z).
+        var first = 5; // x-offset (past the mouth) of the first building.
+        var step = 6.5; // x-spacing between building slots down the street.
+        var slots = Math.ceil(activities.length / 2);
+        var streetLen = first + Math.max(1, slots) * step + 3;
+        var mouthX = side * roadHalf;
+        var midX = mouthX + side * streetLen / 2;
+
+        // Side-street road surface + neon kerb lines.
+        this.paveStrip(midX, z, streetLen, streetHalf * 2, 0);
+        [-streetHalf, streetHalf].forEach(function(zoff) {
+            self.neonEdge(mouthX, 0.05, z + zoff, mouthX + side * streetLen, 0.05, z + zoff);
+        });
+
+        // Topic gate spanning the mouth, plus a tall vertical pylon at the corner.
+        var wayColour = section.current ? 0xffffff : this.palette.primary;
+        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour);
+        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour);
+
+        // Activities line both sides of the street, receding down it.
+        activities.forEach(function(act, k) {
+            var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
+            var along = Math.floor(k / 2);
+            var bx = mouthX + side * (first + along * step);
+            var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
+            var depth = style.footprint[1];
+            var bz = z + zside * (streetHalf + depth / 2 + 0.4);
+            var built = self.makeStructure(act, style);
+            built.group.position.set(bx, 0, bz);
+            // Face the street centreline so the signboard reads from the street.
+            built.group.lookAt(bx, built.group.position.y, z);
+            self.scene.add(built.group);
+        });
+    };
+
+    /**
+     * Pave a flat road strip.
+     *
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     * @param {Number} w Width along x.
+     * @param {Number} d Depth along z.
+     * @param {Number} y Height of the surface.
+     */
+    Cyberspace.prototype.paveStrip = function(cx, cz, w, d, y) {
+        var THREE = this.THREE;
+        var road = new THREE.Mesh(
+            new THREE.PlaneGeometry(w, d),
+            new THREE.MeshBasicMaterial({color: 0x04060c, transparent: true, opacity: 0.9})
+        );
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(cx, y + 0.02, cz);
+        this.scene.add(road);
+    };
+
+    /**
+     * A glowing neon line on the ground between two points.
+     *
+     * @param {Number} x1 Start x.
+     * @param {Number} y1 Start y.
+     * @param {Number} z1 Start z.
+     * @param {Number} x2 End x.
+     * @param {Number} y2 End y.
+     * @param {Number} z2 End z.
+     */
+    Cyberspace.prototype.neonEdge = function(x1, y1, z1, x2, y2, z2) {
+        var THREE = this.THREE;
+        var geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(x1, y1, z1),
+            new THREE.Vector3(x2, y2, z2)
+        ]);
+        this.scene.add(new THREE.Line(
+            geo, new THREE.LineBasicMaterial({color: this.palette.primary})
+        ));
+    };
+
+    /**
+     * A soft reflected-light streak on the wet ground.
+     *
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     * @param {Number} w Streak width.
+     */
+    Cyberspace.prototype.wetStreak = function(cx, cz, w) {
+        var THREE = this.THREE;
+        var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
+        var streak = new THREE.Mesh(
+            new THREE.PlaneGeometry(w, 14 + Math.random() * 18),
+            new THREE.MeshBasicMaterial({
+                color: colour, transparent: true, opacity: 0.08,
+                depthWrite: false, blending: THREE.AdditiveBlending
+            })
+        );
+        streak.rotation.x = -Math.PI / 2;
+        streak.position.set(cx, 0.03, cz);
+        this.scene.add(streak);
+    };
+
+    /**
+     * A neon gate (a torii-like arch) spanning the mouth of a side street,
+     * carrying the topic name. Not interactive; it is pure wayfinding.
+     *
+     * @param {Object} section The section node.
+     * @param {Number} x The gate x (just inside the mouth).
+     * @param {Number} z The street centre z.
+     * @param {Number} side Avenue side (-1/+1).
+     * @param {Number} streetHalf Half-width of the street.
+     * @param {Number} colour Wayfinding colour.
+     */
+    Cyberspace.prototype.buildGate = function(section, x, z, side, streetHalf, colour) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var postMat = new THREE.MeshBasicMaterial({
+            color: colour, transparent: true, opacity: 0.85
+        });
+        var top = 7.5;
+        // Two posts either side of the street.
+        [-streetHalf - 0.6, streetHalf + 0.6].forEach(function(zoff) {
+            var post = new THREE.Mesh(new THREE.BoxGeometry(0.35, top, 0.35), postMat);
+            post.position.set(0, top / 2, zoff);
+            group.add(post);
+        });
+        // Crossbar.
+        var bar = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.5, (streetHalf + 0.9) * 2), postMat
+        );
+        bar.position.set(0, top, 0);
+        group.add(bar);
+
+        // Topic nameplate hanging from the crossbar, facing back up the avenue.
+        var plate = this.makeSign({
+            text: section.name,
+            colour: colour,
+            width: streetHalf * 1.7,
+            height: 2.4,
+            imageurl: section.image || null,
+            post: false
+        });
+        plate.group.position.set(0.25 * side, top - 1.9, 0);
+        group.add(plate.group);
+
+        group.position.set(x, 0, z);
+        // Orient the gate to face back up the avenue (toward +Z at the mouth).
+        group.lookAt(x, 0, z + side * 0.0001 + 10);
+        this.scene.add(group);
+    };
+
+    /**
+     * A tall Japanese-style vertical neon pylon standing at the street corner.
+     *
+     * @param {String} name The topic name.
+     * @param {Number} x Pylon x.
+     * @param {Number} z Pylon z.
+     * @param {Number} colour Neon colour.
+     */
+    Cyberspace.prototype.buildPylon = function(name, x, z, colour) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var h = 16;
+        var mast = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, h, 0.16),
+            new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.6})
+        );
+        mast.position.y = h / 2;
+        group.add(mast);
+
+        // Vertical text blade near the top.
+        var tex = this.verticalTextTexture(name, colour);
+        var blade = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.1, 5.5),
+            new THREE.MeshBasicMaterial({
+                map: tex, transparent: true, depthWrite: false
+            })
+        );
+        blade.position.set(0.5, h - 3.2, 0);
+        group.add(blade);
+        var frame = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.3, 5.7),
+            new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.5})
+        );
+        frame.position.set(0.5, h - 3.2, -0.02);
+        group.add(frame);
+
+        group.position.set(x, 0, z);
+        this.scene.add(group);
+    };
+
+    /**
+     * Build an activity as a building or shop in a given architectural style.
+     * The lit signboard on its facade is the interactive raycast target.
+     *
+     * @param {Object} act The activity node (name, url, state, modname).
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} {group, panel} where panel is the raycast target.
+     */
+    Cyberspace.prototype.makeStructure = function(act, style) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var w = style.footprint[0];
+        var d = style.footprint[1];
+        var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
+
+        // Body: a dark solid mass with a crisp neon edge outline.
+        var body = new THREE.Mesh(
+            new THREE.BoxGeometry(w, h, d),
+            new THREE.MeshBasicMaterial({
+                color: style.face, transparent: true, opacity: style.faceOpacity,
+                wireframe: false
+            })
+        );
+        body.position.y = h / 2;
+        group.add(body);
+
+        var edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+            new THREE.LineBasicMaterial({
+                color: style.edge, transparent: true, opacity: 0.85
+            })
+        );
+        edges.position.y = h / 2;
+        group.add(edges);
+
+        // Entropism buildings wear a broken, weathered wireframe overlay.
+        if (style.wireframe) {
+            var rust = new THREE.Mesh(
+                new THREE.BoxGeometry(w * 1.02, h * 1.01, d * 1.02),
+                new THREE.MeshBasicMaterial({
+                    color: style.glow, wireframe: true, transparent: true, opacity: 0.16
+                })
+            );
+            rust.position.y = h / 2;
+            group.add(rust);
+        }
+
+        // Window wall on the facade (the +z face, which is turned to the street).
+        var winTex = this.windowTexture(style, 6, Math.max(4, Math.round(h / 2)));
+        var wall = new THREE.Mesh(
+            new THREE.PlaneGeometry(w * 0.96, h * 0.96),
+            new THREE.MeshBasicMaterial({
+                map: winTex, transparent: true, opacity: 0.85, depthWrite: false
+            })
+        );
+        wall.position.set(0, h / 2, d / 2 + 0.04);
+        group.add(wall);
+
+        // Style-specific silhouette and roofline.
+        this.dressRoof(group, style, w, d, h);
+
+        // The lit signboard: the clickable face. State colour tints its frame so
+        // completion/restriction still reads at a glance.
+        var stateColour = STATE_COLOURS[act.state] || STATE_COLOURS.available;
+        var sign = this.makeSign({
+            text: act.name,
+            colour: stateColour,
+            width: Math.min(w * 0.92, 3.4),
+            height: 1.4,
+            url: act.url,
+            post: false
+        });
+        sign.group.position.set(0, Math.min(h - 1.1, 2.6), d / 2 + 0.12);
+        group.add(sign.group);
+
+        return {group: group, panel: sign.panel};
+    };
+
+    /**
+     * Add the style's rooftop character: corporate antennae, plastic kitsch
+     * loops, an elite luxury crown, or slum clutter.
+     *
+     * @param {Object} group The building group.
+     * @param {Object} style The STYLES recipe.
+     * @param {Number} w Body width.
+     * @param {Number} d Body depth.
+     * @param {Number} h Body height.
+     */
+    Cyberspace.prototype.dressRoof = function(group, style, w, d, h) {
+        var THREE = this.THREE;
+        if (style.form === 'tower') {
+            // Neo-militarism: a hard antenna and a cold blinking beacon.
+            var mast = new THREE.Mesh(
+                new THREE.BoxGeometry(0.12, 4, 0.12),
+                new THREE.MeshBasicMaterial({color: style.edge})
+            );
+            mast.position.set(0, h + 2, 0);
+            group.add(mast);
+            var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+                color: style.glow, transparent: true, depthWrite: false, opacity: 0.9
+            }));
+            beacon.scale.set(0.9, 0.9, 1);
+            beacon.position.set(0, h + 4, 0);
+            this.beacons.push(beacon);
+            group.add(beacon);
+        } else if (style.form === 'shop') {
+            // Kitsch: a bright plastic awning and a spinning neon ring.
+            var awning = new THREE.Mesh(
+                new THREE.PlaneGeometry(w * 1.02, 1.1),
+                new THREE.MeshBasicMaterial({
+                    color: style.edge, transparent: true, opacity: 0.7,
+                    side: THREE.DoubleSide
+                })
+            );
+            awning.position.set(0, h * 0.5 + 1.6, d / 2 + 0.5);
+            awning.rotation.x = Math.PI / 3;
+            group.add(awning);
+            var ring = new THREE.Mesh(
+                new THREE.TorusGeometry(0.8, 0.09, 8, 20),
+                new THREE.MeshBasicMaterial({color: style.glow})
+            );
+            ring.position.set(0, h + 0.9, 0);
+            ring.userData.spin = 1.2;
+            this.spinners.push(ring);
+            group.add(ring);
+        } else if (style.form === 'pavilion') {
+            // Neo-kitsch: a smooth luxury crown and a slow holo disc.
+            var crown = new THREE.Mesh(
+                new THREE.TorusGeometry(w * 0.5, 0.14, 10, 24),
+                new THREE.MeshBasicMaterial({
+                    color: style.glow, transparent: true, opacity: 0.9
+                })
+            );
+            crown.rotation.x = Math.PI / 2;
+            crown.position.set(0, h + 0.3, 0);
+            group.add(crown);
+            var disc = new THREE.Mesh(
+                new THREE.CircleGeometry(w * 0.4, 24),
+                new THREE.MeshBasicMaterial({
+                    color: style.lit, transparent: true, opacity: 0.25,
+                    side: THREE.DoubleSide, depthWrite: false
+                })
+            );
+            disc.position.set(0, h + 1.4, 0);
+            disc.userData.spin = 0.4;
+            this.spinners.push(disc);
+            group.add(disc);
+        } else {
+            // Entropism: rooftop clutter - tanks and a sagging cable.
+            for (var i = 0; i < 3; i++) {
+                var junk = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.6 + Math.random(), 0.8 + Math.random(), 0.6 + Math.random()),
+                    new THREE.MeshBasicMaterial({color: style.face})
+                );
+                junk.position.set(
+                    (Math.random() - 0.5) * w * 0.7, h + 0.4,
+                    (Math.random() - 0.5) * d * 0.7
+                );
+                var jedge = new THREE.LineSegments(
+                    new THREE.EdgesGeometry(junk.geometry),
+                    new THREE.LineBasicMaterial({color: style.edge, transparent: true, opacity: 0.6})
+                );
+                junk.add(jedge);
+                group.add(junk);
+            }
+        }
     };
 
     /**
@@ -311,11 +1035,11 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Build a neon street sign: a dark panel with a glowing frame, the text,
-     * an optional image, and a support post. Interactive signs (with a url)
-     * are registered for raycasting.
+     * Build a neon signboard: a dark panel with a glowing frame, the text, an
+     * optional image, and (optionally) a support post. Interactive signs (with
+     * a url) are registered for raycasting.
      *
-     * @param {Object} opts {text, colour, width, height, imageurl?, url?}
+     * @param {Object} opts {text, colour, width, height, imageurl?, url?, post?}
      * @return {Object} {group, panel} where panel is the raycast target.
      */
     Cyberspace.prototype.makeSign = function(opts) {
@@ -373,13 +1097,16 @@ define('format_mnemo/vr', [], function() {
         textPlane.position.set(0, hasimage ? -h * 0.3 : 0, 0.05);
         panel.add(textPlane);
 
-        // Support post down to the ground.
-        var post = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12, 24, 0.12),
-            new THREE.MeshBasicMaterial({color: opts.colour, transparent: true, opacity: 0.5})
-        );
-        post.position.set(0, -h / 2 - 12, -0.05);
-        frame.add(post);
+        // Optional support post down to the ground (used by free-standing signs;
+        // facade-mounted signs on buildings pass post:false).
+        if (opts.post !== false) {
+            var post = new THREE.Mesh(
+                new THREE.BoxGeometry(0.12, 24, 0.12),
+                new THREE.MeshBasicMaterial({color: opts.colour, transparent: true, opacity: 0.5})
+            );
+            post.position.set(0, -h / 2 - 12, -0.05);
+            frame.add(post);
+        }
 
         group.add(frame);
 
@@ -421,6 +1148,36 @@ define('format_mnemo/vr', [], function() {
         ctx.fillText(clipped, 256, 64);
         ctx.fillText(clipped, 256, 64);
 
+        var texture = new THREE.CanvasTexture(canvas);
+        texture.anisotropy = 4;
+        return texture;
+    };
+
+    /**
+     * Build a vertical (stacked) neon text texture for a corner pylon blade.
+     *
+     * @param {String} text The label text.
+     * @param {Number} colour Hex int colour.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.verticalTextTexture = function(text, colour) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 512;
+        var ctx = canvas.getContext('2d');
+        var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
+        ctx.font = 'bold 62px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = hex;
+        var chars = text.replace(/\s+/g, '').slice(0, 7);
+        var step = 512 / (chars.length + 1);
+        for (var i = 0; i < chars.length; i++) {
+            ctx.fillText(chars.charAt(i), 64, step * (i + 1));
+        }
         var texture = new THREE.CanvasTexture(canvas);
         texture.anisotropy = 4;
         return texture;
@@ -726,18 +1483,30 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Per-frame update: locomotion, spinning, highlighting, rendering.
+     * Per-frame update: locomotion, spinning, flicker, highlighting, rendering.
      */
     Cyberspace.prototype.tick = function() {
         var dt = Math.min(0.05, this.clock.getDelta());
+        this.time += dt;
         var presenting = this.renderer.xr.isPresenting;
 
-        // Spin the data structures.
-        if (this.spinners) {
-            for (var i = 0; i < this.spinners.length; i++) {
-                this.spinners[i].rotation.y += this.spinners[i].userData.spin * dt;
-                this.spinners[i].rotation.x += this.spinners[i].userData.spin * 0.4 * dt;
-            }
+        // Spin the rooftop holo elements.
+        for (var i = 0; i < this.spinners.length; i++) {
+            this.spinners[i].rotation.y += this.spinners[i].userData.spin * dt;
+            this.spinners[i].rotation.x += this.spinners[i].userData.spin * 0.4 * dt;
+        }
+
+        // Flicker the holographic ads.
+        for (var a = 0; a < this.ads.length; a++) {
+            var ad = this.ads[a];
+            var flick = Math.sin(this.time * 3 + ad.phase);
+            ad.mat.opacity = ad.base * (0.72 + 0.28 * flick);
+        }
+
+        // Blink the rooftop beacons roughly once a second.
+        var on = (Math.floor(this.time * 1.3) % 2) === 0;
+        for (var b = 0; b < this.beacons.length; b++) {
+            this.beacons[b].material.opacity = on ? 0.95 : 0.12;
         }
 
         if (presenting) {
@@ -762,8 +1531,8 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.clampToWorld = function() {
         if (this.player.position.y < 0) {
             this.player.position.y = 0;
-        } else if (this.player.position.y > 30) {
-            this.player.position.y = 30;
+        } else if (this.player.position.y > 45) {
+            this.player.position.y = 45;
         }
     };
 
