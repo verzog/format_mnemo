@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+    WebXR gesture smoke-test harness (not shipped, not loaded by the plugin).
+
+    Loads the real bundled Three.js and the real amd/src/vr.js, then drives the
+    exported GestureManager with a fake XR surface (scripted controllers and
+    hand joints). tests/webxr/smoke.mjs opens this page in headless Chromium
+    and calls window.__mnemoTest.* to assert the input->action mapping, so the
+    gesture logic can be verified without a headset.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>format_mnemo gesture harness</title>
+</head>
+<body>
+<script>
+// Capture the AMD factory output without a loader: vr.js calls define(...).
+window.define = function(name, deps, factory) {
+    window.__mnemoModule = factory();
+};
+</script>
+<script src="../../amd/src/vr.js"></script>
+<script type="module">
+import * as THREE from '../../thirdparty/three.module.min.js';
+
+var GestureManager = window.__mnemoModule._GestureManager;
+
+// A tracked-hand joint stub: only getWorldPosition and visible are read.
+function joint(x, y, z) {
+    return {
+        visible: true,
+        getWorldPosition: function(out) {
+            return out.set(x, y, z);
+        }
+    };
+}
+
+// Build a fresh manager on a fake Cyberspace each scenario.
+function makeManager() {
+    var player = new THREE.Group();
+    var camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+    player.add(camera);
+    var scene = new THREE.Scene();
+    scene.add(player);
+
+    var hands = [handStub(), handStub()];
+
+    // Two controllers parented to the rig, each with a fake input source.
+    var controllers = [];
+    for (var i = 0; i < 2; i++) {
+        var c = new THREE.Object3D();
+        c.userData.inputSource = {
+            handedness: i === 0 ? 'left' : 'right',
+            gamepad: {axes: [0, 0, 0, 0], buttons: buttons()}
+        };
+        c.userData.handedness = c.userData.inputSource.handedness;
+        player.add(c);
+        controllers.push(c);
+    }
+
+    var renderer = {
+        xr: {
+            isPresenting: true,
+            getSession: function() {
+                return {inputSources: []};
+            },
+            getReferenceSpace: function() {
+                return {};
+            },
+            getFrame: function() {
+                return null;
+            },
+            getHand: function(i) {
+                return hands[i];
+            }
+        }
+    };
+
+    var cs = {
+        THREE: THREE,
+        renderer: renderer,
+        player: player,
+        camera: camera,
+        controllers: controllers,
+        brake: false
+    };
+
+    var gm = new GestureManager(cs);
+    return {gm: gm, cs: cs, player: player, camera: camera,
+        controllers: controllers, hands: hands, scene: scene};
+}
+
+function handStub() {
+    var g = new THREE.Group();
+    g.joints = {};
+    return g;
+}
+
+function buttons() {
+    var b = [];
+    for (var i = 0; i < 6; i++) {
+        b.push({pressed: false, value: 0});
+    }
+    return b;
+}
+
+// The test API the Node script drives.
+window.__mnemoTest = {
+    THREE: THREE,
+    make: makeManager,
+    joint: joint,
+    // Step the fake render loop: refresh world matrices, then run gestures.
+    frame: function(ctx, dt) {
+        ctx.scene.updateMatrixWorld(true);
+        ctx.gm.update(dt);
+    },
+    state: function(ctx) {
+        var p = ctx.player.position;
+        return {x: p.x, y: p.y, z: p.z, rotY: ctx.player.rotation.y,
+            brake: ctx.cs.brake};
+    }
+};
+
+window.__mnemoReady = true;
+</script>
+</body>
+</html>

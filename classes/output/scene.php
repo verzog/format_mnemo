@@ -202,6 +202,9 @@ class scene implements renderable, templatable {
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),
+            // Hour of day (0-24 float) in the site's timezone, so the client can
+            // run a day/night cycle that matches the Moodle site's clock.
+            'hour' => $this->site_hour(),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -217,6 +220,19 @@ class scene implements renderable, templatable {
             ],
             'sections' => $nodes['sections'],
         ];
+    }
+
+    /**
+     * The current hour of day (0-24, with minutes as a fraction) in the site's
+     * configured timezone, so the scene's day/night cycle follows the site
+     * clock rather than each viewer's local time.
+     *
+     * @return float
+     */
+    protected function site_hour(): float {
+        $tz = \core_date::get_server_timezone_object();
+        $now = new \DateTime('now', $tz);
+        return (int)$now->format('G') + ((int)$now->format('i')) / 60.0;
     }
 
     /**

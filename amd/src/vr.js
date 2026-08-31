@@ -61,24 +61,24 @@ define('format_mnemo/vr', [], function() {
     //   neokitsch      - the wealthy elite: smooth curves, warm marble and wood.
     var STYLES = {
         entropism: {
-            edge: 0x8a5a2b, glow: 0xffa042, face: 0x0b0805, faceOpacity: 0.92,
-            lit: 0xffb454, density: 0.32, wireframe: true, form: 'block',
-            footprint: [4.2, 4.4], height: [5, 9]
+            edge: 0x8a5a2b, glow: 0xffa042, body: 0x9c8b72, lit: 0xffb454,
+            rough: 0.95, metal: 0.05, density: 0.32, wireframe: true,
+            form: 'block', footprint: [4.2, 4.4], height: [5, 9]
         },
         kitsch: {
-            edge: 0xff3cc7, glow: 0x00e5ff, face: 0x11041a, faceOpacity: 0.82,
-            lit: 0xff5bd0, density: 0.62, wireframe: false, form: 'shop',
-            footprint: [5.2, 4.4], height: [4.5, 6.5]
+            edge: 0xff3cc7, glow: 0x00e5ff, body: 0x7d6690, lit: 0xff7bd8,
+            rough: 0.5, metal: 0.15, density: 0.62, wireframe: false,
+            form: 'shop', footprint: [5.2, 4.4], height: [4.5, 6.5]
         },
         neomilitarism: {
-            edge: 0x33404e, glow: 0xff2b4e, face: 0x04060a, faceOpacity: 0.97,
-            lit: 0x9fb4c9, density: 0.14, wireframe: false, form: 'tower',
-            footprint: [3.2, 3.2], height: [15, 24]
+            edge: 0x394452, glow: 0xff2b4e, body: 0x6b727c, lit: 0xaec4dc,
+            rough: 0.5, metal: 0.6, density: 0.14, wireframe: false,
+            form: 'tower', footprint: [3.2, 3.2], height: [15, 24]
         },
         neokitsch: {
-            edge: 0xffe6a8, glow: 0xffcf7a, face: 0x14100a, faceOpacity: 0.86,
-            lit: 0xfff2cf, density: 0.28, wireframe: false, form: 'pavilion',
-            footprint: [4.6, 4.4], height: [8, 12]
+            edge: 0xffe6a8, glow: 0xffcf7a, body: 0xb8ad96, lit: 0xfff2cf,
+            rough: 0.3, metal: 0.35, density: 0.28, wireframe: false,
+            form: 'pavilion', footprint: [4.6, 4.4], height: [8, 12]
         }
     };
 
@@ -109,6 +109,9 @@ define('format_mnemo/vr', [], function() {
         this.config = config;
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
+        // Hour of day (0-24) from the site clock; drives the day/night cycle.
+        this.hour = (typeof config.hour === 'number') ? config.hour : 20;
+        this.day = null; // Daylight parameters, computed in build().
 
         this.interactive = []; // Meshes that can be gazed/clicked to open.
         this.hovered = null; // Currently highlighted mesh.
@@ -121,9 +124,12 @@ define('format_mnemo/vr', [], function() {
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
         this.tmp = new THREE.Vector3();
+        this.tmp2 = new THREE.Vector3(); // Scratch for measuring per-frame motion.
         this.pointerNdc = new THREE.Vector2(-2, -2); // Off-screen by default.
         this.clock = new THREE.Clock();
         this.time = 0; // Accumulated seconds, for cheap animation.
+        this.brake = false; // Open-palm brake: suppress locomotion this frame.
+        this.gestures = null; // XR gesture manager (built after the renderer).
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.ads = []; // Holographic billboards that flicker.
@@ -146,13 +152,17 @@ define('format_mnemo/vr', [], function() {
         this.root.appendChild(renderer.domElement);
         this.renderer = renderer;
 
+        // Work out where the sun is for the site's current hour, then paint the
+        // sky and smog to match.
+        this.day = this.computeDaylight(this.hour);
+
         // Scene, camera, player rig.
         var scene = new THREE.Scene();
-        scene.background = new THREE.Color(this.palette.sky);
+        scene.background = this.day.skyTop.clone();
         if (this.config.environment !== 'void') {
             // A hazy, coloured fog band is what gives the city its smoggy,
-            // light-bleeding depth.
-            scene.fog = new THREE.FogExp2(this.palette.haze, 0.016);
+            // light-bleeding depth; its colour and thickness follow the time.
+            scene.fog = new THREE.FogExp2(this.day.fog.getHex(), this.day.fogDensity);
         }
         this.scene = scene;
 
@@ -173,6 +183,7 @@ define('format_mnemo/vr', [], function() {
         this.buildRaycaster();
         this.buildCity();
         this.buildControllers();
+        this.gestures = new GestureManager(this);
         this.buildVrButton();
         this.buildFullscreenButton();
         this.bindDesktopControls();
@@ -188,6 +199,81 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Work out the daylight state for an hour of day: sun direction, sky and
+     * fog colours, light intensities and how strongly the neon reads. Everything
+     * downstream (sky, lights, materials, signs) is coloured from this, so the
+     * scene matches the Moodle site clock - bright and hazy by day, dark and
+     * neon-lit by night, warm at dawn and dusk.
+     *
+     * @param {Number} hour Hour of day, 0-24 (minutes as a fraction).
+     * @return {Object} The daylight parameters.
+     */
+    Cyberspace.prototype.computeDaylight = function(hour) {
+        var THREE = this.THREE;
+        var ang = ((hour - 6) / 12) * Math.PI; // 0 at 06:00, PI at 18:00.
+        var elev = (hour >= 6 && hour <= 18) ? Math.sin(ang) : -0.25;
+        var day = Math.max(0, Math.min(1, elev * 1.25));
+        var night = 1 - day;
+        // Warm band peaks when the sun is near the horizon (dawn / dusk).
+        var warm = elev > 0 ? Math.max(0, 1 - Math.abs(elev - 0.12) / 0.32) : 0;
+
+        var sunDir = new THREE.Vector3(
+            Math.cos(ang), Math.max(0.06, Math.sin(ang)), -0.35
+        ).normalize();
+
+        var haze = new THREE.Color(this.palette.haze);
+        var skyNight = new THREE.Color(0x05070f).lerp(haze, 0.5);
+        var horizonNight = new THREE.Color(0x0b1222).lerp(haze, 0.6);
+        var skyDay = new THREE.Color(0x8fb2d4);
+        var horizonDay = new THREE.Color(0xccd7dd);
+        var dusk = new THREE.Color(0xff8a4d);
+
+        var skyTop = skyNight.clone().lerp(skyDay, day);
+        var horizon = horizonNight.clone().lerp(horizonDay, day).lerp(dusk, warm * 0.6);
+
+        var sunWarm = new THREE.Color(0xfff2d8).lerp(new THREE.Color(0xff9550), warm);
+        var moon = new THREE.Color(0x93b0ff);
+
+        return {
+            hour: hour, day: day, night: night, warm: warm, sunDir: sunDir,
+            skyTop: skyTop, horizon: horizon,
+            sunColor: day > 0.03 ? sunWarm : moon,
+            sunIntensity: 0.12 + day * 1.2,
+            hemiIntensity: 0.28 + day * 0.72,
+            fog: horizon.clone(),
+            fogDensity: 0.011 + day * 0.006 + warm * 0.006,
+            neon: 0.3 + night * 0.9, // Neon accent strength.
+            windowEmissive: 0.05 + night * 1.25, // Lit-window glow (near off by day).
+            adOpacity: 0.32 + night * 0.5, // Holographic ad strength.
+            starOpacity: Math.max(0, night - 0.35)
+        };
+    };
+
+    /**
+     * Add the sun (or moon), a hazy sky fill and a soft opposite fill light,
+     * all coloured and scaled for the current time of day.
+     */
+    Cyberspace.prototype.buildLights = function() {
+        var THREE = this.THREE;
+        var d = this.day;
+
+        var hemi = new THREE.HemisphereLight(
+            d.skyTop.getHex(), new THREE.Color(0x3a3d44).lerp(d.horizon, 0.4).getHex(),
+            d.hemiIntensity
+        );
+        this.scene.add(hemi);
+
+        var sun = new THREE.DirectionalLight(d.sunColor.getHex(), d.sunIntensity);
+        sun.position.copy(d.sunDir).multiplyScalar(220);
+        this.scene.add(sun);
+
+        // A fill from the opposite side so shadowed faces keep some form.
+        var fill = new THREE.DirectionalLight(d.horizon.getHex(), 0.25 + d.day * 0.25);
+        fill.position.set(-d.sunDir.x * 140, 50, -d.sunDir.z * 140 + 60);
+        this.scene.add(fill);
+    };
+
+    /**
      * Build the world around the streets: the wet neon ground, a smoggy sky
      * with a low corporate moon, the corporate mega-building skyline, elevated
      * highways over shadowed vertical slums, giant holographic ads and distant
@@ -198,53 +284,54 @@ define('format_mnemo/vr', [], function() {
         var primary = this.palette.primary;
         var secondary = this.palette.secondary;
         var dense = this.config.environment === 'cyberspace';
+        var d = this.day;
+
+        // Sun / moon and sky fill, so lit materials read as real volumes.
+        this.buildLights();
 
         if (this.config.environment !== 'void') {
-            // Wet, near-black ground so the neon reads as reflected light. A
-            // faint grid gives the surface scale without stealing contrast.
+            // Wet asphalt: a lit, slightly reflective ground that catches the
+            // sun by day and the neon by night.
             var ground = new THREE.Mesh(
-                new THREE.PlaneGeometry(1200, 1200),
-                new THREE.MeshBasicMaterial({color: 0x020306})
+                new THREE.PlaneGeometry(1400, 1400),
+                new THREE.MeshStandardMaterial({
+                    color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
+                })
             );
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = -0.02;
             this.scene.add(ground);
 
+            // Faint kerb grid; a neon accent, so it fades out in daylight.
             var grid = new THREE.GridHelper(600, 240, primary, secondary);
-            grid.material.opacity = 0.18;
+            grid.material.opacity = 0.05 + d.night * 0.14;
             grid.material.transparent = true;
             this.scene.add(grid);
-
-            if (dense) {
-                var ceiling = new THREE.GridHelper(600, 120, secondary, secondary);
-                ceiling.material.opacity = 0.06;
-                ceiling.material.transparent = true;
-                ceiling.position.y = 60;
-                this.scene.add(ceiling);
-            }
         }
 
-        // Low corporate moon on the horizon, and a soft horizon glow.
+        // Gradient sky dome and the sun/moon disc.
         this.buildSky();
 
-        // Smog particles / distant lights.
-        var count = this.config.environment === 'void' ? 900 : 1600;
-        var positions = new Float32Array(count * 3);
-        for (var i = 0; i < count; i++) {
-            var r = 140 + Math.random() * 220;
-            var theta = Math.random() * Math.PI * 2;
-            var phi = Math.acos(2 * Math.random() - 1);
-            positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-            positions[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6;
-            positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+        // Smog particles / stars, only really visible at night.
+        if (d.starOpacity > 0.01) {
+            var count = this.config.environment === 'void' ? 900 : 1400;
+            var positions = new Float32Array(count * 3);
+            for (var i = 0; i < count; i++) {
+                var r = 140 + Math.random() * 220;
+                var theta = Math.random() * Math.PI * 2;
+                var phi = Math.acos(2 * Math.random() - 1);
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6;
+                positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+            }
+            var geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            var stars = new THREE.Points(geo, new THREE.PointsMaterial({
+                color: primary, size: 0.6, sizeAttenuation: true,
+                transparent: true, opacity: d.starOpacity, fog: false
+            }));
+            this.scene.add(stars);
         }
-        var geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        var stars = new THREE.Points(geo, new THREE.PointsMaterial({
-            color: primary, size: 0.6, sizeAttenuation: true,
-            transparent: true, opacity: 0.6
-        }));
-        this.scene.add(stars);
 
         // The full city skyline belongs to Cyberspace only. Grid stays a clean,
         // flat data-plane (just the lit ground and the streets), and Void keeps
@@ -263,28 +350,54 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * A low, hazy corporate moon and a bleed of horizon light. Purely
-     * atmospheric; not interactive.
+     * A gradient sky dome (horizon to zenith) and the sun or moon disc, placed
+     * and coloured for the current time of day.
      */
     Cyberspace.prototype.buildSky = function() {
         var THREE = this.THREE;
+        var d = this.day;
+
+        // Vertical gradient dome: horizon colour at the bottom, sky at the top.
         var canvas = document.createElement('canvas');
-        canvas.width = 256;
+        canvas.width = 8;
         canvas.height = 256;
         var ctx = canvas.getContext('2d');
-        var g = ctx.createRadialGradient(128, 128, 10, 128, 128, 128);
-        g.addColorStop(0, 'rgba(255,240,220,0.95)');
-        g.addColorStop(0.35, 'rgba(255,190,150,0.45)');
-        g.addColorStop(1, 'rgba(255,120,80,0)');
+        var g = ctx.createLinearGradient(0, 256, 0, 0);
+        g.addColorStop(0, '#' + d.horizon.getHexString());
+        g.addColorStop(0.45, '#' + d.horizon.clone().lerp(d.skyTop, 0.5).getHexString());
+        g.addColorStop(1, '#' + d.skyTop.getHexString());
         ctx.fillStyle = g;
-        ctx.fillRect(0, 0, 256, 256);
+        ctx.fillRect(0, 0, 8, 256);
         var tex = new THREE.CanvasTexture(canvas);
-        var moon = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: tex, transparent: true, depthWrite: false, opacity: 0.9
+        var dome = new THREE.Mesh(
+            new THREE.SphereGeometry(600, 24, 16),
+            new THREE.MeshBasicMaterial({
+                map: tex, side: THREE.BackSide, depthWrite: false, fog: false
+            })
+        );
+        this.scene.add(dome);
+
+        // The sun (or moon) disc with a soft halo.
+        var disc = document.createElement('canvas');
+        disc.width = 128;
+        disc.height = 128;
+        var dctx = disc.getContext('2d');
+        var col = d.sunColor;
+        var rgb = Math.round(col.r * 255) + ',' + Math.round(col.g * 255) + ',' + Math.round(col.b * 255);
+        var rg = dctx.createRadialGradient(64, 64, 4, 64, 64, 64);
+        rg.addColorStop(0, 'rgba(' + rgb + ',1)');
+        rg.addColorStop(0.25, 'rgba(' + rgb + ',0.8)');
+        rg.addColorStop(1, 'rgba(' + rgb + ',0)');
+        dctx.fillStyle = rg;
+        dctx.fillRect(0, 0, 128, 128);
+        var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(disc), transparent: true,
+            depthWrite: false, fog: false, opacity: 0.95
         }));
-        moon.scale.set(90, 90, 1);
-        moon.position.set(-120, 70, -320);
-        this.scene.add(moon);
+        var size = 60 + d.day * 40;
+        sprite.scale.set(size, size, 1);
+        sprite.position.copy(d.sunDir).multiplyScalar(480);
+        this.scene.add(sprite);
     };
 
     /**
@@ -296,43 +409,102 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} rows Approximate window rows.
      * @return {Object} Three.CanvasTexture.
      */
-    Cyberspace.prototype.windowTexture = function(style, cols, rows) {
-        var key = 'win_' + style.face + '_' + style.lit + '_' + cols + 'x' + rows;
+    Cyberspace.prototype.facadeTextures = function(style, cols, rows) {
+        var key = 'fac_' + style.body + '_' + style.lit + '_' + cols + 'x' + rows;
         if (this.texCache[key]) {
             return this.texCache[key];
         }
         var THREE = this.THREE;
-        var canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 256;
-        var ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#' + ('000000' + style.face.toString(16)).slice(-6);
-        ctx.fillRect(0, 0, 128, 256);
+        var w = 128;
+        var h = 256;
+        var cw = w / cols;
+        var ch = h / rows;
+        var pad = Math.min(cw, ch) * 0.2;
 
-        var lit = '#' + ('000000' + style.lit.toString(16)).slice(-6);
-        var cw = 128 / cols;
-        var ch = 256 / rows;
-        var pad = Math.min(cw, ch) * 0.22;
+        // Surface map: lit concrete/steel with panel lines and darker window
+        // recesses, so the facade reads as a real material under the sun.
+        var mc = document.createElement('canvas');
+        mc.width = w;
+        mc.height = h;
+        var m = mc.getContext('2d');
+        var base = new THREE.Color(style.body);
+        m.fillStyle = '#' + base.getHexString();
+        m.fillRect(0, 0, w, h);
+        // Subtle concrete mottling.
+        for (var s = 0; s < 240; s++) {
+            var shade = (Math.random() - 0.5) * 0.22;
+            m.fillStyle = 'rgba(' + (shade < 0 ? '0,0,0,' : '255,255,255,') + Math.abs(shade).toFixed(3) + ')';
+            m.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+        }
+        // Windows read as cool dark glass on the surface map (day), and only
+        // glow via the emissive map (night).
+        var recess = base.clone().multiplyScalar(0.4).lerp(new THREE.Color(0x0e141d), 0.6);
+        m.strokeStyle = base.clone().multiplyScalar(0.55).getStyle();
+        m.lineWidth = 1;
+
+        // Emissive map: black, with only the lit windows glowing.
+        var ec = document.createElement('canvas');
+        ec.width = w;
+        ec.height = h;
+        var e = ec.getContext('2d');
+        e.fillStyle = '#000000';
+        e.fillRect(0, 0, w, h);
+        var lit = new THREE.Color(style.lit);
+
         for (var y = 0; y < rows; y++) {
             for (var x = 0; x < cols; x++) {
-                var on = Math.random() < style.density;
-                if (!on) {
-                    continue;
+                var wx = x * cw + pad;
+                var wy = y * ch + pad;
+                var ww = cw - pad * 2;
+                var wh = ch - pad * 2;
+                // Window recess on the surface map.
+                m.fillStyle = '#' + recess.getHexString();
+                m.fillRect(wx, wy, ww, wh);
+                m.strokeRect(x * cw, y * ch, cw, ch);
+                // Some windows are lit (emissive).
+                if (Math.random() < style.density) {
+                    var dim = style.wireframe && Math.random() < 0.5;
+                    e.globalAlpha = dim ? 0.4 : 1;
+                    e.fillStyle = '#' + lit.getHexString();
+                    e.fillRect(wx, wy, ww, wh);
                 }
-                // Entropism has broken, dim and mismatched panes.
-                var dim = style.wireframe && Math.random() < 0.5;
-                ctx.globalAlpha = dim ? 0.3 : 0.85;
-                ctx.shadowColor = lit;
-                ctx.shadowBlur = dim ? 0 : 6;
-                ctx.fillStyle = lit;
-                ctx.fillRect(x * cw + pad, y * ch + pad, cw - pad * 2, ch - pad * 2);
             }
         }
-        ctx.globalAlpha = 1;
-        var tex = new THREE.CanvasTexture(canvas);
-        tex.anisotropy = 4;
-        this.texCache[key] = tex;
-        return tex;
+        e.globalAlpha = 1;
+
+        var map = new THREE.CanvasTexture(mc);
+        map.anisotropy = 4;
+        if (map.colorSpace !== undefined) {
+            map.colorSpace = THREE.SRGBColorSpace;
+        }
+        var emissive = new THREE.CanvasTexture(ec);
+        emissive.anisotropy = 4;
+        var out = {map: map, emissive: emissive};
+        this.texCache[key] = out;
+        return out;
+    };
+
+    /**
+     * A lit building-body material for a style: concrete/steel surface with
+     * windows that glow at night (their emissive strength follows the clock).
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @param {Number} cols Approximate window columns.
+     * @param {Number} rows Approximate window rows.
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.facadeMaterial = function(style, cols, rows) {
+        var THREE = this.THREE;
+        var tex = this.facadeTextures(style, cols, rows);
+        return new THREE.MeshStandardMaterial({
+            color: style.body,
+            map: tex.map,
+            roughness: style.rough,
+            metalness: style.metal,
+            emissive: new THREE.Color(style.lit),
+            emissiveMap: tex.emissive,
+            emissiveIntensity: this.day.windowEmissive
+        });
     };
 
     /**
@@ -354,41 +526,20 @@ define('format_mnemo/vr', [], function() {
             var d = 8 + Math.random() * 16;
             var h = 26 + Math.random() * 60;
 
+            // Lit slab with a wall of windows on every face.
             var body = new THREE.Mesh(
                 new THREE.BoxGeometry(w, h, d),
-                new THREE.MeshBasicMaterial({
-                    color: style.face, transparent: true, opacity: 0.96
-                })
+                this.facadeMaterial(style, 10, 22)
             );
             body.position.set(x, h / 2, z);
             this.scene.add(body);
 
-            // Window wall on the two faces most likely to be seen.
-            var winTex = this.windowTexture(style, 10, 22);
-            var facing = [
-                {rot: 0, off: [0, 0, d / 2 + 0.05]},
-                {rot: side < 0 ? Math.PI / 2 : -Math.PI / 2,
-                    off: [side < 0 ? w / 2 + 0.05 : -w / 2 - 0.05, 0, 0]}
-            ];
-            for (var f = 0; f < facing.length; f++) {
-                var wall = new THREE.Mesh(
-                    new THREE.PlaneGeometry(f === 0 ? w : d, h),
-                    new THREE.MeshBasicMaterial({
-                        map: winTex, transparent: true, opacity: 0.9, depthWrite: false
-                    })
-                );
-                wall.position.set(
-                    x + facing[f].off[0], h / 2, z + facing[f].off[2]
-                );
-                wall.rotation.y = facing[f].rot;
-                this.scene.add(wall);
-            }
-
-            // Crown edge glow and an occasional blinking aviation beacon.
+            // Crown edge glow (a neon accent, so it fades by day) and an
+            // occasional blinking aviation beacon.
             var edges = new THREE.LineSegments(
                 new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
                 new THREE.LineBasicMaterial({
-                    color: style.edge, transparent: true, opacity: 0.5
+                    color: style.edge, transparent: true, opacity: 0.2 + this.day.neon * 0.4
                 })
             );
             edges.position.copy(body.position);
@@ -396,7 +547,8 @@ define('format_mnemo/vr', [], function() {
 
             if (Math.random() < 0.5) {
                 var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
-                    color: 0xff2b4e, transparent: true, depthWrite: false, opacity: 0.9
+                    color: 0xff2b4e, transparent: true, depthWrite: false,
+                    opacity: 0.4 + this.day.neon * 0.55
                 }));
                 beacon.scale.set(1.4, 1.4, 1);
                 beacon.position.set(x, h + 0.6, z);
@@ -465,7 +617,7 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildSlumCluster = function(cx, cz) {
         var THREE = this.THREE;
         var style = STYLES.entropism;
-        var winTex = this.windowTexture(style, 4, 6);
+        var mat = this.facadeMaterial(style, 4, 6);
         var y = 0;
         var boxes = 3 + Math.floor(Math.random() * 4);
         for (var b = 0; b < boxes; b++) {
@@ -474,24 +626,10 @@ define('format_mnemo/vr', [], function() {
             var h = 2 + Math.random() * 2.4;
             var jx = (Math.random() - 0.5) * 2.2;
             var jz = (Math.random() - 0.5) * 2.2;
-            var box = new THREE.Mesh(
-                new THREE.BoxGeometry(w, h, d),
-                new THREE.MeshBasicMaterial({
-                    color: style.face, transparent: true, opacity: 0.95
-                })
-            );
+            var box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
             box.position.set(cx + jx, y + h / 2, cz + jz);
             box.rotation.y = Math.random() * 0.5;
             this.scene.add(box);
-            var face = new THREE.Mesh(
-                new THREE.PlaneGeometry(w, h),
-                new THREE.MeshBasicMaterial({
-                    map: winTex, transparent: true, opacity: 0.7, depthWrite: false
-                })
-            );
-            face.position.set(cx + jx, y + h / 2, cz + jz + d / 2 + 0.03);
-            face.rotation.y = box.rotation.y;
-            this.scene.add(face);
             y += h * (0.7 + Math.random() * 0.2);
         }
     };
@@ -510,9 +648,10 @@ define('format_mnemo/vr', [], function() {
             var vertical = Math.random() < 0.5;
             var w = vertical ? 6 : 16;
             var h = vertical ? 20 : 9;
+            var base = this.day.adOpacity;
             var mat = new THREE.MeshBasicMaterial({
-                map: tex, transparent: true, opacity: 0.85,
-                depthWrite: false, blending: THREE.AdditiveBlending
+                map: tex, transparent: true, opacity: base,
+                depthWrite: false, blending: THREE.AdditiveBlending, fog: false
             });
             var ad = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
             var side = Math.random() < 0.5 ? -1 : 1;
@@ -523,7 +662,7 @@ define('format_mnemo/vr', [], function() {
             );
             ad.lookAt(0, ad.position.y, ad.position.z + 10);
             this.scene.add(ad);
-            this.ads.push({mat: mat, base: 0.85, phase: Math.random() * 6.28});
+            this.ads.push({mat: mat, base: base, phase: Math.random() * 6.28});
         }
     };
 
@@ -580,14 +719,16 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildBeams = function() {
         var THREE = this.THREE;
+        // Search beams only cut through the dark, so they fade out by day.
+        var opacity = 0.02 + this.day.night * 0.06;
         for (var i = 0; i < 8; i++) {
             var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
             var beam = new THREE.Mesh(
                 new THREE.CylinderGeometry(0.15, 1.6, 90, 6, 1, true),
                 new THREE.MeshBasicMaterial({
-                    color: colour, transparent: true, opacity: 0.06,
+                    color: colour, transparent: true, opacity: opacity,
                     side: THREE.DoubleSide, depthWrite: false,
-                    blending: THREE.AdditiveBlending
+                    blending: THREE.AdditiveBlending, fog: false
                 })
             );
             var side = Math.random() < 0.5 ? -1 : 1;
@@ -853,13 +994,11 @@ define('format_mnemo/vr', [], function() {
         var d = style.footprint[1];
         var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
 
-        // Body: a dark solid mass with a crisp neon edge outline.
+        // Body: a lit concrete/steel mass whose windows glow at night, with a
+        // crisp neon edge outline that reads strongest after dark.
         var body = new THREE.Mesh(
             new THREE.BoxGeometry(w, h, d),
-            new THREE.MeshBasicMaterial({
-                color: style.face, transparent: true, opacity: style.faceOpacity,
-                wireframe: false
-            })
+            this.facadeMaterial(style, 6, Math.max(4, Math.round(h / 2)))
         );
         body.position.y = h / 2;
         group.add(body);
@@ -867,7 +1006,7 @@ define('format_mnemo/vr', [], function() {
         var edges = new THREE.LineSegments(
             new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
             new THREE.LineBasicMaterial({
-                color: style.edge, transparent: true, opacity: 0.85
+                color: style.edge, transparent: true, opacity: 0.3 + this.day.neon * 0.55
             })
         );
         edges.position.y = h / 2;
@@ -878,23 +1017,13 @@ define('format_mnemo/vr', [], function() {
             var rust = new THREE.Mesh(
                 new THREE.BoxGeometry(w * 1.02, h * 1.01, d * 1.02),
                 new THREE.MeshBasicMaterial({
-                    color: style.glow, wireframe: true, transparent: true, opacity: 0.16
+                    color: style.glow, wireframe: true, transparent: true,
+                    opacity: 0.08 + this.day.neon * 0.12
                 })
             );
             rust.position.y = h / 2;
             group.add(rust);
         }
-
-        // Window wall on the facade (the +z face, which is turned to the street).
-        var winTex = this.windowTexture(style, 6, Math.max(4, Math.round(h / 2)));
-        var wall = new THREE.Mesh(
-            new THREE.PlaneGeometry(w * 0.96, h * 0.96),
-            new THREE.MeshBasicMaterial({
-                map: winTex, transparent: true, opacity: 0.85, depthWrite: false
-            })
-        );
-        wall.position.set(0, h / 2, d / 2 + 0.04);
-        group.add(wall);
 
         // Style-specific silhouette and roofline.
         this.dressRoof(group, style, w, d, h);
@@ -990,7 +1119,9 @@ define('format_mnemo/vr', [], function() {
             for (var i = 0; i < 3; i++) {
                 var junk = new THREE.Mesh(
                     new THREE.BoxGeometry(0.6 + Math.random(), 0.8 + Math.random(), 0.6 + Math.random()),
-                    new THREE.MeshBasicMaterial({color: style.face})
+                    new THREE.MeshStandardMaterial({
+                        color: style.body, roughness: 0.9, metalness: 0.3
+                    })
                 );
                 junk.position.set(
                     (Math.random() - 0.5) * w * 0.7, h + 0.4,
@@ -1252,12 +1383,16 @@ define('format_mnemo/vr', [], function() {
             controller.addEventListener('selectend', function(e) {
                 self.onSelectEnd(e.target);
             });
-            // Squeeze acts as an explicit "thrust" for controllers that map it.
-            controller.addEventListener('squeezestart', function(e) {
-                e.target.userData.selecting = true;
+            // Remember which physical input source (and hand) drives this
+            // controller, so the gesture manager can read its thumbstick,
+            // buttons and haptics and tell left from right.
+            controller.addEventListener('connected', function(e) {
+                e.target.userData.inputSource = e.data;
+                e.target.userData.handedness = e.data && e.data.handedness;
             });
-            controller.addEventListener('squeezeend', function(e) {
-                e.target.userData.selecting = false;
+            controller.addEventListener('disconnected', function(e) {
+                e.target.userData.inputSource = null;
+                e.target.userData.handedness = null;
             });
 
             // A small glowing marker so the hand/controller is visible.
@@ -1288,6 +1423,10 @@ define('format_mnemo/vr', [], function() {
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
         if (target && target.userData && target.userData.url) {
+            // A firm confirmation buzz before navigating away.
+            if (this.gestures) {
+                this.gestures.pulse(controller.userData.handedness, 0.6, 40);
+            }
             this.open(target.userData.url);
         }
     };
@@ -1512,11 +1651,25 @@ define('format_mnemo/vr', [], function() {
         }
 
         if (presenting) {
+            // Measure how far the rig travels this frame so the comfort
+            // vignette can respond to real motion from every locomotion path.
+            this.tmp2.copy(this.player.position);
+            this.brake = false;
+            if (this.gestures) {
+                this.gestures.update(dt);
+            }
             this.updateXrLocomotion(dt);
             this.updateXrHighlight();
+            if (this.gestures) {
+                var travelled = this.player.position.distanceTo(this.tmp2);
+                this.gestures.updateVignette(travelled / Math.max(dt, 0.0001), dt);
+            }
         } else {
             this.updateDesktop(dt);
             this.updateDesktopHighlight();
+            if (this.gestures) {
+                this.gestures.updateVignette(0, dt);
+            }
         }
 
         this.clampToWorld();
@@ -1547,6 +1700,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.updateXrLocomotion = function(dt) {
         var THREE = this.THREE;
         var speed = 6;
+        if (this.brake) {
+            // An open palm this frame is an explicit stop; hold position.
+            return;
+        }
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {
@@ -1641,6 +1798,10 @@ define('format_mnemo/vr', [], function() {
             mesh.scale.setScalar(1.12);
             mesh.userData.material.color.setHex(0xffffff);
             this.renderer.domElement.style.cursor = 'pointer';
+            // A light tick when a node first lights up under the pointer/ray.
+            if (this.gestures && this.renderer.xr.isPresenting) {
+                this.gestures.pulse(null, 0.3, 18);
+            }
         } else {
             this.renderer.domElement.style.cursor = 'grab';
         }
@@ -1652,6 +1813,475 @@ define('format_mnemo/vr', [], function() {
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h, false);
+    };
+
+    /**
+     * Central manager for immersive (XR) gestures. It owns the one place where
+     * raw input - thumbsticks, buttons and haptics on controllers, and tracked
+     * hand joints - is read each frame and mapped to actions, plus the comfort
+     * features (snap turn and a motion vignette).
+     *
+     * Input map:
+     *   - Thumbstick (either hand): glide, head-relative.
+     *   - Right thumbstick X: snap-turn in fixed steps.
+     *   - Grip button / closed fist: "grab the world" and pull yourself along.
+     *   - Open palm: brake - an explicit stop.
+     *   - Trigger / pinch: open the node you are pointing at (handled by the
+     *     existing select events; this class only adds the confirming haptic).
+     *   - Both thumbstick clicks together: recenter to the avenue mouth.
+     *
+     * Everything is feature-detected, so controller-only, hand-only and plain
+     * desktop sessions all degrade gracefully.
+     *
+     * @param {Object} cs The owning Cyberspace instance.
+     */
+    function GestureManager(cs) {
+        var THREE = cs.THREE;
+        this.cs = cs;
+        this.THREE = THREE;
+        this.renderer = cs.renderer;
+        this.player = cs.player;
+        this.camera = cs.camera;
+
+        // Tunables.
+        this.deadzone = 0.15; // Thumbstick centre deadzone.
+        this.glideSpeed = 4.5; // Metres per second at full stick.
+        this.snapAngle = Math.PI / 6; // 30 degrees per snap.
+        this.snapThreshold = 0.7; // Stick X magnitude that triggers a snap.
+        this.snapRelease = 0.3; // Fall back below this to re-arm the snap.
+        this.pinchDist = 0.025; // Not used directly (pinch = select event).
+        this.fistDist = 0.075; // Fingertip-to-wrist under this reads as a fist.
+        this.palmDist = 0.13; // Fingertip-to-wrist over this reads as open.
+
+        // State.
+        this.snapArmed = true; // Debounce so one flick is one snap.
+        this.recenterArmed = true; // Debounce the recenter chord.
+        this.grabbing = false; // Mid grab-the-world pull.
+        this.grabCount = 0; // How many grips were active last frame.
+        this.grabAnchor = new THREE.Vector3();
+        this.vignetteOpacity = 0; // Smoothed current vignette strength.
+        this.home = new THREE.Vector3(0, 0, 12); // Avenue mouth.
+
+        // Scratch vectors, reused to avoid per-frame allocation.
+        this.vForward = new THREE.Vector3();
+        this.vRight = new THREE.Vector3();
+        this.vSum = new THREE.Vector3();
+        this.vDelta = new THREE.Vector3();
+        this.vTip = new THREE.Vector3();
+        this.up = new THREE.Vector3(0, 1, 0);
+        this.handWrist = [new THREE.Vector3(), new THREE.Vector3()];
+        this.ctrlPos = [new THREE.Vector3(), new THREE.Vector3()];
+
+        this.hands = [];
+        this.buildHands();
+        this.buildVignette();
+    }
+
+    /**
+     * Attach the two tracked-hand objects so their joints update each frame.
+     */
+    GestureManager.prototype.buildHands = function() {
+        for (var i = 0; i < 2; i++) {
+            var hand = this.renderer.xr.getHand(i);
+            this.player.add(hand);
+            this.hands.push(hand);
+        }
+    };
+
+    /**
+     * Build the comfort vignette: a soft dark ring fixed to the camera that
+     * fades in with motion to shrink the field of view and reduce sim sickness.
+     */
+    GestureManager.prototype.buildVignette = function() {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        var ctx = canvas.getContext('2d');
+        var g = ctx.createRadialGradient(128, 128, 128 * 0.5, 128, 128, 128);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(0.7, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,0,0,1)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 256, 256);
+
+        var tex = new THREE.CanvasTexture(canvas);
+        var mat = new THREE.MeshBasicMaterial({
+            map: tex, transparent: true, opacity: 0,
+            depthTest: false, depthWrite: false
+        });
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat);
+        mesh.position.set(0, 0, -1);
+        mesh.renderOrder = 999;
+        mesh.frustumCulled = false;
+        this.camera.add(mesh);
+        this.vignette = mesh;
+        this.vignetteMat = mat;
+    };
+
+    /**
+     * Read and act on all XR input for this frame.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.update = function(dt) {
+        var session = this.renderer.xr.getSession();
+        if (!session) {
+            return;
+        }
+
+        // Reset the grab accumulator, then gather input from hands and
+        // controllers. An open palm on either hand brakes the whole frame.
+        this.vSum.set(0, 0, 0);
+        var hands = this.readHandGestures();
+        this.cs.brake = hands.palm;
+        var ctrl = this.readControllers();
+        var grabCount = hands.grabCount + ctrl.grabCount;
+
+        this.handleRecenter(ctrl.thumbClicks);
+        this.handleSnapTurn(ctrl.turnX);
+
+        if (this.cs.brake) {
+            // Braking cancels translation this frame; a fresh grab must re-anchor.
+            this.grabbing = false;
+            return;
+        }
+
+        this.applyGrab(grabCount);
+        this.applyGlide(ctrl.glideX, ctrl.glideZ, dt);
+    };
+
+    /**
+     * Scan both tracked hands for the brake (open palm) and grab (fist)
+     * gestures, accumulating fist wrist positions into the grab sum.
+     *
+     * @return {Object} {palm, grabCount}.
+     */
+    GestureManager.prototype.readHandGestures = function() {
+        var palm = false;
+        var grabCount = 0;
+        for (var h = 0; h < this.hands.length; h++) {
+            var g = this.handGesture(this.hands[h], h);
+            if (!g) {
+                continue;
+            }
+            if (g.palm) {
+                palm = true;
+            }
+            if (g.fist) {
+                this.vSum.add(this.handWrist[h]);
+                grabCount++;
+            }
+        }
+        return {palm: palm, grabCount: grabCount};
+    };
+
+    /**
+     * Read both controllers' thumbsticks, thumbstick clicks and grip buttons,
+     * accumulating grip world positions into the grab sum.
+     *
+     * @return {Object} {glideX, glideZ, turnX, thumbClicks, grabCount}.
+     */
+    GestureManager.prototype.readControllers = function() {
+        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0};
+        var controllers = this.cs.controllers;
+        for (var c = 0; c < controllers.length; c++) {
+            var ctrl = controllers[c];
+            var src = ctrl.userData.inputSource;
+            var gp = src && src.gamepad;
+            if (!gp) {
+                continue;
+            }
+            var stick = this.readStick(gp);
+            // Either stick glides forward/back; the right stick's X is reserved
+            // for snap-turning, while the left (or an unhanded) stick's X
+            // strafes. This keeps the "either hand glides" mapping true, and a
+            // right-only controller can still both glide and turn.
+            out.glideZ += stick.y;
+            if (src.handedness === 'right') {
+                out.turnX = stick.x;
+            } else {
+                out.glideX += stick.x;
+            }
+            if (this.buttonPressed(gp, 3)) {
+                out.thumbClicks++;
+            }
+            if (this.buttonPressed(gp, 1)) { // Grip.
+                ctrl.getWorldPosition(this.ctrlPos[c]);
+                this.vSum.add(this.ctrlPos[c]);
+                out.grabCount++;
+            }
+        }
+        return out;
+    };
+
+    /**
+     * Recenter when both thumbsticks are clicked together, debounced so the
+     * chord fires once per press.
+     *
+     * @param {Number} thumbClicks How many thumbsticks are currently clicked.
+     */
+    GestureManager.prototype.handleRecenter = function(thumbClicks) {
+        if (thumbClicks >= 2 && this.recenterArmed) {
+            this.recenter();
+            this.recenterArmed = false;
+        } else if (thumbClicks === 0) {
+            this.recenterArmed = true;
+        }
+    };
+
+    /**
+     * Snap-turn on a firm right-stick flick, debounced so one flick is one snap.
+     *
+     * @param {Number} turnX The right thumbstick X value.
+     */
+    GestureManager.prototype.handleSnapTurn = function(turnX) {
+        if (Math.abs(turnX) > this.snapThreshold && this.snapArmed) {
+            this.rotatePlayer(turnX < 0 ? this.snapAngle : -this.snapAngle);
+            this.snapArmed = false;
+        } else if (Math.abs(turnX) < this.snapRelease) {
+            this.snapArmed = true;
+        }
+    };
+
+    /**
+     * Grab-the-world pull: keep the average grabbed point under the hand(s),
+     * which moves the player the opposite way.
+     *
+     * @param {Number} grabCount How many hands/controllers are gripping.
+     */
+    GestureManager.prototype.applyGrab = function(grabCount) {
+        if (grabCount <= 0) {
+            this.grabbing = false;
+            this.grabCount = 0;
+            return;
+        }
+        this.vSum.multiplyScalar(1 / grabCount);
+        // Starting a grab, or changing how many hands are gripping, re-anchors:
+        // the averaged point jumps when a grip is added or released, so a delta
+        // against the old anchor would fling the rig even if no hand moved.
+        if (!this.grabbing || grabCount !== this.grabCount) {
+            this.grabbing = true;
+            this.grabCount = grabCount;
+            this.grabAnchor.copy(this.vSum);
+            return;
+        }
+        this.vDelta.subVectors(this.vSum, this.grabAnchor);
+        this.player.position.sub(this.vDelta);
+        // The grabbed objects moved with the rig; predict their new pose.
+        this.grabAnchor.copy(this.vSum).sub(this.vDelta);
+    };
+
+    /**
+     * Thumbstick glide, head-relative and level with the ground.
+     *
+     * @param {Number} glideX Strafe axis in [-1, 1].
+     * @param {Number} glideZ Forward axis in [-1, 1] (stick up is negative).
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.applyGlide = function(glideX, glideZ, dt) {
+        if (glideX === 0 && glideZ === 0) {
+            return;
+        }
+        this.camera.getWorldDirection(this.vForward);
+        this.vForward.y = 0;
+        if (this.vForward.lengthSq() < 1e-4) {
+            this.vForward.set(0, 0, -1);
+        }
+        this.vForward.normalize();
+        this.vRight.crossVectors(this.vForward, this.up).normalize();
+        var step = this.glideSpeed * dt;
+        this.player.position.addScaledVector(this.vForward, -glideZ * step);
+        this.player.position.addScaledVector(this.vRight, glideX * step);
+    };
+
+    /**
+     * Read a thumbstick (or trackpad) pair from a gamepad, with deadzone.
+     *
+     * @param {Object} gp The XR input source gamepad.
+     * @return {Object} {x, y} in the range [-1, 1], centred at 0.
+     */
+    GestureManager.prototype.readStick = function(gp) {
+        var ax = gp.axes || [];
+        // Prefer the thumbstick pair (2,3); fall back to a trackpad (0,1).
+        var x = ax.length > 3 ? ax[2] : (ax[0] || 0);
+        var y = ax.length > 3 ? ax[3] : (ax[1] || 0);
+        if (Math.abs(x) < this.deadzone) {
+            x = 0;
+        }
+        if (Math.abs(y) < this.deadzone) {
+            y = 0;
+        }
+        return {x: x, y: y};
+    };
+
+    /**
+     * Whether a gamepad button index is currently pressed.
+     *
+     * @param {Object} gp The XR input source gamepad.
+     * @param {Number} index The button index.
+     * @return {Boolean} True when that button reports pressed.
+     */
+    GestureManager.prototype.buttonPressed = function(gp, index) {
+        var b = gp.buttons && gp.buttons[index];
+        return !!(b && b.pressed);
+    };
+
+    /**
+     * Classify a tracked hand as a fist and/or an open palm, and record its
+     * wrist world position for grab-the-world locomotion.
+     *
+     * @param {Object} hand The tracked-hand object from the XR manager.
+     * @param {Number} index The hand index (0 or 1), selecting a scratch slot.
+     * @return {Object|null} {fist, palm} or null when the hand is not tracked.
+     */
+    GestureManager.prototype.handGesture = function(hand, index) {
+        // When the hand disconnects or the session is hidden, the XR manager
+        // hides the hand group but can leave each joint's last `visible` flag
+        // set. Rejecting a hidden hand stops a stale open-palm pose from
+        // latching the brake on after a switch back to controllers.
+        if (!hand || hand.visible === false) {
+            return null;
+        }
+        var wrist = this.jointPos(hand, 'wrist', this.handWrist[index]);
+        if (!wrist) {
+            return null;
+        }
+        var tips = [
+            'index-finger-tip', 'middle-finger-tip',
+            'ring-finger-tip', 'pinky-finger-tip'
+        ];
+        var near = 0;
+        var far = 0;
+        var count = 0;
+        for (var i = 0; i < tips.length; i++) {
+            var p = this.jointPos(hand, tips[i], this.vTip);
+            if (!p) {
+                continue;
+            }
+            count++;
+            var d = p.distanceTo(wrist);
+            if (d < this.fistDist) {
+                near++;
+            } else if (d > this.palmDist) {
+                far++;
+            }
+        }
+        if (count < 3) {
+            return null;
+        }
+        return {fist: near >= count, palm: far >= count};
+    };
+
+    /**
+     * World position of a named hand joint, or null when it is not tracked.
+     *
+     * @param {Object} hand The tracked-hand object.
+     * @param {String} name The joint name (e.g. "index-finger-tip").
+     * @param {Object} out A Three.Vector3 to write into.
+     * @return {Object|null} The out vector, or null when unavailable.
+     */
+    GestureManager.prototype.jointPos = function(hand, name, out) {
+        var joints = hand && hand.joints;
+        var j = joints && joints[name];
+        if (!j || j.visible === false) {
+            return null;
+        }
+        return j.getWorldPosition(out);
+    };
+
+    /**
+     * Rotate the player rig around the head by an angle, so a snap turn pivots
+     * about the viewer rather than the world origin.
+     *
+     * @param {Number} angle Radians to rotate (positive is left).
+     */
+    GestureManager.prototype.rotatePlayer = function(angle) {
+        var pivot = this.camera.getWorldPosition(this.vForward);
+        this.player.position.sub(pivot);
+        this.player.position.applyAxisAngle(this.up, angle);
+        this.player.position.add(pivot);
+        this.player.rotateOnWorldAxis(this.up, angle);
+        // A turn is motion too; give the vignette a brief pulse.
+        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.4);
+    };
+
+    /**
+     * Put the viewer at the avenue mouth facing down the street. In a
+     * room-scale session the headset sits at an offset and heading within the
+     * rig, so we compensate for the current camera pose rather than just
+     * zeroing the rig - otherwise the view lands at home plus the physical
+     * offset, still facing the physical heading.
+     */
+    GestureManager.prototype.recenter = function() {
+        var player = this.player;
+        player.position.set(0, 0, 0);
+        player.rotation.set(0, 0, 0);
+        player.updateMatrixWorld(true);
+
+        // Turn the rig so the camera's world heading faces down the avenue (-Z).
+        this.camera.getWorldDirection(this.vForward);
+        this.vForward.y = 0;
+        if (this.vForward.lengthSq() > 1e-4) {
+            this.vForward.normalize();
+            var yaw = Math.atan2(this.vForward.x, -this.vForward.z);
+            player.rotateOnWorldAxis(this.up, -yaw);
+            player.updateMatrixWorld(true);
+        }
+
+        // Slide the rig so the camera sits over the avenue mouth on the ground.
+        this.camera.getWorldPosition(this.vRight);
+        player.position.x += this.home.x - this.vRight.x;
+        player.position.z += this.home.z - this.vRight.z;
+        player.position.y = 0;
+
+        this.grabbing = false;
+        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.5);
+        this.pulse(null, 0.5, 40);
+    };
+
+    /**
+     * Fire a short haptic pulse on matching controllers.
+     *
+     * @param {String|null} handedness "left"/"right" to target one hand, or
+     *     null for any controller that supports haptics.
+     * @param {Number} intensity Pulse strength in [0, 1].
+     * @param {Number} ms Duration in milliseconds.
+     */
+    GestureManager.prototype.pulse = function(handedness, intensity, ms) {
+        var controllers = this.cs.controllers;
+        for (var c = 0; c < controllers.length; c++) {
+            var src = controllers[c].userData.inputSource;
+            if (!src || (handedness && src.handedness !== handedness)) {
+                continue;
+            }
+            var gp = src.gamepad;
+            var act = gp && gp.hapticActuators && gp.hapticActuators[0];
+            if (act && act.pulse) {
+                act.pulse(intensity, ms);
+            }
+        }
+    };
+
+    /**
+     * Ease the comfort vignette toward a strength set by the current speed.
+     *
+     * @param {Number} speed Metres per second the rig moved this frame.
+     * @param {Number} dt Delta time in seconds.
+     */
+    GestureManager.prototype.updateVignette = function(speed, dt) {
+        if (!this.vignetteMat) {
+            return;
+        }
+        // Ramp in over the first few m/s, capped so peripheral vision stays.
+        var target = Math.min(0.6, speed * 0.12);
+        // Ease toward the target, and let a turn pulse decay smoothly.
+        var k = Math.min(1, dt * 8);
+        this.vignetteOpacity += (target - this.vignetteOpacity) * k;
+        if (this.vignetteOpacity < 0.01) {
+            this.vignetteOpacity = 0;
+        }
+        this.vignetteMat.opacity = this.vignetteOpacity;
     };
 
     /**
@@ -1733,6 +2363,13 @@ define('format_mnemo/vr', [], function() {
     }
 
     return {
+        // Exposed for the headless tests (tests/webxr): the gesture manager so
+        // its input->action mapping can be driven with scripted input, and the
+        // scene class so a render harness can screenshot it. Not used by the
+        // plugin itself.
+        _GestureManager: GestureManager,
+        _Cyberspace: Cyberspace,
+
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
          *

@@ -140,6 +140,12 @@ final class scene_test extends \advanced_testcase {
         $this->assertArrayHasKey('invertlook', $config);
         $this->assertFalse($config['invertlook']);
 
+        // The site hour drives the day/night cycle; it is a 0-24 float.
+        $this->assertArrayHasKey('hour', $config);
+        $this->assertIsFloat($config['hour']);
+        $this->assertGreaterThanOrEqual(0.0, $config['hour']);
+        $this->assertLessThan(24.0, $config['hour']);
+
         // Find section 1 and confirm the page is present and the label is not.
         $sectionone = null;
         foreach ($config['sections'] as $section) {

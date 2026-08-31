@@ -24,9 +24,18 @@ off).
 - **WebXR / VR headset support** — an *Enter VR* button appears when an
   `immersive-vr` device is available (Quest, other OpenXR headsets via a WebXR
   browser).
-- **Gestural navigation** — point where you want to go and **pinch** (hand
-  tracking) or **squeeze / hold the trigger** to glide through the data-space.
-  Point at a node and pinch to open it.
+- **Gestural navigation** — a single gesture manager maps controller and
+  hand-tracking input to movement:
+  - **Thumbstick** to glide (head-relative), **right thumbstick left/right**
+    to **snap-turn** without physically turning.
+  - **Grip / make a fist** to **grab the world** and pull yourself along the
+    streets; **open your palm** to brake to a stop.
+  - **Pinch** (hand tracking) or **hold the trigger** to glide toward where you
+    point; aim at a node and **pinch / trigger** to open it.
+  - **Click both thumbsticks** together to recenter at the avenue mouth.
+  - A **comfort vignette** narrows your view while you move to reduce motion
+    sickness, and controllers **buzz** when a node lights up and when you open
+    one.
 - **On-screen fallback** — no headset needed. Drag to look, `W`/`S` to fly,
   `A`/`D` to strafe, `R`/`F` (or `Space`) for altitude, and click a node to open
   it. `Shift` to boost.
@@ -39,7 +48,12 @@ off).
   cold **Neo-Militarist** corporate towers; social/communication tools (forum,
   chat, wiki…) as bright plastic **Kitsch** shops; content and reference (page,
   book, resource…) as elite **Neo-Kitsch** pavilions; everything else as
-  survival-era **Entropist** blocks.
+  survival-era **Entropist** blocks. Buildings are lit concrete/steel volumes
+  with window grids that glow after dark.
+- **Day/night cycle** — the scene follows the **Moodle site's clock**: a real
+  sun and sky by day (hazy blue, atmospheric depth), warm light at dawn/dusk,
+  and a dark, neon- and window-lit skyline at night. The neon signs, holo-ads
+  and lit windows intensify as it gets dark.
 - **Accessible list view** — a full, semantic list of every section and activity
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers

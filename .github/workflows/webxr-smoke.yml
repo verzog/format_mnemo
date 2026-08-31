@@ -1,0 +1,38 @@
+name: WebXR gesture smoke test
+
+# Runs the headless gesture smoke test (tests/webxr) that drives the real
+# GestureManager through scripted controller/hand input. Separate from the
+# Moodle CI matrix so it never blocks it.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'amd/src/vr.js'
+      - 'tests/webxr/**'
+      - '.github/workflows/webxr-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: tests/webxr
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: tests/webxr
+        run: npx playwright install --with-deps chromium
+
+      - name: Run gesture smoke test
+        working-directory: tests/webxr
+        run: npm test
