@@ -48,7 +48,12 @@ off).
   cold **Neo-Militarist** corporate towers; social/communication tools (forum,
   chat, wiki…) as bright plastic **Kitsch** shops; content and reference (page,
   book, resource…) as elite **Neo-Kitsch** pavilions; everything else as
-  survival-era **Entropist** blocks.
+  survival-era **Entropist** blocks. Buildings are lit concrete/steel volumes
+  with window grids that glow after dark.
+- **Day/night cycle** — the scene follows the **Moodle site's clock**: a real
+  sun and sky by day (hazy blue, atmospheric depth), warm light at dawn/dusk,
+  and a dark, neon- and window-lit skyline at night. The neon signs, holo-ads
+  and lit windows intensify as it gets dark.
 - **Accessible list view** — a full, semantic list of every section and activity
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers

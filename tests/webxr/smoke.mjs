@@ -156,6 +156,57 @@ const scenarios = [
                 Math.abs(s.rotY) < 1e-6;
             return {pass, detail: `x=${s.x} z=${s.z} rotY=${s.rotY}`};
         }
+    },
+    {
+        name: 'glide: right stick forward also glides (and does not turn)',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, -1];
+            T.frame(c, 0.1);
+            const s = T.state(c);
+            const pass = Math.abs(s.z + 0.45) < 0.02 && Math.abs(s.rotY) < 1e-6;
+            return {pass, detail: `z=${s.z.toFixed(4)} rotY=${s.rotY}`};
+        }
+    },
+    {
+        name: 'grab: adding a second grip re-anchors without a jump',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            const L = c.controllers[0];
+            const R = c.controllers[1];
+            L.userData.inputSource.gamepad.buttons[1].pressed = true;
+            L.position.set(0, 0, 0);
+            T.frame(c, 0.016); // Anchor with one grip.
+            R.userData.inputSource.gamepad.buttons[1].pressed = true;
+            R.position.set(2, 0, 0); // Second grip added; neither hand moved L.
+            T.frame(c, 0.016);
+            const s = T.state(c);
+            const pass = Math.abs(s.x) < 1e-6 && Math.abs(s.z) < 1e-6;
+            return {pass, detail: `x=${s.x.toFixed(4)} z=${s.z.toFixed(4)} (want ~0)`};
+        }
+    },
+    {
+        name: 'brake: a hidden hand is ignored (no stale brake)',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const J = T.joint;
+            const c = T.make();
+            c.hands[0].visible = false;
+            c.hands[0].joints = {
+                'wrist': J(0, 0, 0),
+                'index-finger-tip': J(0, 0.2, 0),
+                'middle-finger-tip': J(0.02, 0.21, 0),
+                'ring-finger-tip': J(0.04, 0.2, 0),
+                'pinky-finger-tip': J(0.06, 0.19, 0)
+            };
+            c.controllers[0].userData.inputSource.gamepad.axes = [0, 0, 0, -1];
+            T.frame(c, 0.1);
+            const s = T.state(c);
+            const pass = s.brake === false && Math.abs(s.z + 0.45) < 0.02;
+            return {pass, detail: `brake=${s.brake} z=${s.z.toFixed(4)}`};
+        }
     }
 ];
 

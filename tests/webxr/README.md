@@ -55,3 +55,17 @@ environment that pre-installs Chromium elsewhere, point at it:
 ```sh
 PW_CHROMIUM=/path/to/chromium npm test
 ```
+
+## Reviewing the look (manual)
+
+`render.html` + `screenshot.mjs` render the *real* scene full-window with
+sample course data and write PNGs, so the visuals and the **day/night cycle**
+can be eyeballed without a Moodle site. Unlike the gesture test this needs a
+GL, so it is manual and not wired into CI.
+
+```sh
+node screenshot.mjs /some/out/dir   # writes scene-day.png, scene-dusk.png, scene-night.png
+```
+
+`render.html` takes query params: `?hour=13&env=cyberspace&palette=cyan` plus
+camera pose (`px,py,pz,yaw,pitch`) and section count (`n`).

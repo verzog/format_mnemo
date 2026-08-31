@@ -1,0 +1,100 @@
+<!doctype html>
+<!--
+    Manual render harness (dev-only, not shipped). Builds the real Cyberspace
+    scene full-window with sample course data so it can be screenshotted from
+    headless Chromium (tests/webxr/screenshot.mjs) to review the look and the
+    day/night cycle without a Moodle site. Query params: ?hour=13&env=cyberspace
+    &palette=cyan.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>format_mnemo render harness</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#stage{width:100vw;height:100vh}</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+window.define = function(name, deps, factory) {
+    window.__mnemoModule = factory();
+};
+</script>
+<script src="../../amd/src/vr.js"></script>
+<script type="module">
+import * as THREE from '../../thirdparty/three.module.min.js';
+
+function q(name, dflt) {
+    var v = new URLSearchParams(location.search).get(name);
+    return v === null ? dflt : v;
+}
+
+var MODS = ['quiz', 'forum', 'page', 'assign', 'wiki', 'book', 'resource',
+    'chat', 'lesson', 'glossary', 'url', 'workshop'];
+var STATES = ['available', 'complete', 'restricted'];
+
+function sections(n) {
+    var out = [];
+    for (var i = 0; i < n; i++) {
+        var acts = [];
+        var m = 3 + (i % 4);
+        for (var k = 0; k < m; k++) {
+            acts.push({
+                id: i * 100 + k,
+                name: MODS[(i + k) % MODS.length] + ' ' + (k + 1),
+                modname: MODS[(i + k) % MODS.length],
+                url: 'https://example.com/mod/view.php?id=' + (i * 100 + k),
+                state: STATES[(i + k) % STATES.length]
+            });
+        }
+        out.push({
+            number: i + 1, name: 'Topic ' + (i + 1), visible: true,
+            current: i === 1, image: null, activities: acts,
+            activitycount: acts.length, hasactivities: true
+        });
+    }
+    return out;
+}
+
+var strings = {};
+['entervr', 'exitvr', 'vrnotsupported', 'loading', 'failed', 'controls',
+    'complete', 'available', 'restricted', 'fullscreen', 'exitfullscreen']
+    .forEach(function(s) {
+        strings[s] = s;
+    });
+
+var config = {
+    courseid: 1,
+    environment: q('env', 'cyberspace'),
+    palette: q('palette', 'cyan'),
+    invertlook: false,
+    hour: parseFloat(q('hour', '13')),
+    strings: strings,
+    sections: sections(parseInt(q('n', '5'), 10))
+};
+
+try {
+    var root = document.getElementById('stage');
+    var cs = new window.__mnemoModule._Cyberspace(THREE, root, config);
+    // A raised, angled vantage looking down the avenue toward the city.
+    cs.player.position.set(
+        parseFloat(q('px', '10')), parseFloat(q('py', '6')), parseFloat(q('pz', '26'))
+    );
+    cs.yaw = parseFloat(q('yaw', '-0.5'));
+    cs.pitch = parseFloat(q('pitch', '-0.12'));
+    window.__cs = cs;
+    // Let a few frames render (textures/light settle) before the screenshot.
+    var frames = 0;
+    var mark = function() {
+        if (++frames > 12) {
+            window.__ready = true;
+            return;
+        }
+        requestAnimationFrame(mark);
+    };
+    requestAnimationFrame(mark);
+} catch (e) {
+    window.__err = String(e && e.stack || e);
+}
+</script>
+</body>
+</html>
