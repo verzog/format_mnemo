@@ -31,7 +31,9 @@ jobs:
       mariadb:
         image: mariadb:10.11
         env:
-          MYSQL_USER: root
+          # Root is created automatically with an empty password; MYSQL_USER is
+          # only for creating a non-root account, and the image rejects
+          # MYSQL_USER=root, so it is intentionally omitted here.
           MYSQL_ALLOW_EMPTY_PASSWORD: true
           MYSQL_CHARACTER_SET_SERVER: utf8mb4
           MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
