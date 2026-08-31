@@ -116,6 +116,7 @@ define('format_mnemo/vr', [], function() {
         this.buildCity();
         this.buildControllers();
         this.buildVrButton();
+        this.buildFullscreenButton();
         this.bindDesktopControls();
 
         window.addEventListener('resize', this.onResize.bind(this));
@@ -516,6 +517,40 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build a fullscreen toggle button for the scene stage.
+     */
+    Cyberspace.prototype.buildFullscreenButton = function() {
+        var self = this;
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'format-mnemo__fs-btn';
+        button.textContent = '⛶';
+        button.title = this.config.strings.fullscreen;
+        button.setAttribute('aria-label', this.config.strings.fullscreen);
+        this.root.appendChild(button);
+
+        button.addEventListener('click', function() {
+            if (document.fullscreenElement) {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            } else if (self.root.requestFullscreen) {
+                var req = self.root.requestFullscreen();
+                if (req && req.catch) {
+                    req.catch(function() {});
+                }
+            }
+        });
+
+        document.addEventListener('fullscreenchange', function() {
+            var full = document.fullscreenElement === self.root;
+            button.title = full ? self.config.strings.exitfullscreen : self.config.strings.fullscreen;
+            button.setAttribute('aria-label', button.title);
+            self.onResize();
+        });
+    };
+
+    /**
      * Build the "Enter VR" button and wire up session lifecycle.
      */
     Cyberspace.prototype.buildVrButton = function() {
@@ -594,8 +629,9 @@ define('format_mnemo/vr', [], function() {
                 self.lastPointer.x = e.clientX;
                 self.lastPointer.y = e.clientY;
                 self.pointerMoved += Math.abs(dx) + Math.abs(dy);
-                self.yaw -= dx * 0.0032;
-                self.pitch -= dy * 0.0032;
+                // Reversed mouse look: drag moves the view the same way.
+                self.yaw += dx * 0.0032;
+                self.pitch += dy * 0.0032;
                 var lim = Math.PI / 2 - 0.05;
                 self.pitch = Math.max(-lim, Math.min(lim, self.pitch));
             }

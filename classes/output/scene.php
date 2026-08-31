@@ -192,6 +192,8 @@ class scene implements renderable, templatable {
                 'complete' => get_string('statecomplete', 'format_mnemo'),
                 'available' => get_string('stateavailable', 'format_mnemo'),
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
+                'fullscreen' => get_string('fullscreen', 'format_mnemo'),
+                'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
             ],
             'sections' => $nodes['sections'],
         ];
