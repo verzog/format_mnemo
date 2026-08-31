@@ -37,7 +37,8 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
      */
     protected function define_section_plugin_structure() {
         // Only include this structure when the course actually uses this format.
-        $plugin = $this->get_plugin_element(null, $this->get_format_condition(), 'format_mnemo');
+        // The condition is matched against course.format, which is 'mnemo'.
+        $plugin = $this->get_plugin_element(null, $this->get_format_condition(), 'mnemo');
 
         // Wrapper element recommended for plugin structures.
         $pluginwrapper = new backup_nested_element($this->get_recommended_name());
