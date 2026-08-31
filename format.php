@@ -54,5 +54,5 @@ if ($PAGE->user_is_editing()) {
     echo $renderer->render($widget);
 } else {
     // Learners fly through the course as cyberspace.
-    echo $renderer->render_scene($format);
+    echo $renderer->render_cyberspace($format);
 }

@@ -49,10 +49,16 @@ class renderer extends section_renderer {
      * markup for the scene container together with an accessible list-view
      * fallback.
      *
+     * Note: this method is deliberately NOT named render_scene(). The base
+     * renderer's render() dispatches a renderable to a method named
+     * render_<short class name>, so a method called render_scene() would be
+     * invoked with a \format_mnemo\output\scene instance, clashing with this
+     * course-format entry point. The template is therefore rendered explicitly.
+     *
      * @param \core_courseformat\base $format the course format instance
      * @return string HTML
      */
-    public function render_scene(\core_courseformat\base $format): string {
+    public function render_cyberspace(\core_courseformat\base $format): string {
         $scene = new scene($format);
         $config = $scene->get_scene_config($this);
 
@@ -60,6 +66,6 @@ class renderer extends section_renderer {
         // client-side against WebXR; PHP only ships the data and the fallback.
         $this->page->requires->js_call_amd('format_mnemo/vr', 'init', [$config]);
 
-        return $this->render($scene);
+        return $this->render_from_template('format_mnemo/scene', $scene->export_for_template($this));
     }
 }
