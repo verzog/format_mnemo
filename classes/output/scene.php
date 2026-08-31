@@ -60,6 +60,7 @@ class scene implements renderable, templatable {
         $modinfo = get_fast_modinfo($course);
         $completion = new completion_info($course);
         $completionenabled = $completion->is_enabled();
+        $imagefiles = $this->preload_section_images($context);
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -113,6 +114,7 @@ class scene implements renderable, templatable {
                 'name' => format_string($name, true, ['context' => $context]),
                 'visible' => (bool)$section->visible,
                 'current' => $this->format->is_section_current($section),
+                'image' => $this->section_image_url($imagefiles[(int)$section->id] ?? null, $context),
                 'activities' => $activities,
                 'activitycount' => count($activities),
                 'hasactivities' => !empty($activities),
@@ -123,6 +125,54 @@ class scene implements renderable, templatable {
             'sections' => $sections,
             'nodecount' => count($sections),
         ];
+    }
+
+    /**
+     * Load every topic-image file for the course in one query, keyed by the
+     * section id, so building the scene does not do one query per section.
+     *
+     * @param context_course $context the course context
+     * @return \stored_file[] map of section id => the first image file
+     */
+    protected function preload_section_images(context_course $context): array {
+        $fs = get_file_storage();
+        $files = $fs->get_area_files(
+            $context->id,
+            'format_mnemo',
+            'sectionimage',
+            false,
+            'itemid, filepath, filename',
+            false
+        );
+        $map = [];
+        foreach ($files as $file) {
+            $itemid = (int)$file->get_itemid();
+            if (!isset($map[$itemid])) {
+                $map[$itemid] = $file;
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * The pluginfile URL for a preloaded topic-image file, or null when none.
+     *
+     * @param \stored_file|null $file the section's image file, if any
+     * @param context_course $context the course context
+     * @return string|null
+     */
+    protected function section_image_url(?\stored_file $file, context_course $context): ?string {
+        if ($file === null) {
+            return null;
+        }
+        return moodle_url::make_pluginfile_url(
+            $context->id,
+            'format_mnemo',
+            'sectionimage',
+            $file->get_itemid(),
+            $file->get_filepath(),
+            $file->get_filename()
+        )->out(false);
     }
 
     /**
@@ -150,7 +200,6 @@ class scene implements renderable, templatable {
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
-            'layout' => $options['mnemolayout'] ?? 'ring',
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -161,6 +210,8 @@ class scene implements renderable, templatable {
                 'complete' => get_string('statecomplete', 'format_mnemo'),
                 'available' => get_string('stateavailable', 'format_mnemo'),
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
+                'fullscreen' => get_string('fullscreen', 'format_mnemo'),
+                'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
             ],
             'sections' => $nodes['sections'],
         ];

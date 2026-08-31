@@ -1,10 +1,12 @@
 # Mnemo — VR cyberspace course format for Moodle
 
-`format_mnemo` renders a Moodle course as an interactive 3D cyberspace inspired
-by the gestural VR navigation of *Johnny Mnemonic*. Sections and activities
-float as neon **data-structures** in a dark grid void. Learners fly through
-them on any screen and can **jack in with a WebXR headset** to explore the
-course spatially and navigate with their hands.
+`format_mnemo` renders a Moodle course as an interactive 3D **cyberpunk city**
+inspired by the gestural VR navigation of *Johnny Mnemonic*. Each topic is a
+large neon **sign** — its name and, optionally, an uploaded topic image —
+standing at the corner where its **side street branches** off a main street the
+learner flies down; the topic's activities are smaller signs along that branch.
+Learners explore it on any screen and can **jack in with a WebXR headset** to
+fly the streets and reach out to open activities.
 
 Teachers keep the familiar Moodle experience: whenever **editing is turned on**,
 the standard 2D section/activity editor is shown, so the course is built exactly
@@ -32,9 +34,10 @@ off).
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers
   it.
+- **Topic images** — each section can carry an optional image (uploaded in the
+  section's settings) that appears on its street sign.
 - **Per-course look** — teachers choose the environment (Cyberspace / Grid /
-  Void), the neon palette (Cyan / Amber / Magenta / Green), and the node layout
-  (Ring around the learner / City grid / Ascending spiral) in course settings.
+  Void) and the neon palette (Cyan / Amber / Magenta / Green) in course settings.
 - **No framework, self-contained** — the scene is hand-rolled on
   [Three.js](https://threejs.org) with the browser's native WebXR API. Three.js
   is the only third-party dependency; it is **bundled with the plugin**
@@ -67,7 +70,8 @@ Alternatively install the ZIP via
 
 1. In a course, open **Settings → Course format** and choose
    **Mnemo (VR cyberspace)**.
-2. Pick the **Environment**, **Neon palette** and **Node layout**.
+2. Pick the **Environment** and **Neon palette**. Optionally add a **topic
+   image** in each section's settings.
 3. With editing **on**, add sections and activities as usual (standard 2D UI).
 4. Turn editing **off** to fly through the course. Click **Enter VR** to jack in
    with a headset.

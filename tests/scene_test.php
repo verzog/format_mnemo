@@ -42,10 +42,8 @@ final class scene_test extends \advanced_testcase {
 
         $this->assertArrayHasKey('mnemoenvironment', $options);
         $this->assertArrayHasKey('mnemopalette', $options);
-        $this->assertArrayHasKey('mnemolayout', $options);
         $this->assertSame('cyberspace', $options['mnemoenvironment']);
         $this->assertSame('cyan', $options['mnemopalette']);
-        $this->assertSame('ring', $options['mnemolayout']);
         $this->assertTrue($format->uses_sections());
         $this->assertTrue($format->supports_components());
     }
@@ -115,6 +113,9 @@ final class scene_test extends \advanced_testcase {
             }
         }
         $this->assertNotNull($sectionone);
+        // The topic image field is present and null when no image is uploaded.
+        $this->assertArrayHasKey('image', $sectionone);
+        $this->assertNull($sectionone['image']);
         $names = array_column($sectionone['activities'], 'name');
         $this->assertContains('Wetwire briefing', $names);
         $this->assertCount(1, $sectionone['activities'], 'Labels must not become nodes');
