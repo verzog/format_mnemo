@@ -11,7 +11,7 @@ import {readFile} from 'fs/promises';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = normalize(join(here, '..', '..'));
-const exe = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium';
+const exe = process.env.PW_CHROMIUM || null;
 const outDir = process.argv[2] || here;
 
 const MIME = {
@@ -43,11 +43,14 @@ const shots = [
     {label: 'night', q: 'hour=22'}
 ];
 
-const browser = await chromium.launch({
-    executablePath: exe,
+const launchOpts = {
     args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader',
         '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
-});
+};
+if (exe) {
+    launchOpts.executablePath = exe;
+}
+const browser = await chromium.launch(launchOpts);
 const page = await browser.newPage({viewport: {width: 1280, height: 720}});
 page.on('pageerror', (e) => console.error('pageerror:', String(e)));
 

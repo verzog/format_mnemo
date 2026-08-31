@@ -15,7 +15,9 @@ import {readFile} from 'fs/promises';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = normalize(join(here, '..', '..'));
-const exe = process.env.PW_CHROMIUM || '/opt/pw-browsers/chromium';
+// Use Playwright's own Chromium by default (as in CI). Only override the
+// executable when PW_CHROMIUM points at a pre-installed browser.
+const exe = process.env.PW_CHROMIUM || null;
 
 // ES-module imports are blocked from a file:// origin, so serve the repo over
 // http. Only static files under the repo root are served.
@@ -210,10 +212,11 @@ const scenarios = [
     }
 ];
 
-const browser = await chromium.launch({
-    executablePath: exe,
-    args: ['--no-sandbox', '--use-gl=swiftshader']
-});
+const launchOpts = {args: ['--no-sandbox', '--use-gl=swiftshader']};
+if (exe) {
+    launchOpts.executablePath = exe;
+}
+const browser = await chromium.launch(launchOpts);
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
