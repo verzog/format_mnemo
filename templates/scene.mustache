@@ -1,0 +1,108 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template format_mnemo/scene
+
+    Container for the immersive cyberspace scene plus an accessible list-view
+    fallback for the whole course.
+
+    Classes required for JS:
+    * data-mnemo-root - the scene mount point the WebXR module renders into.
+    * data-mnemo-fallback - the accessible list, hidden once the scene loads.
+    * data-mnemo-toggle - switches between 3D and list views.
+
+    Context variables required for this template:
+    * rootid - unique DOM id for this scene.
+    * environment - environment key (adds a CSS modifier class).
+    * palette - palette key (adds a CSS modifier class).
+    * sections - array of section nodes with their activities.
+
+    Example context (json):
+    {
+        "rootid": "mnemo-scene-2",
+        "environment": "cyberspace",
+        "palette": "cyan",
+        "hassections": true,
+        "str_loading": "Initialising cyberspace…",
+        "str_toggle": "Toggle list / 3D view",
+        "str_controls": "Drag to look, W/S to fly, click a node to open it.",
+        "str_arialabel": "Interactive 3D view of the course.",
+        "str_emptynode": "This node has no activities yet.",
+        "sections": [
+            {
+                "number": 1,
+                "name": "Node 1",
+                "activitycount": 2,
+                "hasactivities": true,
+                "activities": [
+                    {"name": "Intro", "url": "https://example.com/mod/page/view.php?id=1", "modname": "page", "state": "available"}
+                ]
+            }
+        ]
+    }
+}}
+<div class="format-mnemo format-mnemo--env-{{environment}} format-mnemo--palette-{{palette}}">
+    <div class="format-mnemo__bar">
+        <button type="button" class="btn btn-secondary format-mnemo__toggle" data-mnemo-toggle
+                aria-pressed="false">
+            {{str_toggle}}
+        </button>
+        <p class="format-mnemo__controls" data-mnemo-controls>{{str_controls}}</p>
+    </div>
+
+    <div class="format-mnemo__stage"
+         id="{{rootid}}"
+         data-mnemo-root
+         data-environment="{{environment}}"
+         data-palette="{{palette}}"
+         role="application"
+         aria-label="{{str_arialabel}}">
+        <div class="format-mnemo__loading" data-mnemo-loading>
+            <span class="format-mnemo__spinner" aria-hidden="true"></span>
+            <span>{{str_loading}}</span>
+        </div>
+    </div>
+
+    <div class="format-mnemo__fallback" data-mnemo-fallback>
+        {{#hassections}}
+        <ul class="format-mnemo__sections">
+            {{#sections}}
+            <li class="format-mnemo__section" data-section-number="{{number}}">
+                <h3 class="format-mnemo__section-name">{{name}}</h3>
+                {{#hasactivities}}
+                <ul class="format-mnemo__activities">
+                    {{#activities}}
+                    <li class="format-mnemo__activity format-mnemo__activity--{{state}}">
+                        {{#url}}
+                            <a href="{{url}}" class="format-mnemo__activity-link">{{name}}</a>
+                        {{/url}}
+                        {{^url}}
+                            <span class="format-mnemo__activity-link">{{name}}</span>
+                        {{/url}}
+                    </li>
+                    {{/activities}}
+                </ul>
+                {{/hasactivities}}
+                {{^hasactivities}}
+                <p class="format-mnemo__empty">{{str_emptynode}}</p>
+                {{/hasactivities}}
+            </li>
+            {{/sections}}
+        </ul>
+        {{/hassections}}
+    </div>
+</div>

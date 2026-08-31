@@ -1,0 +1,65 @@
+<?php
+// This file is part of Moodle - https://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+
+namespace format_mnemo\output;
+
+use core_courseformat\output\section_renderer;
+use moodle_page;
+
+/**
+ * Renderer for the Mnemo course format.
+ *
+ * Extends the standard course format section renderer so that the normal 2D
+ * section editing interface is available while editing is turned on, and adds a
+ * helper for rendering the immersive cyberspace scene for learners.
+ *
+ * @package    format_mnemo
+ * @copyright  2026 format_mnemo contributors
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+class renderer extends section_renderer {
+
+    /**
+     * Constructor.
+     *
+     * @param moodle_page $page
+     * @param string $target one of rendering target constants
+     */
+    public function __construct(moodle_page $page, $target) {
+        parent::__construct($page, $target);
+    }
+
+    /**
+     * Render the immersive cyberspace scene for learners.
+     *
+     * Queues the WebXR/Three.js AMD module with the scene data and returns the
+     * markup for the scene container together with an accessible list-view
+     * fallback.
+     *
+     * @param \core_courseformat\base $format the course format instance
+     * @return string HTML
+     */
+    public function render_scene(\core_courseformat\base $format): string {
+        $scene = new scene($format);
+        $config = $scene->get_scene_config($this);
+
+        // Hand the full scene graph to the browser module. Rendering happens
+        // client-side against WebXR; PHP only ships the data and the fallback.
+        $this->page->requires->js_call_amd('format_mnemo/vr', 'init', [$config]);
+
+        return $this->render($scene);
+    }
+}
