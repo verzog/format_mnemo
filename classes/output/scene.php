@@ -108,10 +108,11 @@ class scene implements renderable, templatable {
                 }
             }
 
-            $name = $this->format->get_section_name($section);
+            // Signs show the teacher's plain title (no editing-view number).
+            $name = $this->format->get_section_title_plain($section);
             $sections[] = [
                 'number' => (int)$section->section,
-                'name' => format_string($name, true, ['context' => $context]),
+                'name' => $name,
                 'visible' => (bool)$section->visible,
                 'current' => $this->format->is_section_current($section),
                 'image' => $this->section_image_url($imagefiles[(int)$section->id] ?? null, $context),

@@ -34,6 +34,16 @@ use core\output\inplace_editable;
  */
 class format_mnemo extends core_courseformat\base {
     /**
+     * Maximum accepted upload size for a topic image, in bytes.
+     *
+     * The client downscales every image to a small texture, so this only caps
+     * what is stored; it is generous enough for an ordinary photo. Keep this in
+     * sync with the filemanager options in section_format_options(),
+     * update_section_format_options() and \format_mnemo\form\editsection.
+     */
+    const TOPIC_IMAGE_MAXBYTES = 5242880;
+
+    /**
      * Returns true. This format uses sections.
      *
      * @return bool
@@ -212,7 +222,7 @@ class format_mnemo extends core_courseformat\base {
                     [
                         'subdirs' => 0,
                         'maxfiles' => 1,
-                        'maxbytes' => 1048576,
+                        'maxbytes' => self::TOPIC_IMAGE_MAXBYTES,
                         'accepted_types' => ['web_image'],
                     ],
                 ],
@@ -255,7 +265,7 @@ class format_mnemo extends core_courseformat\base {
                 'format_mnemo',
                 'sectionimage',
                 (int)$data['id'],
-                ['subdirs' => 0, 'maxfiles' => 1, 'maxbytes' => 1048576, 'accepted_types' => ['web_image']]
+                ['subdirs' => 0, 'maxfiles' => 1, 'maxbytes' => self::TOPIC_IMAGE_MAXBYTES, 'accepted_types' => ['web_image']]
             );
             // Not a stored scalar option; the file area is the source of truth.
             unset($data['topicimage']);
@@ -271,6 +281,57 @@ class format_mnemo extends core_courseformat\base {
      */
     public function can_delete_section($section) {
         return true;
+    }
+
+    /**
+     * Returns the display name of the given section.
+     *
+     * Learners see the teacher's section title on the cyberspace signs (via
+     * get_section_title_plain()); this method drives the 2D editing interface,
+     * where the title is shown together with its topic number for orientation.
+     * Sections without a title fall back to the default "Section N".
+     *
+     * @param int|stdClass|section_info $section Section object or section number
+     * @return string
+     */
+    public function get_section_name($section) {
+        $section = $this->get_section($section);
+        if ((string)$section->name !== '') {
+            $title = format_string(
+                $section->name,
+                true,
+                ['context' => context_course::instance($this->get_courseid())]
+            );
+            if ($section->section != 0) {
+                return get_string('sectiontitlenumbered', 'format_mnemo', (object)[
+                    'title' => $title,
+                    'number' => $section->section,
+                ]);
+            }
+            return $title;
+        }
+        return $this->get_default_section_name($section);
+    }
+
+    /**
+     * The plain section title, without the editing-view topic number.
+     *
+     * Used for the cyberspace signs, where the teacher's title is shown on its
+     * own; sections without a title fall back to the default "Section N".
+     *
+     * @param int|stdClass|section_info $section Section object or section number
+     * @return string
+     */
+    public function get_section_title_plain($section): string {
+        $section = $this->get_section($section);
+        if ((string)$section->name !== '') {
+            return format_string(
+                $section->name,
+                true,
+                ['context' => context_course::instance($this->get_courseid())]
+            );
+        }
+        return $this->get_default_section_name($section);
     }
 
     /**

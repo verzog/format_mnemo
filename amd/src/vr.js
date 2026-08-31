@@ -745,7 +745,23 @@ define('format_mnemo/vr', [], function() {
             this.updateDesktopHighlight();
         }
 
+        this.clampToWorld();
+
         this.renderer.render(this.scene, this.camera);
+    };
+
+    /**
+     * Keep the player rig inside the world: never below the neon floor (so the
+     * view cannot sink through the ground) nor above the ceiling grid. The floor
+     * sits at y = 0, so pinning the rig at 0 keeps the eye at standing height
+     * above it in both desktop and XR.
+     */
+    Cyberspace.prototype.clampToWorld = function() {
+        if (this.player.position.y < 0) {
+            this.player.position.y = 0;
+        } else if (this.player.position.y > 30) {
+            this.player.position.y = 30;
+        }
     };
 
     /**
