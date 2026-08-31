@@ -41,7 +41,7 @@ off).
 
 ## Requirements
 
-- Moodle **4.1 (LTS)** or later.
+- Moodle **5.0** or later (tested on 5.0–5.2).
 - A **WebGL**-capable browser for the 3D view (all evergreen browsers).
 - For VR: a **WebXR**-capable browser and an `immersive-vr` headset. Hand
   tracking uses the WebXR Hand Input API where the device/browser supports it;

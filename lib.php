@@ -297,7 +297,8 @@ class format_mnemo extends core_courseformat\base {
     /**
      * Returns whether this course format allows the activity to be displayed inline.
      *
-     * @param cm_info|stdClass $cm
+     * @param cm_info|stdClass $cm the course module
+     * @param int|stdClass|section_info $section the section
      * @return bool
      */
     public function allow_stealth_module_visibility($cm, $section) {

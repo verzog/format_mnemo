@@ -25,7 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->version   = 2026083100;
-$plugin->requires  = 2022112800; // Moodle 4.1 (LTS) or later.
+$plugin->requires  = 2025041400; // Moodle 5.0.
+$plugin->supported = [500, 502]; // Moodle 5.0 - 5.2.
 $plugin->component = 'format_mnemo';
 $plugin->maturity  = MATURITY_ALPHA;
 $plugin->release   = 'v0.1.0';
