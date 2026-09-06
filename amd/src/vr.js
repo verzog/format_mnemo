@@ -221,6 +221,7 @@ define('format_mnemo/vr', [], function() {
         this.buildVrButton();
         this.buildFullscreenButton();
         this.bindDesktopControls();
+        this.bindMediaPause();
         // Cinematic post pipeline (bloom) for the on-screen view.
         this.buildPostFX();
 
@@ -2768,52 +2769,28 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Build a large interactive video screen for a video activity. A direct
-     * (same-origin/CORS) video file plays in-world on the screen and toggles
-     * play/pause on click; a YouTube/Vimeo (or other) embed shows a poster that
-     * opens the video on click. A file that fails to load falls back to the
-     * poster + open behaviour.
+     * Build a large interactive video screen for a video activity. Every screen
+     * starts as a poster (so no media — and no third-party request — loads until
+     * the learner acts). Clicking a direct-file screen loads and plays the video
+     * in-world (a user gesture, so with sound); clicking an embed (or a file that
+     * fails to decode) opens the activity. The frame colour reflects the
+     * activity state, like a building's sign.
      *
-     * @param {Object} act The activity node (name, url, video:{kind, src}).
+     * @param {Object} act The activity node (name, url, state, video:{kind, src}).
      * @return {Object} {group, panel} — the screen group and its raycast target.
      */
     Cyberspace.prototype.makeVideoScreen = function(act) {
         var THREE = this.THREE;
-        var self = this;
         var group = new THREE.Group();
         var w = 5.2;
         var h = 2.95; // Roughly 16:9.
-        var colour = this.palette.primary;
+        var colour = STATE_COLOURS[act.state] || this.palette.primary;
 
         // Neon frame (glow behind the screen); also the hover-highlight target.
         var frameMat = new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.9});
         var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.4, h + 0.4), frameMat);
 
-        var video = null;
-        var screenMat;
-        if (act.video.kind === 'file') {
-            video = document.createElement('video');
-            video.crossOrigin = 'anonymous';
-            video.loop = true;
-            video.muted = true;
-            video.playsInline = true;
-            video.setAttribute('playsinline', '');
-            video.src = act.video.src;
-            var vtex = new THREE.VideoTexture(video);
-            vtex.colorSpace = THREE.SRGBColorSpace;
-            screenMat = new THREE.MeshBasicMaterial({map: vtex});
-            // Muted autoplay is allowed by browsers; ignore a rejected attempt.
-            var playing = video.play();
-            if (playing && playing.catch) {
-                playing.catch(function() {
-                    // Autoplay may be blocked; the viewer can click to play.
-                });
-            }
-            this.videos.push(video);
-        } else {
-            screenMat = new THREE.MeshBasicMaterial({map: this.makePosterTexture(act.name)});
-        }
-
+        var screenMat = new THREE.MeshBasicMaterial({map: this.makePosterTexture(act.name)});
         var screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), screenMat);
         screen.position.z = 0.05;
         frame.add(screen);
@@ -2833,22 +2810,77 @@ define('format_mnemo/vr', [], function() {
             baseColour: colour,
             interactive: true
         };
-        if (video) {
-            screen.userData.videoToggle = video;
-            // If the file cannot be decoded (e.g. cross-origin without CORS),
-            // fall back to a poster that opens the activity on click.
-            video.addEventListener('error', function() {
-                screenMat.map = self.makePosterTexture(act.name);
-                screenMat.needsUpdate = true;
-                delete screen.userData.videoToggle;
-                screen.userData.url = act.url;
-            });
+        if (act.video.kind === 'file') {
+            // Deferred: the video is created and fetched only on activation.
+            screen.userData.videoSrc = act.video.src;
+            screen.userData.viewUrl = act.url;
+            screen.userData.screenMat = screenMat;
         } else {
             screen.userData.url = act.url;
         }
         this.interactive.push(screen);
 
         return {group: group, panel: screen};
+    };
+
+    /**
+     * Start a deferred file video on its screen: create the element, swap the
+     * poster for a live VideoTexture, play it (from a click, so with sound), and
+     * record the module view so completion-on-view still fires. A file that
+     * cannot be decoded falls back to the poster + open behaviour.
+     *
+     * @param {Object} screen The screen mesh whose userData carries videoSrc.
+     */
+    Cyberspace.prototype.startVideo = function(screen) {
+        var THREE = this.THREE;
+        var self = this;
+        var ud = screen.userData;
+        var video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.loop = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.src = ud.videoSrc;
+        var vtex = new THREE.VideoTexture(video);
+        vtex.colorSpace = THREE.SRGBColorSpace;
+        ud.screenMat.map = vtex;
+        ud.screenMat.needsUpdate = true;
+        video.addEventListener('error', function() {
+            ud.screenMat.map = self.makePosterTexture(ud.name);
+            ud.screenMat.needsUpdate = true;
+            delete ud.videoToggle;
+            ud.url = ud.viewUrl;
+        });
+        var playing = video.play();
+        if (playing && playing.catch) {
+            playing.catch(function() {
+                // Play was rejected; the viewer can click again to retry.
+            });
+        }
+        ud.videoToggle = video;
+        delete ud.videoSrc; // Subsequent clicks toggle play/pause.
+        this.videos.push(video);
+        this.recordView(ud.viewUrl);
+    };
+
+    /**
+     * Record a module view (best-effort) so a video watched in-world still
+     * satisfies view-based completion, without navigating away. redirect:'manual'
+     * avoids following the module's redirect to (and downloading) the media.
+     *
+     * @param {String} url The activity view URL.
+     */
+    Cyberspace.prototype.recordView = function(url) {
+        if (!url || !window.fetch) {
+            return;
+        }
+        try {
+            window.fetch(url, {credentials: 'same-origin', redirect: 'manual'}).catch(function() {
+                // Best-effort view ping; nothing to do on failure.
+            });
+        } catch (e) {
+            // Fetch unavailable or blocked; skip the view ping.
+        }
     };
 
     /**
@@ -2896,7 +2928,7 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Act on an interactive node: toggle a video screen's playback, or open an
+     * Act on an interactive node: start or toggle a video screen, or open an
      * activity URL.
      *
      * @param {Object} target The intersected mesh.
@@ -2905,31 +2937,66 @@ define('format_mnemo/vr', [], function() {
         if (!target || !target.userData) {
             return;
         }
-        if (target.userData.videoToggle) {
-            this.toggleVideo(target.userData.videoToggle);
-        } else if (target.userData.url) {
-            this.open(target.userData.url);
+        var ud = target.userData;
+        if (ud.videoToggle) {
+            this.toggleVideo(ud.videoToggle);
+        } else if (ud.videoSrc) {
+            this.startVideo(target);
+        } else if (ud.url) {
+            this.open(ud.url);
         }
     };
 
     /**
-     * Toggle a screen video between playing (with sound) and paused. The first
-     * activation is a user gesture, so it may unmute and start audio.
+     * Toggle an already-started screen video between playing and paused.
      *
      * @param {Object} video The HTMLVideoElement.
      */
     Cyberspace.prototype.toggleVideo = function(video) {
         if (video.paused) {
-            video.muted = false;
             var playing = video.play();
             if (playing && playing.catch) {
                 playing.catch(function() {
-                    // Play was rejected (e.g. still no user gesture); ignore.
+                    // Play was rejected; nothing to do.
                 });
             }
         } else {
             video.pause();
         }
+    };
+
+    /**
+     * Pause all screen videos (when the 3D stage is hidden — list view or a
+     * hidden tab — so audio does not keep playing out of sight).
+     */
+    Cyberspace.prototype.pauseVideos = function() {
+        for (var i = 0; i < this.videos.length; i++) {
+            this.videos[i].pause();
+        }
+    };
+
+    /**
+     * Pause screen videos when the learner switches to the list view or hides
+     * the tab, so a playing video does not keep sounding while out of sight.
+     */
+    Cyberspace.prototype.bindMediaPause = function() {
+        var self = this;
+        var container = this.root.closest ? this.root.closest('.format-mnemo') : null;
+        if (container) {
+            var toggle = container.querySelector('[data-mnemo-toggle]');
+            if (toggle) {
+                toggle.addEventListener('click', function() {
+                    if (container.classList.contains('format-mnemo--listview')) {
+                        self.pauseVideos();
+                    }
+                });
+            }
+        }
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                self.pauseVideos();
+            }
+        });
     };
 
     /**

@@ -326,16 +326,17 @@ const scenarios = [
                 makePosterTexture: CS.prototype.makePosterTexture,
                 makeVideoScreen: CS.prototype.makeVideoScreen
             };
-            const r = obj.makeVideoScreen({name: 'Clip', url: 'https://x/watch', video: {kind: 'embed'}});
+            const r = obj.makeVideoScreen(
+                {name: 'Clip', url: 'https://x/watch', state: 'available', video: {kind: 'embed'}});
             const pass = r.group.isGroup === true &&
                 r.panel.userData.url === 'https://x/watch' &&
-                !r.panel.userData.videoToggle &&
+                !r.panel.userData.videoToggle && !r.panel.userData.videoSrc &&
                 obj.interactive.length === 1 && obj.videos.length === 0;
             return {pass, detail: `url=${r.panel.userData.url}`};
         }
     },
     {
-        name: 'video: a file activity builds a screen with a playable video element',
+        name: 'video: a file activity defers the video until activation',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
@@ -344,29 +345,48 @@ const scenarios = [
                 makePosterTexture: CS.prototype.makePosterTexture,
                 makeVideoScreen: CS.prototype.makeVideoScreen
             };
-            const r = obj.makeVideoScreen({name: 'V', url: 'u', video: {kind: 'file', src: 'movie.mp4'}});
-            const v = r.panel.userData.videoToggle;
-            const pass = !!v && v.tagName === 'VIDEO' && !r.panel.userData.url &&
-                obj.videos.length === 1;
-            return {pass, detail: `tag=${v && v.tagName}`};
+            const r = obj.makeVideoScreen(
+                {name: 'V', url: 'u', state: 'available', video: {kind: 'file', src: 'movie.mp4'}});
+            // No media element or URL request until the learner acts.
+            const pass = r.panel.userData.videoSrc === 'movie.mp4' &&
+                !r.panel.userData.videoToggle && !r.panel.userData.url &&
+                obj.videos.length === 0;
+            return {pass, detail: `src=${r.panel.userData.videoSrc} videos=${obj.videos.length}`};
         }
     },
     {
-        name: 'video: activate toggles a screen video and opens a link',
+        name: 'video: activating a file screen starts the video (loaded lazily)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {
+                THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
+                makePosterTexture: CS.prototype.makePosterTexture,
+                makeVideoScreen: CS.prototype.makeVideoScreen,
+                activate: CS.prototype.activate, startVideo: CS.prototype.startVideo,
+                toggleVideo: CS.prototype.toggleVideo,
+                recordView: function() {
+                    this.recorded = true;
+                }
+            };
+            const r = obj.makeVideoScreen(
+                {name: 'V', url: 'view.php', state: 'available', video: {kind: 'file', src: 'movie.mp4'}});
+            obj.activate(r.panel);
+            const v = r.panel.userData.videoToggle;
+            const pass = !!v && v.tagName === 'VIDEO' && !r.panel.userData.videoSrc &&
+                obj.videos.length === 1 && obj.recorded === true;
+            return {pass, detail: `tag=${v && v.tagName} recorded=${obj.recorded}`};
+        }
+    },
+    {
+        name: 'video: activate opens a link node',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const obj = {open: function(u) {
                 this.opened = u;
             }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate};
-            const vid = {paused: true, muted: true, play: function() {
-                this.played = true; return {catch: function() {}};
-            }, pause: function() {
-                this.paused = true;
-            }};
-            obj.activate({userData: {videoToggle: vid}});
             obj.activate({userData: {url: 'openme'}});
-            return {pass: vid.played === true && vid.muted === false && obj.opened === 'openme',
-                detail: `played=${vid.played} opened=${obj.opened}`};
+            return {pass: obj.opened === 'openme', detail: `opened=${obj.opened}`};
         }
     },
     {
