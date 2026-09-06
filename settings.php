@@ -76,6 +76,20 @@ if ($ADMIN->fulltree) {
         PARAM_URL
     ));
 
+    // Upload a prop asset pack straight into Moodle instead of hosting it at a
+    // URL. Files land in the 'assetpack' file area at system context and are
+    // served via pluginfile; the loader reads them by the same
+    // av/lamp/kiosk/barrier naming convention. Only uncompressed .glb models are
+    // accepted (no Draco). The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/assetpack',
+        get_string('setting_assetpack', 'format_mnemo'),
+        get_string('setting_assetpack_desc', 'format_mnemo'),
+        'assetpack',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+    ));
+
     // Default drag-to-look direction for newly created courses. Teachers can
     // override this per course, so the direction never needs a code change.
     $settings->add(new admin_setting_configcheckbox(

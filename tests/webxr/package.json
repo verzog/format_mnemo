@@ -5,7 +5,9 @@
   "description": "Headless WebXR gesture smoke test for the Mnemo course format (dev-only, not shipped).",
   "type": "module",
   "scripts": {
-    "test": "node smoke.mjs"
+    "test": "node smoke.mjs && node gltf.mjs",
+    "test:smoke": "node smoke.mjs",
+    "test:gltf": "node gltf.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0"

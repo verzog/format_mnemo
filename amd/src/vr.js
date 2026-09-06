@@ -1336,12 +1336,17 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Fetch and parse a binary glTF (.glb) model, cached per URL. Returns a
-     * template group; callers clone it for each instance. Supports the common
-     * subset (geometry + PBR metallic-roughness factors + node hierarchy);
-     * Draco-compressed primitives are rejected so the scene falls back cleanly.
+     * Fetch and parse a glTF model (binary .glb or JSON .gltf), cached per URL.
+     * Returns a template group; callers clone it for each instance. Covers the
+     * common glTF 2.0 scope: node hierarchy, all accessor component types
+     * (interleaved and sparse), vertex colours and multiple UV sets, PBR
+     * metallic-roughness with base-colour / metallic-roughness / normal /
+     * occlusion / emissive textures (embedded, data-URI or external images),
+     * samplers, alpha modes, and the emissive-strength and texture-transform
+     * extensions. Draco-compressed primitives are rejected (they need a separate
+     * decoder) so the scene falls back cleanly.
      *
-     * @param {String} url The .glb URL.
+     * @param {String} url The .glb or .gltf URL.
      * @return {Promise} Resolves with a Three.Group template.
      */
     Cyberspace.prototype.loadModel = function(url) {
@@ -1349,68 +1354,188 @@ define('format_mnemo/vr', [], function() {
             return this.modelCache[url];
         }
         var self = this;
+        var base = url.replace(/[^/]*$/, '');
         var promise = fetch(url).then(function(res) {
             if (!res.ok) {
                 throw new Error('model fetch failed: ' + res.status);
             }
             return res.arrayBuffer();
         }).then(function(buffer) {
-            return self.parseGlb(buffer);
+            return self.parseGlb(buffer, base);
         });
         this.modelCache[url] = promise;
         return promise;
     };
 
     /**
-     * Parse a .glb ArrayBuffer into a Three.Group.
+     * Parse a glTF container (binary .glb or JSON .gltf) into a Three.Group.
+     * Returns a promise because images and external buffers may be fetched and
+     * decoded before the group is complete.
      *
-     * @param {ArrayBuffer} buffer The .glb bytes.
-     * @return {Object} A Three.Group.
+     * @param {ArrayBuffer} buffer The model bytes.
+     * @param {String} baseUrl The URL the model was loaded from, used to resolve
+     *     external buffers and images (or '' when there is none).
+     * @return {Promise} Resolves with a Three.Group.
      */
-    Cyberspace.prototype.parseGlb = function(buffer) {
-        var THREE = this.THREE;
-        var dv = new DataView(buffer);
-        if (dv.getUint32(0, true) !== 0x46546c67) {
-            throw new Error('not a glb');
-        }
+    Cyberspace.prototype.parseGlb = function(buffer, baseUrl) {
         var json = null;
         var bin = null;
-        var offset = 12;
-        while (offset < dv.byteLength) {
-            var len = dv.getUint32(offset, true);
-            var type = dv.getUint32(offset + 4, true);
-            var start = offset + 8;
-            if (type === 0x4e4f534a) {
-                json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, start, len)));
-            } else if (type === 0x004e4942) {
-                bin = new Uint8Array(buffer, start, len);
+        var dv = new DataView(buffer);
+        if (dv.getUint32(0, true) === 0x46546c67) {
+            var offset = 12;
+            while (offset < dv.byteLength) {
+                var len = dv.getUint32(offset, true);
+                var type = dv.getUint32(offset + 4, true);
+                var start = offset + 8;
+                if (type === 0x4e4f534a) {
+                    json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, start, len)));
+                } else if (type === 0x004e4942) {
+                    bin = new Uint8Array(buffer, start, len);
+                }
+                offset = start + len + ((4 - (len % 4)) % 4);
             }
-            offset = start + len + ((4 - (len % 4)) % 4);
+        } else {
+            // A plain-text .gltf file: the whole buffer is the JSON document.
+            json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer)));
         }
         if (!json) {
             throw new Error('glb has no JSON chunk');
         }
+        return this.buildGltf(json, bin, baseUrl || '');
+    };
 
-        var group = new THREE.Group();
-        var scene = json.scenes[json.scene || 0];
-        for (var i = 0; i < scene.nodes.length; i++) {
-            group.add(this.glbNode(json, bin, scene.nodes[i]));
+    /**
+     * Resolve a glTF's buffers and images, then build its scene graph.
+     *
+     * @param {Object} json The parsed glTF JSON.
+     * @param {Object} bin The GLB binary chunk (Uint8Array), or null for .gltf.
+     * @param {String} baseUrl Base URL for external resources.
+     * @return {Promise} Resolves with a Three.Group.
+     */
+    Cyberspace.prototype.buildGltf = function(json, bin, baseUrl) {
+        var self = this;
+        var THREE = this.THREE;
+        return this.glbBuffers(json, bin, baseUrl).then(function(buffers) {
+            return self.glbImages(json, buffers, baseUrl).then(function(images) {
+                var ctx = {
+                    json: json, buffers: buffers, images: images,
+                    baseUrl: baseUrl, texCache: {}
+                };
+                var group = new THREE.Group();
+                var scene = json.scenes[json.scene || 0];
+                for (var i = 0; i < scene.nodes.length; i++) {
+                    group.add(self.glbNode(ctx, scene.nodes[i]));
+                }
+                return group;
+            });
+        });
+    };
+
+    /**
+     * Resolve every glTF buffer to a Uint8Array. Buffer 0 of a .glb is the
+     * embedded BIN chunk; others (and all .gltf buffers) come from data URIs or
+     * external files relative to the model.
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Object} bin The GLB binary chunk, or null.
+     * @param {String} baseUrl Base URL for external buffers.
+     * @return {Promise} Resolves with an array of Uint8Array.
+     */
+    Cyberspace.prototype.glbBuffers = function(json, bin, baseUrl) {
+        var self = this;
+        var list = json.buffers || [];
+        return Promise.all(list.map(function(buf) {
+            if (!buf.uri) {
+                return bin;
+            }
+            if (buf.uri.indexOf('data:') === 0) {
+                return self.dataUri(buf.uri);
+            }
+            return fetch(baseUrl + buf.uri).then(function(r) {
+                return r.arrayBuffer();
+            }).then(function(ab) {
+                return new Uint8Array(ab);
+            });
+        }));
+    };
+
+    /**
+     * Decode all glTF images to ImageBitmaps (or null when one fails), in
+     * parallel. Each image comes from a bufferView + mimeType, a data URI, or an
+     * external file relative to the model.
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Array} buffers The resolved buffers.
+     * @param {String} baseUrl Base URL for external images.
+     * @return {Promise} Resolves with an array of ImageBitmap|null.
+     */
+    Cyberspace.prototype.glbImages = function(json, buffers, baseUrl) {
+        var self = this;
+        var list = json.images || [];
+        return Promise.all(list.map(function(img) {
+            return self.glbImage(img, json, buffers, baseUrl).catch(function() {
+                return null;
+            });
+        }));
+    };
+
+    /**
+     * Decode one glTF image to an ImageBitmap.
+     *
+     * @param {Object} img The glTF image entry.
+     * @param {Object} json The parsed glTF.
+     * @param {Array} buffers The resolved buffers.
+     * @param {String} baseUrl Base URL for an external image.
+     * @return {Promise} Resolves with an ImageBitmap.
+     */
+    Cyberspace.prototype.glbImage = function(img, json, buffers, baseUrl) {
+        if (img.uri) {
+            var src = img.uri.indexOf('data:') === 0 ? img.uri : baseUrl + img.uri;
+            return fetch(src).then(function(r) {
+                return r.blob();
+            }).then(function(b) {
+                return createImageBitmap(b);
+            });
         }
-        return group;
+        var view = json.bufferViews[img.bufferView];
+        var buf = buffers[view.buffer || 0];
+        var bytes = new Uint8Array(buf.buffer, buf.byteOffset + (view.byteOffset || 0), view.byteLength);
+        var blob = new Blob([bytes], {type: img.mimeType || 'image/png'});
+        return createImageBitmap(blob);
+    };
+
+    /**
+     * Decode a data: URI to a Uint8Array (base64 or URL-encoded payload).
+     *
+     * @param {String} uri The data URI.
+     * @return {Object} A Uint8Array of the decoded bytes.
+     */
+    Cyberspace.prototype.dataUri = function(uri) {
+        var comma = uri.indexOf(',');
+        var meta = uri.slice(5, comma);
+        var data = uri.slice(comma + 1);
+        if (meta.indexOf('base64') >= 0) {
+            var str = atob(data);
+            var out = new Uint8Array(str.length);
+            for (var i = 0; i < str.length; i++) {
+                out[i] = str.charCodeAt(i);
+            }
+            return out;
+        }
+        return new TextEncoder().encode(decodeURIComponent(data));
     };
 
     /**
      * Build one glTF node (and its children) into a Three.Object3D.
      *
-     * @param {Object} json The parsed glTF.
-     * @param {Object} bin The binary chunk.
+     * @param {Object} ctx The parse context (json, buffers, images, texCache).
      * @param {Number} index The node index.
      * @return {Object} A Three.Object3D.
      */
-    Cyberspace.prototype.glbNode = function(json, bin, index) {
+    Cyberspace.prototype.glbNode = function(ctx, index) {
         var THREE = this.THREE;
-        var node = json.nodes[index];
-        var obj = node.mesh !== undefined ? this.glbMesh(json, bin, node.mesh) : new THREE.Object3D();
+        var node = ctx.json.nodes[index];
+        var obj = node.mesh !== undefined ? this.glbMesh(ctx, node.mesh) : new THREE.Object3D();
         if (node.matrix) {
             obj.applyMatrix4(new THREE.Matrix4().fromArray(node.matrix));
         } else {
@@ -1426,7 +1551,7 @@ define('format_mnemo/vr', [], function() {
         }
         if (node.children) {
             for (var i = 0; i < node.children.length; i++) {
-                obj.add(this.glbNode(json, bin, node.children[i]));
+                obj.add(this.glbNode(ctx, node.children[i]));
             }
         }
         return obj;
@@ -1435,89 +1560,352 @@ define('format_mnemo/vr', [], function() {
     /**
      * Build a glTF mesh into a Three.Group of primitive meshes.
      *
-     * @param {Object} json The parsed glTF.
-     * @param {Object} bin The binary chunk.
+     * @param {Object} ctx The parse context.
      * @param {Number} index The mesh index.
-     * @return {Object} A Three.Group (or Mesh) for the mesh.
+     * @return {Object} A Three.Group for the mesh.
      */
-    Cyberspace.prototype.glbMesh = function(json, bin, index) {
+    Cyberspace.prototype.glbMesh = function(ctx, index) {
         var THREE = this.THREE;
-        var mesh = json.meshes[index];
+        var mesh = ctx.json.meshes[index];
         var out = new THREE.Group();
         for (var p = 0; p < mesh.primitives.length; p++) {
-            var prim = mesh.primitives[p];
-            if (prim.extensions && prim.extensions.KHR_draco_mesh_compression) {
-                throw new Error('Draco compression is not supported');
-            }
-            var geo = new THREE.BufferGeometry();
-            geo.setAttribute('position', new THREE.BufferAttribute(
-                this.glbAccessor(json, bin, prim.attributes.POSITION), 3));
-            if (prim.attributes.NORMAL !== undefined) {
-                geo.setAttribute('normal', new THREE.BufferAttribute(
-                    this.glbAccessor(json, bin, prim.attributes.NORMAL), 3));
-            }
-            if (prim.indices !== undefined) {
-                geo.setIndex(new THREE.BufferAttribute(
-                    this.glbAccessor(json, bin, prim.indices), 1));
-            }
-            if (prim.attributes.NORMAL === undefined) {
-                geo.computeVertexNormals();
-            }
-            out.add(new THREE.Mesh(geo, this.glbMaterial(json, prim.material)));
+            out.add(this.glbPrimitive(ctx, mesh.primitives[p]));
         }
         return out;
     };
 
     /**
-     * A Three.MeshStandardMaterial from a glTF material's PBR factors, with any
-     * emissive scaled to glow (and bloom) after dark.
+     * Build one mesh primitive (geometry attributes + material) into a mesh.
      *
-     * @param {Object} json The parsed glTF.
-     * @param {Number} index The material index (may be undefined).
-     * @return {Object} A Three.MeshStandardMaterial.
+     * @param {Object} ctx The parse context.
+     * @param {Object} prim The glTF primitive.
+     * @return {Object} A Three.Mesh.
      */
-    Cyberspace.prototype.glbMaterial = function(json, index) {
+    Cyberspace.prototype.glbPrimitive = function(ctx, prim) {
         var THREE = this.THREE;
-        var mat = (index !== undefined && json.materials) ? json.materials[index] : {};
-        var pbr = mat.pbrMetallicRoughness || {};
-        var col = pbr.baseColorFactor || [0.8, 0.8, 0.8, 1];
-        var em = mat.emissiveFactor || [0, 0, 0];
-        var emMax = Math.max(em[0], em[1], em[2]);
-        return new THREE.MeshStandardMaterial({
-            color: new THREE.Color(col[0], col[1], col[2]),
-            metalness: pbr.metallicFactor === undefined ? 0.1 : pbr.metallicFactor,
-            roughness: pbr.roughnessFactor === undefined ? 0.8 : pbr.roughnessFactor,
-            emissive: new THREE.Color(
-                Math.min(1, em[0]), Math.min(1, em[1]), Math.min(1, em[2])),
-            emissiveIntensity: emMax > 0 ? (0.7 + this.day.night) : 0
-        });
+        if (prim.extensions && prim.extensions.KHR_draco_mesh_compression) {
+            throw new Error('Draco compression is not supported');
+        }
+        var geo = new THREE.BufferGeometry();
+        var attr = prim.attributes;
+        geo.setAttribute('position', this.glbAttribute(ctx, attr.POSITION));
+        if (attr.NORMAL !== undefined) {
+            geo.setAttribute('normal', this.glbAttribute(ctx, attr.NORMAL));
+        }
+        if (attr.TANGENT !== undefined) {
+            geo.setAttribute('tangent', this.glbAttribute(ctx, attr.TANGENT));
+        }
+        if (attr.TEXCOORD_0 !== undefined) {
+            geo.setAttribute('uv', this.glbAttribute(ctx, attr.TEXCOORD_0));
+        }
+        if (attr.TEXCOORD_1 !== undefined) {
+            geo.setAttribute('uv1', this.glbAttribute(ctx, attr.TEXCOORD_1));
+        }
+        if (attr.COLOR_0 !== undefined) {
+            geo.setAttribute('color', this.glbAttribute(ctx, attr.COLOR_0));
+        }
+        if (prim.indices !== undefined) {
+            geo.setIndex(this.glbAttribute(ctx, prim.indices));
+        }
+        if (attr.NORMAL === undefined) {
+            geo.computeVertexNormals();
+        }
+        return new THREE.Mesh(geo, this.glbMaterial(ctx, prim.material, attr.COLOR_0 !== undefined));
     };
 
     /**
-     * Read a glTF accessor into a typed array (subset: FLOAT / UNSIGNED_SHORT /
-     * UNSIGNED_INT, tightly packed).
+     * Read a glTF accessor into a Three.BufferAttribute.
      *
-     * @param {Object} json The parsed glTF.
-     * @param {Object} bin The binary chunk.
+     * @param {Object} ctx The parse context.
      * @param {Number} index The accessor index.
-     * @return {Object} A Float32Array / Uint16Array / Uint32Array.
+     * @return {Object} A Three.BufferAttribute.
      */
-    Cyberspace.prototype.glbAccessor = function(json, bin, index) {
-        var acc = json.accessors[index];
-        var view = json.bufferViews[acc.bufferView];
-        var comps = {SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4}[acc.type];
-        var count = acc.count * comps;
-        var start = bin.byteOffset + (view.byteOffset || 0) + (acc.byteOffset || 0);
-        if (acc.componentType === 5126) {
-            return new Float32Array(bin.buffer.slice(start, start + count * 4));
+    Cyberspace.prototype.glbAttribute = function(ctx, index) {
+        var acc = this.glbAccessor(ctx, index);
+        return new this.THREE.BufferAttribute(acc.array, acc.itemSize, acc.normalized);
+    };
+
+    /**
+     * Build a Three.MeshStandardMaterial from a glTF material: PBR factors and
+     * textures, vertex colours, alpha mode, double-sidedness, and emissive glow
+     * (scaled by the day/night cycle and the emissive-strength extension).
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Number} index The material index (may be undefined).
+     * @param {Boolean} hasVertexColor Whether the primitive supplies COLOR_0.
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.glbMaterial = function(ctx, index, hasVertexColor) {
+        var THREE = this.THREE;
+        var mat = (index !== undefined && ctx.json.materials) ? ctx.json.materials[index] : {};
+        var pbr = mat.pbrMetallicRoughness || {};
+        var col = pbr.baseColorFactor || [1, 1, 1, 1];
+        var hasMr = !!pbr.metallicRoughnessTexture;
+        var m = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(col[0], col[1], col[2]),
+            metalness: pbr.metallicFactor !== undefined ? pbr.metallicFactor : (hasMr ? 1 : 0.1),
+            roughness: pbr.roughnessFactor !== undefined ? pbr.roughnessFactor : (hasMr ? 1 : 0.8),
+            vertexColors: !!hasVertexColor
+        });
+        if (col[3] < 1) {
+            m.opacity = col[3];
+            m.transparent = true;
         }
-        if (acc.componentType === 5123) {
-            return new Uint16Array(bin.buffer.slice(start, start + count * 2));
+        this.glbTextures(ctx, mat, pbr, m);
+        this.glbEmissive(mat, m);
+        this.glbAlpha(mat, m);
+        return m;
+    };
+
+    /**
+     * Attach the glTF material's textures to a Three material.
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Object} mat The glTF material.
+     * @param {Object} pbr The material's pbrMetallicRoughness block.
+     * @param {Object} m The Three.MeshStandardMaterial to populate.
+     */
+    Cyberspace.prototype.glbTextures = function(ctx, mat, pbr, m) {
+        var THREE = this.THREE;
+        var t;
+        if (pbr.baseColorTexture && (t = this.glbTexture(ctx, pbr.baseColorTexture, true))) {
+            m.map = t;
         }
-        if (acc.componentType === 5125) {
-            return new Uint32Array(bin.buffer.slice(start, start + count * 4));
+        if (pbr.metallicRoughnessTexture && (t = this.glbTexture(ctx, pbr.metallicRoughnessTexture, false))) {
+            m.metalnessMap = t;
+            m.roughnessMap = t;
         }
-        throw new Error('unsupported accessor componentType ' + acc.componentType);
+        if (mat.normalTexture && (t = this.glbTexture(ctx, mat.normalTexture, false))) {
+            m.normalMap = t;
+            if (mat.normalTexture.scale !== undefined) {
+                m.normalScale = new THREE.Vector2(mat.normalTexture.scale, mat.normalTexture.scale);
+            }
+        }
+        if (mat.occlusionTexture && (t = this.glbTexture(ctx, mat.occlusionTexture, false))) {
+            m.aoMap = t;
+            if (mat.occlusionTexture.strength !== undefined) {
+                m.aoMapIntensity = mat.occlusionTexture.strength;
+            }
+        }
+        if (mat.emissiveTexture && (t = this.glbTexture(ctx, mat.emissiveTexture, true))) {
+            m.emissiveMap = t;
+        }
+    };
+
+    /**
+     * Set a material's emissive colour and its day/night-scaled glow intensity.
+     *
+     * @param {Object} mat The glTF material.
+     * @param {Object} m The Three material.
+     */
+    Cyberspace.prototype.glbEmissive = function(mat, m) {
+        var THREE = this.THREE;
+        var em = mat.emissiveFactor || [0, 0, 0];
+        var emMax = Math.max(em[0], em[1], em[2]);
+        m.emissive = new THREE.Color(Math.min(1, em[0]), Math.min(1, em[1]), Math.min(1, em[2]));
+        // An emissive map with no factor still glows: treat the factor as white.
+        if (m.emissiveMap && emMax === 0) {
+            m.emissive = new THREE.Color(1, 1, 1);
+        }
+        var strength = 1;
+        var ext = mat.extensions && mat.extensions.KHR_materials_emissive_strength;
+        if (ext && ext.emissiveStrength !== undefined) {
+            strength = ext.emissiveStrength;
+        }
+        var glows = emMax > 0 || !!m.emissiveMap;
+        m.emissiveIntensity = glows ? (0.7 + this.day.night) * strength : 0;
+    };
+
+    /**
+     * Apply a glTF material's alpha mode and double-sidedness.
+     *
+     * @param {Object} mat The glTF material.
+     * @param {Object} m The Three material.
+     */
+    Cyberspace.prototype.glbAlpha = function(mat, m) {
+        if (mat.alphaMode === 'BLEND') {
+            m.transparent = true;
+        } else if (mat.alphaMode === 'MASK') {
+            m.alphaTest = mat.alphaCutoff !== undefined ? mat.alphaCutoff : 0.5;
+        }
+        if (mat.doubleSided) {
+            m.side = this.THREE.DoubleSide;
+        }
+    };
+
+    /**
+     * Build a Three.Texture from a glTF textureInfo, or null when its image is
+     * unavailable. Cached per (texture, colour-space) in the parse context.
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Object} info The glTF textureInfo (index, texCoord, extensions).
+     * @param {Boolean} srgb Whether the texture holds colour (sRGB) or data (linear).
+     * @return {Object} A Three.Texture, or null.
+     */
+    Cyberspace.prototype.glbTexture = function(ctx, info, srgb) {
+        var THREE = this.THREE;
+        if (!ctx.json.textures) {
+            return null;
+        }
+        var tex = ctx.json.textures[info.index];
+        var img = tex ? ctx.images[tex.source] : null;
+        if (!img) {
+            return null;
+        }
+        var key = info.index + (srgb ? '|s' : '|l');
+        if (ctx.texCache[key]) {
+            return ctx.texCache[key];
+        }
+        var texture = new THREE.Texture(img);
+        // glTF stores images top-left origin, so Three must not flip them.
+        texture.flipY = false;
+        texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        this.glbSampler(ctx, tex, texture);
+        if (info.texCoord) {
+            texture.channel = info.texCoord;
+        }
+        this.glbTexTransform(info, texture);
+        texture.needsUpdate = true;
+        ctx.texCache[key] = texture;
+        return texture;
+    };
+
+    /**
+     * Apply a glTF sampler's wrap and filter modes to a Three.Texture.
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Object} tex The glTF texture entry.
+     * @param {Object} texture The Three.Texture to configure.
+     */
+    Cyberspace.prototype.glbSampler = function(ctx, tex, texture) {
+        var THREE = this.THREE;
+        var wrap = {
+            33071: THREE.ClampToEdgeWrapping,
+            33648: THREE.MirroredRepeatWrapping,
+            10497: THREE.RepeatWrapping
+        };
+        var mag = {9728: THREE.NearestFilter, 9729: THREE.LinearFilter};
+        var min = {
+            9728: THREE.NearestFilter, 9729: THREE.LinearFilter,
+            9984: THREE.NearestMipmapNearestFilter, 9985: THREE.LinearMipmapNearestFilter,
+            9986: THREE.NearestMipmapLinearFilter, 9987: THREE.LinearMipmapLinearFilter
+        };
+        var s = (ctx.json.samplers && tex.sampler !== undefined) ? ctx.json.samplers[tex.sampler] : {};
+        texture.wrapS = wrap[s.wrapS] || THREE.RepeatWrapping;
+        texture.wrapT = wrap[s.wrapT] || THREE.RepeatWrapping;
+        if (s.magFilter) {
+            texture.magFilter = mag[s.magFilter] || THREE.LinearFilter;
+        }
+        if (s.minFilter) {
+            texture.minFilter = min[s.minFilter] || THREE.LinearMipmapLinearFilter;
+        }
+    };
+
+    /**
+     * Apply the KHR_texture_transform extension (offset/scale/rotation) to a
+     * Three.Texture, when present on the textureInfo.
+     *
+     * @param {Object} info The glTF textureInfo.
+     * @param {Object} texture The Three.Texture.
+     */
+    Cyberspace.prototype.glbTexTransform = function(info, texture) {
+        var tt = info.extensions && info.extensions.KHR_texture_transform;
+        if (!tt) {
+            return;
+        }
+        if (tt.offset) {
+            texture.offset.set(tt.offset[0], tt.offset[1]);
+        }
+        if (tt.scale) {
+            texture.repeat.set(tt.scale[0], tt.scale[1]);
+        }
+        if (tt.rotation !== undefined) {
+            texture.rotation = tt.rotation;
+        }
+        if (tt.texCoord !== undefined) {
+            texture.channel = tt.texCoord;
+        }
+    };
+
+    /**
+     * Read a glTF accessor into a typed array, de-interleaving any byte stride
+     * and applying sparse substitutions. Supports every glTF component type.
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Number} index The accessor index.
+     * @return {Object} {array, itemSize, normalized}.
+     */
+    Cyberspace.prototype.glbAccessor = function(ctx, index) {
+        var acc = ctx.json.accessors[index];
+        var comps = {SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16}[acc.type];
+        var spec = this.glbComponent(acc.componentType);
+        var out = new spec.array(acc.count * comps);
+        if (acc.bufferView !== undefined) {
+            var view = ctx.json.bufferViews[acc.bufferView];
+            var buf = ctx.buffers[view.buffer || 0];
+            var dv = new DataView(buf.buffer, buf.byteOffset);
+            var stride = view.byteStride || comps * spec.bytes;
+            var base = (view.byteOffset || 0) + (acc.byteOffset || 0);
+            for (var e = 0; e < acc.count; e++) {
+                for (var c = 0; c < comps; c++) {
+                    out[e * comps + c] = dv[spec.get](base + e * stride + c * spec.bytes, true);
+                }
+            }
+        }
+        if (acc.sparse) {
+            this.glbSparse(ctx, acc, out, comps);
+        }
+        return {array: out, itemSize: comps, normalized: !!acc.normalized};
+    };
+
+    /**
+     * Map a glTF componentType to its typed-array class, byte size and DataView
+     * getter.
+     *
+     * @param {Number} type The glTF componentType constant.
+     * @return {Object} {array, bytes, get}.
+     */
+    Cyberspace.prototype.glbComponent = function(type) {
+        var map = {
+            5120: {array: Int8Array, bytes: 1, get: 'getInt8'},
+            5121: {array: Uint8Array, bytes: 1, get: 'getUint8'},
+            5122: {array: Int16Array, bytes: 2, get: 'getInt16'},
+            5123: {array: Uint16Array, bytes: 2, get: 'getUint16'},
+            5125: {array: Uint32Array, bytes: 4, get: 'getUint32'},
+            5126: {array: Float32Array, bytes: 4, get: 'getFloat32'}
+        };
+        if (!map[type]) {
+            throw new Error('unsupported accessor componentType ' + type);
+        }
+        return map[type];
+    };
+
+    /**
+     * Apply a glTF accessor's sparse substitutions onto an already-read array.
+     *
+     * @param {Object} ctx The parse context.
+     * @param {Object} acc The accessor carrying a sparse block.
+     * @param {Object} out The dense typed array to patch in place.
+     * @param {Number} comps Components per element.
+     */
+    Cyberspace.prototype.glbSparse = function(ctx, acc, out, comps) {
+        var s = acc.sparse;
+        var idxSpec = this.glbComponent(s.indices.componentType);
+        var valSpec = this.glbComponent(acc.componentType);
+        var iv = ctx.json.bufferViews[s.indices.bufferView];
+        var vv = ctx.json.bufferViews[s.values.bufferView];
+        var ibuf = ctx.buffers[iv.buffer || 0];
+        var vbuf = ctx.buffers[vv.buffer || 0];
+        var idv = new DataView(ibuf.buffer, ibuf.byteOffset);
+        var vdv = new DataView(vbuf.buffer, vbuf.byteOffset);
+        var ib = (iv.byteOffset || 0) + (s.indices.byteOffset || 0);
+        var vb = (vv.byteOffset || 0) + (s.values.byteOffset || 0);
+        for (var i = 0; i < s.count; i++) {
+            var target = idv[idxSpec.get](ib + i * idxSpec.bytes, true);
+            for (var c = 0; c < comps; c++) {
+                out[target * comps + c] = vdv[valSpec.get](vb + (i * comps + c) * valSpec.bytes, true);
+            }
+        }
     };
 
     /**
