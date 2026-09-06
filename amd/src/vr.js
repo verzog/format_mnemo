@@ -1415,19 +1415,21 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildGltf = function(json, bin, baseUrl) {
         var self = this;
         var THREE = this.THREE;
-        return this.glbBuffers(json, bin, baseUrl).then(function(buffers) {
-            return self.glbImages(json, buffers, baseUrl).then(function(images) {
-                var ctx = {
-                    json: json, buffers: buffers, images: images,
-                    baseUrl: baseUrl, texCache: {}
-                };
-                var group = new THREE.Group();
-                var scene = json.scenes[json.scene || 0];
-                for (var i = 0; i < scene.nodes.length; i++) {
-                    group.add(self.glbNode(ctx, scene.nodes[i]));
-                }
-                return group;
-            });
+        var buffers;
+        return this.glbBuffers(json, bin, baseUrl).then(function(resolved) {
+            buffers = resolved;
+            return self.glbImages(json, buffers, baseUrl);
+        }).then(function(images) {
+            var ctx = {
+                json: json, buffers: buffers, images: images,
+                baseUrl: baseUrl, texCache: {}
+            };
+            var group = new THREE.Group();
+            var scene = json.scenes[json.scene || 0];
+            for (var i = 0; i < scene.nodes.length; i++) {
+                group.add(self.glbNode(ctx, scene.nodes[i]));
+            }
+            return group;
         });
     };
 
@@ -1641,10 +1643,20 @@ define('format_mnemo/vr', [], function() {
         var pbr = mat.pbrMetallicRoughness || {};
         var col = pbr.baseColorFactor || [1, 1, 1, 1];
         var hasMr = !!pbr.metallicRoughnessTexture;
+        // Fall back to the plugin's softer defaults only when neither a factor
+        // nor a metallic-roughness texture is given (spec default is 1 for both).
+        var metalness = hasMr ? 1 : 0.1;
+        if (pbr.metallicFactor !== undefined) {
+            metalness = pbr.metallicFactor;
+        }
+        var roughness = hasMr ? 1 : 0.8;
+        if (pbr.roughnessFactor !== undefined) {
+            roughness = pbr.roughnessFactor;
+        }
         var m = new THREE.MeshStandardMaterial({
             color: new THREE.Color(col[0], col[1], col[2]),
-            metalness: pbr.metallicFactor !== undefined ? pbr.metallicFactor : (hasMr ? 1 : 0.1),
-            roughness: pbr.roughnessFactor !== undefined ? pbr.roughnessFactor : (hasMr ? 1 : 0.8),
+            metalness: metalness,
+            roughness: roughness,
             vertexColors: !!hasVertexColor
         });
         if (col[3] < 1) {
@@ -1757,7 +1769,7 @@ define('format_mnemo/vr', [], function() {
             return ctx.texCache[key];
         }
         var texture = new THREE.Texture(img);
-        // glTF stores images top-left origin, so Three must not flip them.
+        // Textures use glTF's top-left image origin, so Three must not flip them.
         texture.flipY = false;
         texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         this.glbSampler(ctx, tex, texture);
@@ -1780,15 +1792,15 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.glbSampler = function(ctx, tex, texture) {
         var THREE = this.THREE;
         var wrap = {
-            33071: THREE.ClampToEdgeWrapping,
-            33648: THREE.MirroredRepeatWrapping,
-            10497: THREE.RepeatWrapping
+            '33071': THREE.ClampToEdgeWrapping,
+            '33648': THREE.MirroredRepeatWrapping,
+            '10497': THREE.RepeatWrapping
         };
-        var mag = {9728: THREE.NearestFilter, 9729: THREE.LinearFilter};
+        var mag = {'9728': THREE.NearestFilter, '9729': THREE.LinearFilter};
         var min = {
-            9728: THREE.NearestFilter, 9729: THREE.LinearFilter,
-            9984: THREE.NearestMipmapNearestFilter, 9985: THREE.LinearMipmapNearestFilter,
-            9986: THREE.NearestMipmapLinearFilter, 9987: THREE.LinearMipmapLinearFilter
+            '9728': THREE.NearestFilter, '9729': THREE.LinearFilter,
+            '9984': THREE.NearestMipmapNearestFilter, '9985': THREE.LinearMipmapNearestFilter,
+            '9986': THREE.NearestMipmapLinearFilter, '9987': THREE.LinearMipmapLinearFilter
         };
         var s = (ctx.json.samplers && tex.sampler !== undefined) ? ctx.json.samplers[tex.sampler] : {};
         texture.wrapS = wrap[s.wrapS] || THREE.RepeatWrapping;
@@ -1867,12 +1879,12 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.glbComponent = function(type) {
         var map = {
-            5120: {array: Int8Array, bytes: 1, get: 'getInt8'},
-            5121: {array: Uint8Array, bytes: 1, get: 'getUint8'},
-            5122: {array: Int16Array, bytes: 2, get: 'getInt16'},
-            5123: {array: Uint16Array, bytes: 2, get: 'getUint16'},
-            5125: {array: Uint32Array, bytes: 4, get: 'getUint32'},
-            5126: {array: Float32Array, bytes: 4, get: 'getFloat32'}
+            '5120': {array: Int8Array, bytes: 1, get: 'getInt8'},
+            '5121': {array: Uint8Array, bytes: 1, get: 'getUint8'},
+            '5122': {array: Int16Array, bytes: 2, get: 'getInt16'},
+            '5123': {array: Uint16Array, bytes: 2, get: 'getUint16'},
+            '5125': {array: Uint32Array, bytes: 4, get: 'getUint32'},
+            '5126': {array: Float32Array, bytes: 4, get: 'getFloat32'}
         };
         if (!map[type]) {
             throw new Error('unsupported accessor componentType ' + type);
