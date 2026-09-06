@@ -2310,8 +2310,10 @@ define('format_mnemo/vr', [], function() {
         var full = {depthBuffer: true, samples: 4};
         var half = {depthBuffer: false};
 
+        // All post targets stay linear: tone mapping is applied writing the
+        // scene here, bloom is summed in linear light, and the final composite
+        // encodes to sRGB for display (see compositeMat).
         var scene = new THREE.WebGLRenderTarget(w, h, full);
-        scene.texture.colorSpace = THREE.SRGBColorSpace;
         var bright = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurA = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurB = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
@@ -2327,7 +2329,7 @@ define('format_mnemo/vr', [], function() {
         ].join('\n');
 
         var thresholdMat = new THREE.ShaderMaterial({
-            uniforms: {tDiffuse: {value: null}, threshold: {value: 0.7}, knee: {value: 0.25}},
+            uniforms: {tDiffuse: {value: null}, threshold: {value: 0.62}, knee: {value: 0.2}},
             toneMapped: false,
             vertexShader: vert,
             fragmentShader: [
@@ -2366,7 +2368,7 @@ define('format_mnemo/vr', [], function() {
 
         // Bloom is subtle by day (so the bright sky does not wash out) and
         // strong after dark, when neon and lit windows should blaze.
-        var bloomStrength = 0.35 + 0.75 * this.day.night;
+        var bloomStrength = 0.12 + 0.9 * this.day.night;
         var compositeMat = new THREE.ShaderMaterial({
             uniforms: {tScene: {value: null}, tBloom: {value: null}, strength: {value: bloomStrength}},
             toneMapped: false,
@@ -2374,10 +2376,17 @@ define('format_mnemo/vr', [], function() {
             fragmentShader: [
                 'varying vec2 vUv;',
                 'uniform sampler2D tScene; uniform sampler2D tBloom; uniform float strength;',
+                '// Encode linear light to sRGB for the display (the intermediate',
+                '// targets are linear, and this raw shader is not auto-encoded).',
+                'vec3 lin2srgb(vec3 c){',
+                '  vec3 lo = c * 12.92;',
+                '  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;',
+                '  return mix(hi, lo, step(c, vec3(0.0031308)));',
+                '}',
                 'void main(){',
                 '  vec3 base = texture2D(tScene, vUv).rgb;',
                 '  vec3 bloom = texture2D(tBloom, vUv).rgb;',
-                '  gl_FragColor = vec4(base + bloom * strength, 1.0);',
+                '  gl_FragColor = vec4(lin2srgb(base + bloom * strength), 1.0);',
                 '}'
             ].join('\n')
         });
