@@ -211,13 +211,13 @@ const scenarios = [
         }
     },
     {
-        name: 'road: on foot, off-road position is clamped to the corridor',
+        name: 'road: a small overstep on foot is clamped back to the corridor',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const fake = {
-                flyThreshold: 1.2,
+                flyThreshold: 1.2, captureMargin: 3,
                 roads: [{xMin: -5, xMax: 5, zMin: -100, zMax: 12}],
-                player: {position: {x: 20, y: 0, z: 0}}
+                player: {position: {x: 6, y: 0, z: 0}}
             };
             CS.prototype.constrainToRoad.call(fake);
             const p = fake.player.position;
@@ -226,26 +226,41 @@ const scenarios = [
         }
     },
     {
+        name: 'road: landing far off-road from flight is not snapped',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const fake = {
+                flyThreshold: 1.2, captureMargin: 3,
+                roads: [{xMin: -5, xMax: 5, zMin: -100, zMax: 12}],
+                player: {position: {x: 200, y: 0, z: 0}}
+            };
+            CS.prototype.constrainToRoad.call(fake);
+            const p = fake.player.position;
+            const pass = Math.abs(p.x - 200) < 1e-9;
+            return {pass, detail: `x=${p.x} (want 200, no teleport)`};
+        }
+    },
+    {
         name: 'road: while flying, movement is unconstrained',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const fake = {
-                flyThreshold: 1.2,
+                flyThreshold: 1.2, captureMargin: 3,
                 roads: [{xMin: -5, xMax: 5, zMin: -100, zMax: 12}],
-                player: {position: {x: 20, y: 3, z: 0}}
+                player: {position: {x: 6, y: 3, z: 0}}
             };
             CS.prototype.constrainToRoad.call(fake);
             const p = fake.player.position;
-            const pass = Math.abs(p.x - 20) < 1e-9;
-            return {pass, detail: `x=${p.x} (want 20, unclamped)`};
+            const pass = Math.abs(p.x - 6) < 1e-9;
+            return {pass, detail: `x=${p.x} (want 6, unclamped)`};
         }
     },
     {
-        name: 'road: nearest of avenue/side-street corridors is chosen',
+        name: 'road: nearest corridor within reach is chosen',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const fake = {
-                flyThreshold: 1.2,
+                flyThreshold: 1.2, captureMargin: 3,
                 roads: [
                     {xMin: -5, xMax: 5, zMin: -100, zMax: 12},
                     {xMin: 5, xMax: 25, zMin: -54, zMax: -46}

@@ -138,6 +138,7 @@ define('format_mnemo/vr', [], function() {
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
         this.flyThreshold = 1.2; // Rig height above which movement is free-flight.
+        this.captureMargin = 3; // Only clamp to a road within this distance.
 
         this.build();
     }
@@ -619,32 +620,15 @@ define('format_mnemo/vr', [], function() {
 
         var y;
         var x;
-        // Floor ledges (spandrels): a raised band with an ambient-occlusion
-        // shadow beneath, repeated every floor so it tiles vertically.
-        for (y = 0; y < rows; y++) {
-            var ly = y * ch;
-            g.fillStyle = '#' + ledge.getHexString();
-            g.fillRect(0, ly, SIZE, 4);
-            g.fillStyle = 'rgba(0,0,0,0.28)';
-            g.fillRect(0, ly + 4, SIZE, 3);
-            b.fillStyle = 'rgb(200,200,200)';
-            b.fillRect(0, ly, SIZE, 4);
-            b.fillStyle = 'rgb(60,60,60)';
-            b.fillRect(0, ly + 4, SIZE, 3);
-        }
-
+        // Windows: glass inset into each cell, with a mullion frame drawn as a
+        // border (not a full-cell fill) so the concrete, mottling and the floor
+        // ledges added afterwards all survive on the colour and height maps.
         for (y = 0; y < rows; y++) {
             for (x = 0; x < cols; x++) {
                 var wx = x * cw + frame;
                 var wy = y * ch + frame + 4;
                 var ww = cw - frame * 2;
                 var wh = ch - frame * 2 - 4;
-
-                // Mullion frame (recessed dark on bump).
-                g.fillStyle = '#' + mullion.getHexString();
-                g.fillRect(x * cw, y * ch, cw, ch);
-                b.fillStyle = 'rgb(150,150,150)';
-                b.fillRect(x * cw, y * ch, cw, ch);
 
                 // Glass: a vertical gradient plus a diagonal reflection streak.
                 var grd = g.createLinearGradient(wx, wy, wx, wy + wh);
@@ -661,7 +645,15 @@ define('format_mnemo/vr', [], function() {
                 g.closePath();
                 g.fill();
 
-                // Windows sit deeper (bump) and read as glossy glass (rough).
+                // Mullion frame border around the glass (raised on the height map).
+                g.strokeStyle = '#' + mullion.getHexString();
+                g.lineWidth = 3;
+                g.strokeRect(wx - 1.5, wy - 1.5, ww + 3, wh + 3);
+                b.strokeStyle = 'rgb(180,180,180)';
+                b.lineWidth = 3;
+                b.strokeRect(wx - 1.5, wy - 1.5, ww + 3, wh + 3);
+
+                // Windows sit deeper (height) and read as glossy glass (rough).
                 b.fillStyle = 'rgb(70,70,70)';
                 b.fillRect(wx, wy, ww, wh);
                 r.fillStyle = 'rgb(45,45,45)';
@@ -676,6 +668,21 @@ define('format_mnemo/vr', [], function() {
                     e.globalAlpha = 1;
                 }
             }
+        }
+
+        // Floor ledges (spandrels): a raised band with an ambient-occlusion
+        // shadow beneath, drawn after the windows so they read on the colour and
+        // height (normal) maps, and tiling vertically every floor.
+        for (y = 0; y < rows; y++) {
+            var ly = y * ch;
+            g.fillStyle = '#' + ledge.getHexString();
+            g.fillRect(0, ly, SIZE, 4);
+            g.fillStyle = 'rgba(0,0,0,0.28)';
+            g.fillRect(0, ly + 4, SIZE, 3);
+            b.fillStyle = 'rgb(205,205,205)';
+            b.fillRect(0, ly, SIZE, 4);
+            b.fillStyle = 'rgb(55,55,55)';
+            b.fillRect(0, ly + 4, SIZE, 3);
         }
 
         // Rust patches - heavy on Entropism, a light bloom elsewhere - on the
@@ -1030,10 +1037,11 @@ define('format_mnemo/vr', [], function() {
         vent.position.set(0, 0.75, d / 2 + 0.16);
         group.add(vent);
 
+        // Access panel on the right side wall, clear of the front signboard.
         var panel = new THREE.Mesh(
-            new THREE.BoxGeometry(1.2, 1.6, 0.2), this.trimMaterial(style, 0, 1)
+            new THREE.BoxGeometry(0.2, 1.6, 1.2), this.trimMaterial(style, 0, 1)
         );
-        panel.position.set(-w / 2 + 0.9, 1.7, d / 2 + 0.1);
+        panel.position.set(w / 2 + 0.06, 1.7, -d * 0.12);
         group.add(panel);
 
         var pipe = new THREE.Mesh(
@@ -2278,6 +2286,13 @@ define('format_mnemo/vr', [], function() {
                 bestX = cx;
                 bestZ = cz;
             }
+        }
+        // Only capture movement that is already at/near a road. On-foot steps
+        // are tiny, so this holds walkers on the road; but someone who flew far
+        // away and descends off-road is left free rather than being teleported
+        // across the scene (they are recaptured once they walk near a road).
+        if (bestDist > this.captureMargin * this.captureMargin) {
+            return;
         }
         this.player.position.x = bestX;
         this.player.position.z = bestZ;
