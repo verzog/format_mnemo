@@ -1,8 +1,9 @@
 name: WebXR gesture smoke test
 
-# Runs the headless gesture smoke test (tests/webxr) that drives the real
-# GestureManager through scripted controller/hand input. Separate from the
-# Moodle CI matrix so it never blocks it.
+# Runs the headless WebXR tests (tests/webxr): the gesture smoke test that
+# drives the real GestureManager through scripted controller/hand input, and
+# the glTF loader test that parses textured .glb models with the real loader.
+# Separate from the Moodle CI matrix so it never blocks it.
 on:
   push:
     branches:
@@ -33,6 +34,6 @@ jobs:
         working-directory: tests/webxr
         run: npx playwright install --with-deps chromium
 
-      - name: Run gesture smoke test
+      - name: Run WebXR gesture + glTF loader tests
         working-directory: tests/webxr
         run: npm test

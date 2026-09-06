@@ -453,6 +453,30 @@ function format_mnemo_inplace_editable($itemtype, $itemid, $newvalue) {
  * @return bool false if the file was not found, just send the file otherwise and do not return anything
  */
 function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options = []) {
+    // Site-wide prop asset pack uploaded in the plugin's admin settings, served
+    // from the system context. These are decorative 3D models, served like the
+    // plugin's bundled ones (which are already public plugin static files).
+    if ($filearea === 'assetpack') {
+        if ($context->contextlevel != CONTEXT_SYSTEM) {
+            return false;
+        }
+        // The first path segment is a cache-busting revision (the newest file's
+        // modified time), not the stored itemid; the files always live at
+        // itemid 0. Discard it and serve from itemid 0.
+        array_shift($args);
+        $filename = array_pop($args);
+        $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
+
+        $fs = get_file_storage();
+        $file = $fs->get_file($context->id, 'format_mnemo', 'assetpack', 0, $filepath, $filename);
+        if (!$file || $file->is_directory()) {
+            return false;
+        }
+
+        send_stored_file($file, DAYSECS, 0, $forcedownload, $options);
+        return true;
+    }
+
     if ($context->contextlevel != CONTEXT_COURSE) {
         return false;
     }

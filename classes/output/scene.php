@@ -239,17 +239,60 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * The base URL the client loads glTF prop models from. An admin can set a
-     * custom asset pack URL; otherwise the plugin's bundled models are used.
+     * The base URL the client loads glTF prop models from, in order of
+     * precedence: an admin-configured external asset-pack URL, then an asset
+     * pack uploaded into Moodle, then the plugin's bundled models.
      *
      * @return string
      */
     protected function models_base_url(): string {
+        // 1) An explicit external asset-pack URL always wins.
         $base = get_config('format_mnemo', 'assetbaseurl');
         if (!empty($base)) {
             return rtrim($base, '/') . '/';
         }
+        // 2) An asset pack uploaded into Moodle (system context file area).
+        $uploaded = $this->uploaded_pack_base_url();
+        if ($uploaded !== null) {
+            return $uploaded;
+        }
+        // 3) The props bundled with the plugin.
         return (new moodle_url('/course/format/mnemo/models/'))->out(false);
+    }
+
+    /**
+     * The pluginfile base URL for an admin-uploaded prop asset pack, or null
+     * when none has been uploaded. The client appends "<name>.glb" to this, so
+     * the returned URL is slash-terminated (or ends where a filename belongs).
+     *
+     * @return string|null
+     */
+    protected function uploaded_pack_base_url(): ?string {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
+        if (empty($files)) {
+            return null;
+        }
+        // Use the newest file's modified time as a revision in the URL, so that
+        // replacing a same-named model busts the browser cache (the pluginfile
+        // handler ignores this segment and always serves the itemid-0 files).
+        $rev = 0;
+        foreach ($files as $file) {
+            $rev = max($rev, (int)$file->get_timemodified());
+        }
+        // Build a per-file pluginfile URL with a sentinel name, then trim the
+        // name so the client can append the real "<role>.glb" it needs.
+        $sentinel = 'model.glb';
+        $url = moodle_url::make_pluginfile_url(
+            $context->id,
+            'format_mnemo',
+            'assetpack',
+            $rev,
+            '/',
+            $sentinel
+        )->out(false);
+        return substr($url, 0, -strlen($sentinel));
     }
 
     /**
