@@ -1431,7 +1431,11 @@ define('format_mnemo/vr', [], function() {
                 var em = m.emissive;
                 var glows = !!m.emissiveMap || (em && (em.r + em.g + em.b) > 0);
                 if (glows) {
-                    m.emissiveIntensity = (0.7 + night) * (m.emissiveIntensity || 1);
+                    // Keep an intentionally disabled emission (emissiveIntensity
+                    // 0, e.g. KHR_materials_emissive_strength 0) off; only default
+                    // when the loader left it unset.
+                    var base = (typeof m.emissiveIntensity === 'number') ? m.emissiveIntensity : 1;
+                    m.emissiveIntensity = (0.7 + night) * base;
                 }
             }
         });
@@ -4397,9 +4401,23 @@ define('format_mnemo/vr', [], function() {
             // Import map so the addon glTF loaders resolve the bare 'three'
             // specifier to the same module the client uses, and 'three/addons/'
             // to the bundled example modules. Must precede the loader script.
-            // Skipped when the page already has an import map (the client then
-            // falls back to its built-in glTF parser).
-            if (config.addonsbaseurl && !document.querySelector('script[type="importmap"]')) {
+            // Only skipped when a page already maps 'three' itself (so we do not
+            // fight an existing three provider); an unrelated import map does not
+            // stop us — modern browsers apply multiple maps, and if not, the
+            // client falls back to its built-in glTF parser.
+            var mapsThree = false;
+            var existingmaps = document.querySelectorAll('script[type="importmap"]');
+            for (var mi = 0; mi < existingmaps.length; mi++) {
+                try {
+                    var parsed = JSON.parse(existingmaps[mi].textContent || '{}');
+                    if (parsed.imports && parsed.imports.three) {
+                        mapsThree = true;
+                    }
+                } catch (e) {
+                    // Ignore an unparseable import map.
+                }
+            }
+            if (config.addonsbaseurl && !mapsThree) {
                 try {
                     var importmap = document.createElement('script');
                     importmap.type = 'importmap';

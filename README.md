@@ -215,8 +215,12 @@ By default the scene loads its bundled Three.js with a dynamic ES-module
 asset loaders are wired up with an **import map** (an inline
 `<script type="importmap">`); if your site enforces a strict CSP that blocks
 inline scripts, allow it (a nonce or `'unsafe-inline'` for `script-src`) so the
-Draco/KTX2/meshopt decoders can load. Without it, the plugin falls back to its
-built-in **uncompressed**-glTF parser, so uncompressed packs still work. If
+Draco/KTX2/meshopt decoders can load. The Draco and KTX2 decoders also run in
+**Web Workers created from `blob:` URLs**, so a strict CSP must additionally
+allow `worker-src blob:` (or `child-src blob:` where `worker-src` is
+unsupported) — with only `worker-src 'self'`, the import map loads but every
+Draco/KTX2 model still fails. Without these allowances the plugin falls back to
+its built-in **uncompressed**-glTF parser, so uncompressed packs still work. If
 Three.js itself cannot load at all, the plugin falls back to the accessible list
 view with a short message.
 

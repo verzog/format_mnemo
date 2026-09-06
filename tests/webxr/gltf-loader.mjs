@@ -121,19 +121,24 @@ const meshopt = await loadFixture('av-meshopt.glb');
 check('meshopt-compressed .glb decodes', meshopt.ok && meshopt.meshes > 0 && meshopt.verts > 0,
     meshopt.ok ? `meshes=${meshopt.meshes} verts=${meshopt.verts}` : meshopt.err);
 
-// dressLoadedModel raises emissiveIntensity for an emissive material at night.
+// dressLoadedModel raises emissiveIntensity for an emissive material at night,
+// but keeps an intentionally disabled emission (intensity 0) off.
 const dressed = await page.evaluate(() => {
     const THREE = window.__mnemoLoader.THREE;
     const CS = window.__mnemoModule._Cyberspace;
     const g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 0, 0)});
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat));
+    const glow = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 0, 0)});
+    const off = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 0, 0)});
+    off.emissiveIntensity = 0;
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), glow));
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), off));
     CS.prototype.dressLoadedModel.call({day: {night: 1}}, g);
-    return mat.emissiveIntensity;
+    return {glow: glow.emissiveIntensity, off: off.emissiveIntensity};
 });
-check('dressLoadedModel boosts emissive at night', Math.abs(dressed - 1.7) < 1e-6, `intensity=${dressed}`);
+check('dressLoadedModel boosts emissive at night', Math.abs(dressed.glow - 1.7) < 1e-6, `glow=${dressed.glow}`);
+check('dressLoadedModel keeps disabled emission off', dressed.off === 0, `off=${dressed.off}`);
 
-const total = 5;
+const total = 6;
 console.log(`\n${total - failed}/${total} addon glTF loader checks passed.`);
 
 await browser.close();
