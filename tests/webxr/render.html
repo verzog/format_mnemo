@@ -74,6 +74,16 @@ var config = {
     sections: sections(parseInt(q('n', '5'), 10))
 };
 
+// Dev only: mark the first activity of each topic as a video screen for review
+// (?video=embed shows the poster; ?video=file needs a real same-origin file).
+if (q('video')) {
+    config.sections.forEach(function(s) {
+        if (s.activities[0]) {
+            s.activities[0].video = {kind: q('video'), src: q('videosrc', '')};
+        }
+    });
+}
+
 try {
     var root = document.getElementById('stage');
     var cs = new window.__mnemoModule._Cyberspace(THREE, root, config);

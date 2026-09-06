@@ -114,6 +114,7 @@ define('format_mnemo/vr', [], function() {
         this.day = null; // Daylight parameters, computed in build().
 
         this.interactive = []; // Meshes that can be gazed/clicked to open.
+        this.videos = []; // HTMLVideoElements driving in-world screens.
         this.hovered = null; // Currently highlighted mesh.
         this.controllers = []; // XR controller target-ray spaces.
         this.keys = {}; // Held keyboard keys.
@@ -220,6 +221,7 @@ define('format_mnemo/vr', [], function() {
         this.buildVrButton();
         this.buildFullscreenButton();
         this.bindDesktopControls();
+        this.bindMediaPause();
         // Cinematic post pipeline (bloom) for the on-screen view.
         this.buildPostFX();
 
@@ -2203,6 +2205,14 @@ define('format_mnemo/vr', [], function() {
             var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
             var depth = style.footprint[1];
             var bz = z + zside * (streetHalf + depth / 2 + 0.4);
+            // A video activity is a large screen instead of a building.
+            if (act.video) {
+                var vscreen = self.makeVideoScreen(act);
+                vscreen.group.position.set(bx, 3.2, bz);
+                vscreen.group.lookAt(bx, 3.2, z);
+                self.scene.add(vscreen.group);
+                return;
+            }
             var built = self.makeStructure(act, style);
             built.group.position.set(bx, 0, bz);
             // Face the street centreline so the signboard reads from the street.
@@ -2759,6 +2769,237 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build a large interactive video screen for a video activity. Every screen
+     * starts as a poster (so no media — and no third-party request — loads until
+     * the learner acts). Clicking a direct-file screen loads and plays the video
+     * in-world (a user gesture, so with sound); clicking an embed (or a file that
+     * fails to decode) opens the activity. The frame colour reflects the
+     * activity state, like a building's sign.
+     *
+     * @param {Object} act The activity node (name, url, state, video:{kind, src}).
+     * @return {Object} {group, panel} — the screen group and its raycast target.
+     */
+    Cyberspace.prototype.makeVideoScreen = function(act) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var w = 5.2;
+        var h = 2.95; // Roughly 16:9.
+        var colour = STATE_COLOURS[act.state] || this.palette.primary;
+
+        // Neon frame (glow behind the screen); also the hover-highlight target.
+        var frameMat = new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.9});
+        var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.4, h + 0.4), frameMat);
+
+        var screenMat = new THREE.MeshBasicMaterial({map: this.makePosterTexture(act.name)});
+        var screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), screenMat);
+        screen.position.z = 0.05;
+        frame.add(screen);
+
+        // A support post to the ground so the screen reads as a street fixture.
+        var post = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, 24, 0.16),
+            new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.5})
+        );
+        post.position.set(0, -h / 2 - 12, -0.05);
+        frame.add(post);
+        group.add(frame);
+
+        screen.userData = {
+            name: act.name,
+            material: frameMat,
+            baseColour: colour,
+            interactive: true
+        };
+        if (act.video.kind === 'file') {
+            // Deferred: the video is created and fetched only on activation.
+            screen.userData.videoSrc = act.video.src;
+            screen.userData.viewUrl = act.url;
+            screen.userData.screenMat = screenMat;
+        } else {
+            screen.userData.url = act.url;
+        }
+        this.interactive.push(screen);
+
+        return {group: group, panel: screen};
+    };
+
+    /**
+     * Start a deferred file video on its screen: create the element, swap the
+     * poster for a live VideoTexture, play it (from a click, so with sound), and
+     * record the module view so completion-on-view still fires. A file that
+     * cannot be decoded falls back to the poster + open behaviour.
+     *
+     * @param {Object} screen The screen mesh whose userData carries videoSrc.
+     */
+    Cyberspace.prototype.startVideo = function(screen) {
+        var THREE = this.THREE;
+        var self = this;
+        var ud = screen.userData;
+        var video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.loop = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.src = ud.videoSrc;
+        var vtex = new THREE.VideoTexture(video);
+        vtex.colorSpace = THREE.SRGBColorSpace;
+        ud.screenMat.map = vtex;
+        ud.screenMat.needsUpdate = true;
+        video.addEventListener('error', function() {
+            ud.screenMat.map = self.makePosterTexture(ud.name);
+            ud.screenMat.needsUpdate = true;
+            delete ud.videoToggle;
+            ud.url = ud.viewUrl;
+        });
+        var playing = video.play();
+        if (playing && playing.catch) {
+            playing.catch(function() {
+                // Play was rejected; the viewer can click again to retry.
+            });
+        }
+        ud.videoToggle = video;
+        delete ud.videoSrc; // Subsequent clicks toggle play/pause.
+        this.videos.push(video);
+        this.recordView(ud.viewUrl);
+    };
+
+    /**
+     * Record a module view (best-effort) so a video watched in-world still
+     * satisfies view-based completion, without navigating away. redirect:'manual'
+     * avoids following the module's redirect to (and downloading) the media.
+     *
+     * @param {String} url The activity view URL.
+     */
+    Cyberspace.prototype.recordView = function(url) {
+        if (!url || !window.fetch) {
+            return;
+        }
+        try {
+            window.fetch(url, {credentials: 'same-origin', redirect: 'manual'}).catch(function() {
+                // Best-effort view ping; nothing to do on failure.
+            });
+        } catch (e) {
+            // Fetch unavailable or blocked; skip the view ping.
+        }
+    };
+
+    /**
+     * Build a poster texture for a video screen: a dark panel with a neon play
+     * triangle and the activity name.
+     *
+     * @param {String} name The activity name.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.makePosterTexture = function(name) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 576;
+        var ctx = canvas.getContext('2d');
+        var hex = '#' + ('000000' + this.palette.primary.toString(16)).slice(-6);
+
+        ctx.fillStyle = '#05070d';
+        ctx.fillRect(0, 0, 1024, 576);
+
+        // Play triangle.
+        ctx.fillStyle = hex;
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 40;
+        ctx.beginPath();
+        ctx.moveTo(430, 210);
+        ctx.lineTo(430, 366);
+        ctx.lineTo(610, 288);
+        ctx.closePath();
+        ctx.fill();
+
+        // Activity name.
+        ctx.shadowBlur = 16;
+        ctx.font = 'bold 46px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = hex;
+        var clipped = name.length > 28 ? name.slice(0, 27) + '…' : name;
+        ctx.fillText(clipped, 512, 470);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        return texture;
+    };
+
+    /**
+     * Act on an interactive node: start or toggle a video screen, or open an
+     * activity URL.
+     *
+     * @param {Object} target The intersected mesh.
+     */
+    Cyberspace.prototype.activate = function(target) {
+        if (!target || !target.userData) {
+            return;
+        }
+        var ud = target.userData;
+        if (ud.videoToggle) {
+            this.toggleVideo(ud.videoToggle);
+        } else if (ud.videoSrc) {
+            this.startVideo(target);
+        } else if (ud.url) {
+            this.open(ud.url);
+        }
+    };
+
+    /**
+     * Toggle an already-started screen video between playing and paused.
+     *
+     * @param {Object} video The HTMLVideoElement.
+     */
+    Cyberspace.prototype.toggleVideo = function(video) {
+        if (video.paused) {
+            var playing = video.play();
+            if (playing && playing.catch) {
+                playing.catch(function() {
+                    // Play was rejected; nothing to do.
+                });
+            }
+        } else {
+            video.pause();
+        }
+    };
+
+    /**
+     * Pause all screen videos (when the 3D stage is hidden — list view or a
+     * hidden tab — so audio does not keep playing out of sight).
+     */
+    Cyberspace.prototype.pauseVideos = function() {
+        for (var i = 0; i < this.videos.length; i++) {
+            this.videos[i].pause();
+        }
+    };
+
+    /**
+     * Pause screen videos when the learner switches to the list view or hides
+     * the tab, so a playing video does not keep sounding while out of sight.
+     */
+    Cyberspace.prototype.bindMediaPause = function() {
+        var self = this;
+        var container = this.root.closest ? this.root.closest('.format-mnemo') : null;
+        if (container) {
+            var toggle = container.querySelector('[data-mnemo-toggle]');
+            if (toggle) {
+                toggle.addEventListener('click', function() {
+                    if (container.classList.contains('format-mnemo--listview')) {
+                        self.pauseVideos();
+                    }
+                });
+            }
+        }
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                self.pauseVideos();
+            }
+        });
+    };
+
+    /**
      * Build a neon text texture on a transparent canvas for a sign face.
      *
      * @param {String} text The label text.
@@ -2924,12 +3165,12 @@ define('format_mnemo/vr', [], function() {
         var hit = this.intersectController(controller);
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
-        if (target && target.userData && target.userData.url) {
-            // A firm confirmation buzz before navigating away.
+        if (target && target.userData && (target.userData.url || target.userData.videoToggle)) {
+            // A firm confirmation buzz before acting on the node.
             if (this.gestures) {
                 this.gestures.pulse(controller.userData.handedness, 0.6, 40);
             }
-            this.open(target.userData.url);
+            this.activate(target);
         }
     };
 
@@ -3107,8 +3348,8 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.clickOpen = function() {
         this.raycaster.setFromCamera(this.pointerNdc, this.camera);
         var hits = this.raycaster.intersectObjects(this.interactive, false);
-        if (hits.length && hits[0].object.userData.url) {
-            this.open(hits[0].object.userData.url);
+        if (hits.length) {
+            this.activate(hits[0].object);
         }
     };
 

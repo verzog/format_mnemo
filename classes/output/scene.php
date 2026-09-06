@@ -55,6 +55,7 @@ class scene implements renderable, templatable {
      * @return array{sections: array, nodecount: int}
      */
     protected function build_nodes(): array {
+        global $DB;
         $course = $this->format->get_course();
         $context = context_course::instance($course->id);
         $modinfo = get_fast_modinfo($course);
@@ -62,6 +63,10 @@ class scene implements renderable, templatable {
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
         $buildingmodels = $this->preload_building_models((int)$course->id);
+        // URL activity records and Resource video main files for the course, so
+        // video detection is a couple of queries rather than one per activity.
+        $urlrecords = $DB->get_records('url', ['course' => (int)$course->id]);
+        $resourcevideos = $this->preload_resource_videos((int)$course->id);
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -109,6 +114,12 @@ class scene implements renderable, templatable {
                         // activity (file name or URL), or null to use the
                         // type-based/procedural building.
                         'building' => $buildingmodels[(int)$cm->id] ?? null,
+                        // Video info for activities that are videos, so the
+                        // client can render them as an interactive screen; null
+                        // otherwise. Only exposed for activities the user can
+                        // actually access, so a restricted activity never leaks a
+                        // playable source.
+                        'video' => $cm->uservisible ? $this->video_info($cm, $urlrecords, $resourcevideos, $course) : null,
                     ];
                 }
             }
@@ -181,6 +192,110 @@ class scene implements renderable, templatable {
             $map[(int)$row->cmid] = $row->model;
         }
         return $map;
+    }
+
+    /**
+     * Describe an activity as a video screen, or null when it is not a video.
+     *
+     * A URL activity pointing at YouTube/Vimeo is an embed (poster + open); one
+     * pointing at a direct video file, or a File resource whose main file is a
+     * video, is a file that can play in-world.
+     *
+     * @param \cm_info $cm the course module
+     * @param array $urlrecords map of url-instance id => url record
+     * @param array $resourcevideos map of cmid => video descriptor for resources
+     * @param \stdClass $course the course
+     * @return array|null ['kind' => 'file'|'embed', 'src' => string] or null
+     */
+    protected function video_info(\cm_info $cm, array $urlrecords, array $resourcevideos, \stdClass $course): ?array {
+        if ($cm->modname === 'url') {
+            $record = $urlrecords[$cm->instance] ?? null;
+            if (!$record) {
+                return null;
+            }
+            // Resolve the URL module's full URL so any configured URL variables
+            // (course/user/custom parameters) are applied, rather than the raw
+            // stored value.
+            global $CFG;
+            require_once($CFG->dirroot . '/mod/url/locallib.php');
+            return $this->classify_video_url(url_get_full_url($record, $cm, $course));
+        }
+        if ($cm->modname === 'resource') {
+            return $resourcevideos[(int)$cm->id] ?? null;
+        }
+        return null;
+    }
+
+    /**
+     * Classify an external URL as a video: an embed (YouTube/Vimeo) shown as a
+     * clickable poster, or a direct video file playable in-world. Audio-capable
+     * ambiguous extensions (.ogg) are not treated as video.
+     *
+     * @param string $url the external URL
+     * @return array|null the video descriptor, or null when it is not a video
+     */
+    protected function classify_video_url(string $url): ?array {
+        $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+        foreach (['youtube.com', 'youtu.be', 'vimeo.com'] as $embedhost) {
+            if ($host !== '' && strpos($host, $embedhost) !== false) {
+                return ['kind' => 'embed'];
+            }
+        }
+        $path = strtolower((string)parse_url($url, PHP_URL_PATH));
+        if (preg_match('/\.(mp4|webm|ogv|m4v|mov)$/', $path)) {
+            return ['kind' => 'file', 'src' => $url];
+        }
+        return null;
+    }
+
+    /**
+     * Preload, in bounded queries, the playable video source for every File
+     * resource in the course whose main file is a video — keyed by course
+     * module id. Joined through the module contexts by course (no per-activity
+     * query), inspects only each resource's main file, and uses the resource
+     * revision in the URL so a replaced file busts caches.
+     *
+     * @param int $courseid the course id
+     * @return array map of cmid => ['kind' => 'file', 'src' => string]
+     */
+    protected function preload_resource_videos(int $courseid): array {
+        global $DB;
+        $revisions = $DB->get_records_menu('resource', ['course' => $courseid], '', 'id, revision');
+        $sql = "SELECT f.id, f.contextid, f.filepath, f.filename, f.mimetype, f.sortorder,
+                       cm.id AS cmid, cm.instance AS instanceid
+                  FROM {files} f
+                  JOIN {context} ctx ON ctx.id = f.contextid AND ctx.contextlevel = :ctxmod
+                  JOIN {course_modules} cm ON cm.id = ctx.instanceid
+                  JOIN {modules} m ON m.id = cm.module AND m.name = 'resource'
+                 WHERE cm.course = :course
+                   AND f.component = 'mod_resource'
+                   AND f.filearea = 'content'
+                   AND f.filename <> '.'
+              ORDER BY cm.id ASC, f.sortorder DESC, f.id ASC";
+        $rows = $DB->get_recordset_sql($sql, ['ctxmod' => CONTEXT_MODULE, 'course' => $courseid]);
+        $seen = [];
+        $videos = [];
+        foreach ($rows as $row) {
+            if (isset($seen[$row->cmid])) {
+                // Only the resource's main file (first by sortorder) is examined.
+                continue;
+            }
+            $seen[$row->cmid] = true;
+            if (strpos((string)$row->mimetype, 'video/') === 0) {
+                $rev = $revisions[$row->instanceid] ?? 0;
+                $src = moodle_url::make_pluginfile_url(
+                    $row->contextid,
+                    'mod_resource',
+                    'content',
+                    $rev,
+                    $row->filepath,
+                    $row->filename
+                )->out(false);
+                $videos[(int)$row->cmid] = ['kind' => 'file', 'src' => $src];
+            }
+        }
+        $rows->close();
+        return $videos;
     }
 
     /**
