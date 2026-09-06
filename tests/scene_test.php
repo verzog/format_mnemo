@@ -240,6 +240,15 @@ final class scene_test extends \advanced_testcase {
         $data->format_mnemo_building = '';
         format_mnemo_coursemodule_edit_post_actions($data, $course);
         $this->assertFalse($DB->record_exists('format_mnemo_building', ['cmid' => $page->cmid]));
+
+        // A URL's scheme is stored lower-cased (so the renderer recognises it);
+        // the rest of the URL keeps its case.
+        $data->format_mnemo_building = 'HTTPS://cdn.example/Model.glb';
+        format_mnemo_coursemodule_edit_post_actions($data, $course);
+        $this->assertSame(
+            'https://cdn.example/Model.glb',
+            $DB->get_field('format_mnemo_building', 'model', ['cmid' => $page->cmid])
+        );
     }
 
     /**

@@ -597,6 +597,11 @@ function format_mnemo_coursemodule_edit_post_actions($data, $course) {
 
     $cmid = (int)$data->coursemodule;
     $model = isset($data->format_mnemo_building) ? trim($data->format_mnemo_building) : '';
+    // Lower-case a URL scheme so it matches the renderer's (lower-case) check;
+    // the rest of the URL keeps its case.
+    $model = preg_replace_callback('#^(https?)://#i', function ($m) {
+        return strtolower($m[1]) . '://';
+    }, $model);
     $existing = $DB->get_record('format_mnemo_building', ['cmid' => $cmid]);
 
     if ($model === '') {
