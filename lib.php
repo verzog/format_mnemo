@@ -460,12 +460,15 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
         if ($context->contextlevel != CONTEXT_SYSTEM) {
             return false;
         }
-        $itemid = (int)array_shift($args);
+        // The first path segment is a cache-busting revision (the newest file's
+        // modified time), not the stored itemid; the files always live at
+        // itemid 0. Discard it and serve from itemid 0.
+        array_shift($args);
         $filename = array_pop($args);
         $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
 
         $fs = get_file_storage();
-        $file = $fs->get_file($context->id, 'format_mnemo', 'assetpack', $itemid, $filepath, $filename);
+        $file = $fs->get_file($context->id, 'format_mnemo', 'assetpack', 0, $filepath, $filename);
         if (!$file || $file->is_directory()) {
             return false;
         }

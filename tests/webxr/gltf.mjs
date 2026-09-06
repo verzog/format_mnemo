@@ -121,9 +121,13 @@ function wrapGlb(gltf, bin) {
     return out;
 }
 
-// Build a textured quad .glb exercising the full scope. If imageAsDataUri is
-// true the texture image is referenced by a data: URI instead of a bufferView.
-function buildTexturedGlb(imageAsDataUri) {
+// Build a textured quad .glb exercising the full scope. opts.imageAsDataUri
+// references the image by a data: URI instead of a bufferView; opts.alphaMode
+// overrides the material alpha mode (default BLEND).
+function buildTexturedGlb(opts) {
+    opts = opts || {};
+    const imageAsDataUri = !!opts.imageAsDataUri;
+    const alphaMode = opts.alphaMode || 'BLEND';
     const bin = [];
     const bufferViews = [];
     const accessors = [];
@@ -165,6 +169,11 @@ function buildTexturedGlb(imageAsDataUri) {
     accessors.push({bufferView: uvView, componentType: 5126, count: 4, type: 'VEC2'});
     const uvAcc = accessors.length - 1;
 
+    // A second UV set (TEXCOORD_1), used by the occlusion texture below.
+    const uv1View = addView(f32(uvs), 34962);
+    accessors.push({bufferView: uv1View, componentType: 5126, count: 4, type: 'VEC2'});
+    const uv1Acc = accessors.length - 1;
+
     const colView = addView(colors, 34962);
     accessors.push({bufferView: colView, componentType: 5121, normalized: true, count: 4, type: 'VEC4'});
     const colAcc = accessors.length - 1;
@@ -194,7 +203,10 @@ function buildTexturedGlb(imageAsDataUri) {
         nodes: [{mesh: 0}],
         meshes: [{
             primitives: [{
-                attributes: {POSITION: posAcc, NORMAL: nrmAcc, TEXCOORD_0: uvAcc, COLOR_0: colAcc},
+                attributes: {
+                    POSITION: posAcc, NORMAL: nrmAcc, TEXCOORD_0: uvAcc,
+                    TEXCOORD_1: uv1Acc, COLOR_0: colAcc
+                },
                 indices: idxAcc,
                 material: 0
             }]
@@ -208,10 +220,10 @@ function buildTexturedGlb(imageAsDataUri) {
                 roughnessFactor: 1
             },
             normalTexture: {index: 0, scale: 0.8},
-            occlusionTexture: {index: 0, strength: 0.7},
+            occlusionTexture: {index: 0, strength: 0.7, texCoord: 1},
             emissiveTexture: {index: 0},
             emissiveFactor: [1, 1, 1],
-            alphaMode: 'BLEND',
+            alphaMode: alphaMode,
             doubleSided: true,
             extensions: {KHR_materials_emissive_strength: {emissiveStrength: 3}}
         }],
@@ -328,14 +340,18 @@ const inspect = async (b64) => page.evaluate(async (data) => {
         normalScale: m.normalMap ? Math.abs(m.normalScale.x - 0.8) < 1e-6 : false,
         aoMap: !!m.aoMap,
         aoStrength: m.aoMap ? Math.abs(m.aoMapIntensity - 0.7) < 1e-6 : false,
+        aoChannel: m.aoMap ? m.aoMap.channel === 1 : false,
         emissiveMap: !!m.emissiveMap,
         emissiveGlow: m.emissiveIntensity > 0,
         emissiveStrength: Math.abs(m.emissiveIntensity - (0.7 + 1) * 3) < 1e-6,
         transparent: m.transparent === true && Math.abs(m.opacity - 0.5) < 1e-6,
+        rawTransparent: m.transparent === true,
+        rawOpacity: m.opacity,
         doubleSided: m.side === THREE.DoubleSide,
         vertexColors: m.vertexColors === true && !!col,
         colorNormalized: col ? col.normalized === true : false,
         hasUv: !!g.getAttribute('uv'),
+        hasUv1: !!g.getAttribute('uv1'),
         indexUint: !!(idx && idx.array instanceof Uint32Array)
     };
 }, b64);
@@ -371,7 +387,7 @@ const check = (name, cond, detail) => {
     console.log(`  [${tag}] ${name}${detail ? '  (' + detail + ')' : ''}`);
 };
 
-const embedded = await inspect(buildTexturedGlb(false).toString('base64'));
+const embedded = await inspect(buildTexturedGlb().toString('base64'));
 if (embedded.error) {
     console.error('embedded model failed to parse: ' + embedded.error);
     errors.forEach((x) => console.error('  ' + x));
@@ -390,6 +406,8 @@ check('normal map loads', embedded.normalMap);
 check('normal scale is applied', embedded.normalScale);
 check('occlusion map loads', embedded.aoMap);
 check('occlusion strength is applied', embedded.aoStrength);
+check('second UV set (TEXCOORD_1) is read', embedded.hasUv1);
+check('occlusion samples its declared UV channel', embedded.aoChannel);
 check('emissive map loads', embedded.emissiveMap);
 check('emissive glows after dark', embedded.emissiveGlow);
 check('emissive-strength extension is applied', embedded.emissiveStrength);
@@ -400,16 +418,58 @@ check('normalised UBYTE colours kept normalised', embedded.colorNormalized);
 check('UV set is read', embedded.hasUv);
 check('UNSIGNED_INT indices are read', embedded.indexUint);
 
-const dataUri = await inspect(buildTexturedGlb(true).toString('base64'));
+const dataUri = await inspect(buildTexturedGlb({imageAsDataUri: true}).toString('base64'));
 check('data-URI image path loads a texture', !dataUri.error && dataUri.hasMap);
+
+// An OPAQUE material with a sub-1 base-colour alpha must stay opaque.
+const opaque = await inspect(buildTexturedGlb({alphaMode: 'OPAQUE'}).toString('base64'));
+check('OPAQUE material with alpha < 1 stays opaque',
+    !opaque.error && opaque.rawTransparent === false && Math.abs(opaque.rawOpacity - 0.5) < 1e-6);
 
 const draco = await dracoRejects(buildDracoGlb().toString('base64'));
 check('Draco-compressed primitive is rejected', draco);
 
+// URL-reference resolution for external resources (Codex P2).
+const urls = await page.evaluate(() => {
+    const CS = window.__mnemoModule._Cyberspace;
+    const obj = Object.create(CS.prototype);
+    return {
+        rootRelative: obj.resolveUrl('/shared/tex.png', 'https://host/pack/models/'),
+        relative: obj.resolveUrl('tex.png', 'https://host/pack/models/'),
+        absolute: obj.resolveUrl('https://cdn.example/tex.png', 'https://host/pack/'),
+        data: obj.resolveUrl('data:image/png;base64,AAAA', 'https://host/pack/')
+    };
+});
+check('root-relative URI resolves against the origin',
+    urls.rootRelative === 'https://host/shared/tex.png');
+check('relative URI resolves against the model directory',
+    urls.relative === 'https://host/pack/models/tex.png');
+check('absolute URI is kept as-is', urls.absolute === 'https://cdn.example/tex.png');
+check('data URI is kept as-is', urls.data === 'data:image/png;base64,AAAA');
+
+// One image referenced twice with different texCoord must yield distinct
+// textures with the right channels (per-reference cache key, Codex P2).
+const cache = await page.evaluate(() => {
+    const THREE = window.__mnemoTest.THREE;
+    const CS = window.__mnemoModule._Cyberspace;
+    const obj = Object.create(CS.prototype);
+    obj.THREE = THREE;
+    // A plain truthy object is enough as the texture "image" here.
+    const ctx = {
+        json: {textures: [{source: 0}], samplers: []},
+        images: [{width: 1, height: 1}], texCache: {}
+    };
+    const a = obj.glbTexture(ctx, {index: 0, texCoord: 0}, false);
+    const b = obj.glbTexture(ctx, {index: 0, texCoord: 1}, false);
+    return {distinct: a !== b, chanA: a.channel || 0, chanB: b.channel};
+});
+check('same image, different texCoord => distinct cached textures',
+    cache.distinct && cache.chanA === 0 && cache.chanB === 1);
+
 await browser.close();
 server.close();
 
-const total = 22;
+const total = 29;
 console.log(`\n${total - failed}/${total} glTF loader checks passed.`);
 if (errors.length) {
     errors.forEach((x) => console.error('page error: ' + x));

@@ -1453,7 +1453,7 @@ define('format_mnemo/vr', [], function() {
             if (buf.uri.indexOf('data:') === 0) {
                 return self.dataUri(buf.uri);
             }
-            return fetch(baseUrl + buf.uri).then(function(r) {
+            return fetch(self.resolveUrl(buf.uri, baseUrl)).then(function(r) {
                 return r.arrayBuffer();
             }).then(function(ab) {
                 return new Uint8Array(ab);
@@ -1491,19 +1491,44 @@ define('format_mnemo/vr', [], function() {
      * @return {Promise} Resolves with an ImageBitmap.
      */
     Cyberspace.prototype.glbImage = function(img, json, buffers, baseUrl) {
+        // Texture data is straight-alpha in its own colour space, so the browser
+        // must not premultiply alpha or colour-convert it on decode.
+        var opts = {premultiplyAlpha: 'none', colorSpaceConversion: 'none'};
         if (img.uri) {
-            var src = img.uri.indexOf('data:') === 0 ? img.uri : baseUrl + img.uri;
+            var src = img.uri.indexOf('data:') === 0 ? img.uri : this.resolveUrl(img.uri, baseUrl);
             return fetch(src).then(function(r) {
                 return r.blob();
             }).then(function(b) {
-                return createImageBitmap(b);
+                return createImageBitmap(b, opts);
             });
         }
         var view = json.bufferViews[img.bufferView];
         var buf = buffers[view.buffer || 0];
         var bytes = new Uint8Array(buf.buffer, buf.byteOffset + (view.byteOffset || 0), view.byteLength);
         var blob = new Blob([bytes], {type: img.mimeType || 'image/png'});
-        return createImageBitmap(blob);
+        return createImageBitmap(blob, opts);
+    };
+
+    /**
+     * Resolve a possibly-relative glTF resource URI against the model's URL,
+     * using URL-reference semantics (so root-relative and absolute URIs work,
+     * not just names in the same directory). Data URIs are returned unchanged.
+     *
+     * @param {String} uri The resource URI from the glTF.
+     * @param {String} baseUrl The URL the model was loaded from.
+     * @return {String} The resolved absolute URL.
+     */
+    Cyberspace.prototype.resolveUrl = function(uri, baseUrl) {
+        if (uri.indexOf('data:') === 0) {
+            return uri;
+        }
+        var base = baseUrl || (window.location && window.location.href) || undefined;
+        try {
+            return new URL(uri, base).href;
+        } catch (e) {
+            // Last-resort fallback if URL or the base is unusable.
+            return (baseUrl || '') + uri;
+        }
     };
 
     /**
@@ -1597,11 +1622,10 @@ define('format_mnemo/vr', [], function() {
         if (attr.TANGENT !== undefined) {
             geo.setAttribute('tangent', this.glbAttribute(ctx, attr.TANGENT));
         }
-        if (attr.TEXCOORD_0 !== undefined) {
-            geo.setAttribute('uv', this.glbAttribute(ctx, attr.TEXCOORD_0));
-        }
-        if (attr.TEXCOORD_1 !== undefined) {
-            geo.setAttribute('uv1', this.glbAttribute(ctx, attr.TEXCOORD_1));
+        // Map every TEXCOORD_n to Three's matching uv set: 0 -> "uv", n -> "uvN".
+        // A texture channel that finds no uv set would sample missing data.
+        for (var n = 0; attr['TEXCOORD_' + n] !== undefined; n++) {
+            geo.setAttribute(n === 0 ? 'uv' : 'uv' + n, this.glbAttribute(ctx, attr['TEXCOORD_' + n]));
         }
         if (attr.COLOR_0 !== undefined) {
             geo.setAttribute('color', this.glbAttribute(ctx, attr.COLOR_0));
@@ -1659,9 +1683,11 @@ define('format_mnemo/vr', [], function() {
             roughness: roughness,
             vertexColors: !!hasVertexColor
         });
-        if (col[3] < 1) {
+        // The base-colour alpha multiplier applies, but only BLEND actually
+        // blends; glbAlpha() enables transparency for BLEND (and cutoff for
+        // MASK), so an OPAQUE prop with alpha < 1 still renders opaque.
+        if (col[3] !== undefined) {
             m.opacity = col[3];
-            m.transparent = true;
         }
         this.glbTextures(ctx, mat, pbr, m);
         this.glbEmissive(mat, m);
@@ -1764,7 +1790,12 @@ define('format_mnemo/vr', [], function() {
         if (!img) {
             return null;
         }
-        var key = info.index + (srgb ? '|s' : '|l');
+        // The cache key must capture everything that varies per reference (the
+        // UV channel and any texture transform), or one reference's settings
+        // would leak to another that shares the same image.
+        var transform = (info.extensions && info.extensions.KHR_texture_transform) || 0;
+        var key = info.index + (srgb ? '|s' : '|l') + '|' + (info.texCoord || 0) +
+            '|' + JSON.stringify(transform);
         if (ctx.texCache[key]) {
             return ctx.texCache[key];
         }

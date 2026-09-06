@@ -274,6 +274,13 @@ class scene implements renderable, templatable {
         if (empty($files)) {
             return null;
         }
+        // Use the newest file's modified time as a revision in the URL, so that
+        // replacing a same-named model busts the browser cache (the pluginfile
+        // handler ignores this segment and always serves the itemid-0 files).
+        $rev = 0;
+        foreach ($files as $file) {
+            $rev = max($rev, (int)$file->get_timemodified());
+        }
         // Build a per-file pluginfile URL with a sentinel name, then trim the
         // name so the client can append the real "<role>.glb" it needs.
         $sentinel = 'model.glb';
@@ -281,7 +288,7 @@ class scene implements renderable, templatable {
             $context->id,
             'format_mnemo',
             'assetpack',
-            0,
+            $rev,
             '/',
             $sentinel
         )->out(false);
