@@ -134,7 +134,10 @@ define('format_mnemo/vr', [], function() {
         this.spinners = []; // Rooftop holo elements that rotate.
         this.ads = []; // Holographic billboards that flicker.
         this.beacons = []; // Rooftop lights that blink.
-        this.texCache = {}; // Cached window/ad canvas textures, keyed by string.
+        this.texCache = {}; // Cached canvas textures, keyed by string.
+        this.matCache = {}; // Cached facade materials, keyed by style + repeat.
+        this.roads = []; // Walkable road corridors (rects in the XZ plane).
+        this.flyThreshold = 1.2; // Rig height above which movement is free-flight.
 
         this.build();
     }
@@ -153,8 +156,17 @@ define('format_mnemo/vr', [], function() {
         this.renderer = renderer;
 
         // Work out where the sun is for the site's current hour, then paint the
-        // sky and smog to match.
+        // sky and smog to match. Void is always deep space, so its lighting is a
+        // fixed night-like preset rather than the site clock.
         this.day = this.computeDaylight(this.hour);
+        if (this.config.environment === 'void') {
+            this.day.day = 0;
+            this.day.night = 1;
+            this.day.neon = 1.2;
+            this.day.windowEmissive = 1.3;
+            this.day.adOpacity = 0.85;
+            this.day.starOpacity = 1;
+        }
 
         // Scene, camera, player rig.
         var scene = new THREE.Scene();
@@ -286,6 +298,13 @@ define('format_mnemo/vr', [], function() {
         var dense = this.config.environment === 'cyberspace';
         var d = this.day;
 
+        // Void is a different backdrop entirely: the streets float in deep space
+        // among planets and nebulae, so it builds its own lights and sky.
+        if (this.config.environment === 'void') {
+            this.buildSpace();
+            return;
+        }
+
         // Sun / moon and sky fill, so lit materials read as real volumes.
         this.buildLights();
 
@@ -401,110 +420,633 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * A canvas texture of a lit window grid for a building facade, cached per
-     * style/scale so many buildings share one GPU texture.
+     * Build the Void backdrop: deep space with a dense starfield, drifting
+     * nebulae, a bright distant star that lights the scene, and a few planets,
+     * so the streets appear to float in orbit.
+     */
+    Cyberspace.prototype.buildSpace = function() {
+        var THREE = this.THREE;
+        this.scene.background = new THREE.Color(0x03040a);
+
+        // A cold key light from the distant star, plus a dim fill so the far
+        // side of buildings and planets is not pure black.
+        var starDir = new THREE.Vector3(0.5, 0.35, -0.6).normalize();
+        var key = new THREE.DirectionalLight(0xdfe8ff, 1.15);
+        key.position.copy(starDir).multiplyScalar(300);
+        this.scene.add(key);
+        this.scene.add(new THREE.HemisphereLight(0x223046, 0x05060c, 0.35));
+
+        // Dense starfield on a fixed far shell.
+        var count = 2600;
+        var pos = new Float32Array(count * 3);
+        for (var i = 0; i < count; i++) {
+            var r = 300 + Math.random() * 240;
+            var th = Math.random() * Math.PI * 2;
+            var ph = Math.acos(2 * Math.random() - 1);
+            pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+            pos[i * 3 + 1] = r * Math.cos(ph);
+            pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+        }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        this.scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+            color: 0xffffff, size: 1.1, sizeAttenuation: true,
+            transparent: true, opacity: 0.9, fog: false
+        })));
+
+        // Nebulae: big soft additive clouds tinted by the palette.
+        var nebColours = [this.palette.primary, this.palette.secondary, 0xff3b6b];
+        for (var nb = 0; nb < 3; nb++) {
+            var neb = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: this.radialTexture(nebColours[nb % nebColours.length]),
+                transparent: true, opacity: 0.16, depthWrite: false,
+                blending: THREE.AdditiveBlending, fog: false
+            }));
+            var ns = 240 + Math.random() * 220;
+            neb.scale.set(ns, ns * 0.6, 1);
+            neb.position.set(
+                (Math.random() - 0.5) * 500, 60 + Math.random() * 160,
+                -260 - Math.random() * 200
+            );
+            this.scene.add(neb);
+        }
+
+        // The star itself as a bright halo sprite.
+        var star = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: this.radialTexture(0xfff4e0), transparent: true, opacity: 0.95,
+            depthWrite: false, blending: THREE.AdditiveBlending, fog: false
+        }));
+        star.scale.set(70, 70, 1);
+        star.position.copy(starDir).multiplyScalar(520);
+        this.scene.add(star);
+
+        // A handful of planets, spread out, lit by the star and gently
+        // self-illuminated so they read as distant worlds rather than holes.
+        this.makePlanet(72, {x: -195, y: 110, z: -340}, [0xc9975f, 0x7d5a37], true);
+        this.makePlanet(54, {x: 205, y: 150, z: -430}, [0x5680bb, 0x223b63], false);
+        this.makePlanet(24, {x: 150, y: 66, z: -270}, [0x9aa0a8, 0x4b5058], false);
+    };
+
+    /**
+     * A soft radial-gradient sprite texture (opaque centre to transparent edge).
+     *
+     * @param {Number} colour Hex int colour.
+     * @return {Object} A Three.CanvasTexture.
+     */
+    Cyberspace.prototype.radialTexture = function(colour) {
+        var THREE = this.THREE;
+        var c = new THREE.Color(colour);
+        var rgb = Math.round(c.r * 255) + ',' + Math.round(c.g * 255) + ',' + Math.round(c.b * 255);
+        var ctx = this.newCanvasCtx(128);
+        var grd = ctx.createRadialGradient(64, 64, 2, 64, 64, 64);
+        grd.addColorStop(0, 'rgba(' + rgb + ',1)');
+        grd.addColorStop(0.4, 'rgba(' + rgb + ',0.5)');
+        grd.addColorStop(1, 'rgba(' + rgb + ',0)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, 128, 128);
+        var t = new THREE.CanvasTexture(ctx.canvas);
+        if (t.colorSpace !== undefined) {
+            t.colorSpace = THREE.SRGBColorSpace;
+        }
+        return t;
+    };
+
+    /**
+     * Build a lit planet sphere with a banded surface, optionally ringed.
+     *
+     * @param {Number} radius Planet radius.
+     * @param {Object} at Position {x, y, z}.
+     * @param {Array} colours [band A, band B] hex ints.
+     * @param {Boolean} ringed Whether to add a ring.
+     */
+    Cyberspace.prototype.makePlanet = function(radius, at, colours, ringed) {
+        var THREE = this.THREE;
+        var ctx = this.newCanvasCtx(256);
+        var a = new THREE.Color(colours[0]);
+        var b = new THREE.Color(colours[1]);
+        ctx.fillStyle = '#' + a.getHexString();
+        ctx.fillRect(0, 0, 256, 256);
+        // Horizontal bands with a little turbulence.
+        for (var y = 0; y < 256; y += 4) {
+            var t = 0.5 + 0.5 * Math.sin(y * 0.05 + Math.random() * 0.4);
+            ctx.fillStyle = '#' + a.clone().lerp(b, t).getHexString();
+            ctx.fillRect(0, y, 256, 4 + Math.random() * 3);
+        }
+        var tex = new THREE.CanvasTexture(ctx.canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var planet = new THREE.Mesh(
+            new THREE.SphereGeometry(radius, 32, 24),
+            new THREE.MeshStandardMaterial({
+                map: tex, roughness: 1, metalness: 0,
+                emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.28
+            })
+        );
+        planet.position.set(at.x, at.y, at.z);
+        this.scene.add(planet);
+
+        if (ringed) {
+            var ring = new THREE.Mesh(
+                new THREE.RingGeometry(radius * 1.4, radius * 2.1, 48),
+                new THREE.MeshBasicMaterial({
+                    color: 0xcbb78a, transparent: true, opacity: 0.5,
+                    side: THREE.DoubleSide, depthWrite: false, fog: false
+                })
+            );
+            ring.rotation.x = Math.PI / 2.6;
+            ring.position.copy(planet.position);
+            this.scene.add(ring);
+        }
+    };
+
+    // A window module is roughly this many metres, so repeat counts keep the
+    // window grid a consistent real size across buildings of any dimension.
+    var MODULE_W = 8; // Four window columns.
+    var MODULE_H = 11; // Six floors.
+
+    /**
+     * Build the seamless, tileable facade texture set for a style once (surface
+     * colour, bump relief, roughness and emissive windows), cached per style.
+     * The tile is a small block of floors and window columns; facadeMaterial
+     * repeats it across a face so the windows stay crisp at any building size.
      *
      * @param {Object} style One of the STYLES recipes.
-     * @param {Number} cols Approximate window columns.
-     * @param {Number} rows Approximate window rows.
-     * @return {Object} Three.CanvasTexture.
+     * @return {Object} {map, bump, rough, emissive} base Three.CanvasTextures.
      */
-    Cyberspace.prototype.facadeTextures = function(style, cols, rows) {
-        var key = 'fac_' + style.body + '_' + style.lit + '_' + cols + 'x' + rows;
+    Cyberspace.prototype.facadeTextures = function(style) {
+        var key = 'facbase_' + style.body + '_' + style.lit + '_' + style.rough;
         if (this.texCache[key]) {
             return this.texCache[key];
         }
         var THREE = this.THREE;
-        var w = 128;
-        var h = 256;
-        var cw = w / cols;
-        var ch = h / rows;
-        var pad = Math.min(cw, ch) * 0.2;
+        var SIZE = 512;
+        var cols = 4;
+        var rows = 6;
+        var cw = SIZE / cols;
+        var ch = SIZE / rows;
+        var frame = Math.min(cw, ch) * 0.16; // Concrete gutter around a window.
 
-        // Surface map: lit concrete/steel with panel lines and darker window
-        // recesses, so the facade reads as a real material under the sun.
-        var mc = document.createElement('canvas');
-        mc.width = w;
-        mc.height = h;
-        var m = mc.getContext('2d');
+        var g = this.newCanvasCtx(SIZE); // Colour/surface map.
+        var b = this.newCanvasCtx(SIZE); // Bump relief.
+        var r = this.newCanvasCtx(SIZE); // Roughness.
+        var e = this.newCanvasCtx(SIZE); // Emissive windows.
+
         var base = new THREE.Color(style.body);
-        m.fillStyle = '#' + base.getHexString();
-        m.fillRect(0, 0, w, h);
-        // Subtle concrete mottling.
-        for (var s = 0; s < 240; s++) {
-            var shade = (Math.random() - 0.5) * 0.22;
-            m.fillStyle = 'rgba(' + (shade < 0 ? '0,0,0,' : '255,255,255,') + Math.abs(shade).toFixed(3) + ')';
-            m.fillRect(Math.random() * w, Math.random() * h, 3, 3);
-        }
-        // Windows read as cool dark glass on the surface map (day), and only
-        // glow via the emissive map (night).
-        var recess = base.clone().multiplyScalar(0.4).lerp(new THREE.Color(0x0e141d), 0.6);
-        m.strokeStyle = base.clone().multiplyScalar(0.55).getStyle();
-        m.lineWidth = 1;
-
-        // Emissive map: black, with only the lit windows glowing.
-        var ec = document.createElement('canvas');
-        ec.width = w;
-        ec.height = h;
-        var e = ec.getContext('2d');
-        e.fillStyle = '#000000';
-        e.fillRect(0, 0, w, h);
+        var mullion = base.clone().multiplyScalar(0.55);
+        var ledge = base.clone().multiplyScalar(1.18);
+        var glassTop = new THREE.Color(0x0c1119);
+        var glassBot = base.clone().multiplyScalar(0.42).lerp(new THREE.Color(0x121a24), 0.6);
         var lit = new THREE.Color(style.lit);
+        var concreteRough = Math.round(style.rough * 255);
 
-        for (var y = 0; y < rows; y++) {
-            for (var x = 0; x < cols; x++) {
-                var wx = x * cw + pad;
-                var wy = y * ch + pad;
-                var ww = cw - pad * 2;
-                var wh = ch - pad * 2;
-                // Window recess on the surface map.
-                m.fillStyle = '#' + recess.getHexString();
-                m.fillRect(wx, wy, ww, wh);
-                m.strokeRect(x * cw, y * ch, cw, ch);
-                // Some windows are lit (emissive).
+        // Bases.
+        g.fillStyle = '#' + base.getHexString();
+        g.fillRect(0, 0, SIZE, SIZE);
+        b.fillStyle = 'rgb(120,120,120)';
+        b.fillRect(0, 0, SIZE, SIZE);
+        r.fillStyle = 'rgb(' + concreteRough + ',' + concreteRough + ',' + concreteRough + ')';
+        r.fillRect(0, 0, SIZE, SIZE);
+        e.fillStyle = '#000000';
+        e.fillRect(0, 0, SIZE, SIZE);
+
+        // Concrete mottling on the colour and bump maps.
+        for (var s = 0; s < 1400; s++) {
+            var sh = (Math.random() - 0.5) * 0.16;
+            g.fillStyle = (sh < 0 ? 'rgba(0,0,0,' : 'rgba(255,255,255,') + Math.abs(sh).toFixed(3) + ')';
+            g.fillRect(Math.random() * SIZE, Math.random() * SIZE, 3, 3);
+        }
+
+        var y;
+        var x;
+        // Floor ledges (spandrels): a raised band with an ambient-occlusion
+        // shadow beneath, repeated every floor so it tiles vertically.
+        for (y = 0; y < rows; y++) {
+            var ly = y * ch;
+            g.fillStyle = '#' + ledge.getHexString();
+            g.fillRect(0, ly, SIZE, 4);
+            g.fillStyle = 'rgba(0,0,0,0.28)';
+            g.fillRect(0, ly + 4, SIZE, 3);
+            b.fillStyle = 'rgb(200,200,200)';
+            b.fillRect(0, ly, SIZE, 4);
+            b.fillStyle = 'rgb(60,60,60)';
+            b.fillRect(0, ly + 4, SIZE, 3);
+        }
+
+        for (y = 0; y < rows; y++) {
+            for (x = 0; x < cols; x++) {
+                var wx = x * cw + frame;
+                var wy = y * ch + frame + 4;
+                var ww = cw - frame * 2;
+                var wh = ch - frame * 2 - 4;
+
+                // Mullion frame (recessed dark on bump).
+                g.fillStyle = '#' + mullion.getHexString();
+                g.fillRect(x * cw, y * ch, cw, ch);
+                b.fillStyle = 'rgb(150,150,150)';
+                b.fillRect(x * cw, y * ch, cw, ch);
+
+                // Glass: a vertical gradient plus a diagonal reflection streak.
+                var grd = g.createLinearGradient(wx, wy, wx, wy + wh);
+                grd.addColorStop(0, '#' + glassTop.getHexString());
+                grd.addColorStop(1, '#' + glassBot.getHexString());
+                g.fillStyle = grd;
+                g.fillRect(wx, wy, ww, wh);
+                g.fillStyle = 'rgba(255,255,255,0.06)';
+                g.beginPath();
+                g.moveTo(wx, wy + wh * 0.7);
+                g.lineTo(wx + ww * 0.5, wy);
+                g.lineTo(wx + ww, wy);
+                g.lineTo(wx, wy + wh);
+                g.closePath();
+                g.fill();
+
+                // Windows sit deeper (bump) and read as glossy glass (rough).
+                b.fillStyle = 'rgb(70,70,70)';
+                b.fillRect(wx, wy, ww, wh);
+                r.fillStyle = 'rgb(45,45,45)';
+                r.fillRect(wx, wy, ww, wh);
+
+                // Some windows are lit at night.
                 if (Math.random() < style.density) {
                     var dim = style.wireframe && Math.random() < 0.5;
-                    e.globalAlpha = dim ? 0.4 : 1;
+                    e.globalAlpha = dim ? 0.35 : 0.9;
                     e.fillStyle = '#' + lit.getHexString();
                     e.fillRect(wx, wy, ww, wh);
+                    e.globalAlpha = 1;
                 }
             }
         }
+
+        // Rust patches - heavy on Entropism, a light bloom elsewhere - on the
+        // colour map, and rougher there.
+        var rust = new THREE.Color(0x71401f);
+        var worn = !!style.wireframe;
+        var rr = Math.round(rust.r * 255) + ',' + Math.round(rust.g * 255) + ',' + Math.round(rust.b * 255);
+        var patches = worn ? 26 : 8;
+        for (var p = 0; p < patches; p++) {
+            var px = Math.random() * SIZE;
+            var py = Math.random() * SIZE;
+            var pr = 6 + Math.random() * (worn ? 34 : 16);
+            var rgd = g.createRadialGradient(px, py, 0, px, py, pr);
+            rgd.addColorStop(0, 'rgba(' + rr + ',' + (worn ? 0.5 : 0.26) + ')');
+            rgd.addColorStop(1, 'rgba(' + rr + ',0)');
+            g.fillStyle = rgd;
+            g.fillRect(px - pr, py - pr, pr * 2, pr * 2);
+            r.globalAlpha = worn ? 0.5 : 0.3;
+            r.fillStyle = 'rgb(240,240,240)';
+            r.beginPath();
+            r.arc(px, py, pr * 0.8, 0, Math.PI * 2);
+            r.fill();
+            r.globalAlpha = 1;
+        }
+
+        // Fine scratches: bright on roughness, a faint groove on the height map.
+        for (var sc = 0; sc < 70; sc++) {
+            var sx = Math.random() * SIZE;
+            var sy = Math.random() * SIZE;
+            var sa = Math.random() * Math.PI;
+            var sl = 5 + Math.random() * 26;
+            var ex = sx + Math.cos(sa) * sl;
+            var ey = sy + Math.sin(sa) * sl;
+            r.strokeStyle = 'rgba(255,255,255,0.3)';
+            r.lineWidth = 1;
+            r.beginPath();
+            r.moveTo(sx, sy);
+            r.lineTo(ex, ey);
+            r.stroke();
+            b.strokeStyle = 'rgba(95,95,95,0.6)';
+            b.beginPath();
+            b.moveTo(sx, sy);
+            b.lineTo(ex, ey);
+            b.stroke();
+        }
+
+        // Water streaks weeping down from ledges (darker colour, shinier rough).
+        for (var k = 0; k < 10; k++) {
+            var wsx = Math.random() * SIZE;
+            var wsw = 3 + Math.random() * 9;
+            var wtop = Math.floor(Math.random() * rows) * ch;
+            var wgd = g.createLinearGradient(0, wtop, 0, SIZE);
+            wgd.addColorStop(0, 'rgba(0,0,0,0.2)');
+            wgd.addColorStop(1, 'rgba(0,0,0,0)');
+            g.fillStyle = wgd;
+            g.fillRect(wsx, wtop, wsw, SIZE - wtop);
+            r.fillStyle = 'rgba(20,20,20,0.5)';
+            r.fillRect(wsx, wtop, wsw, SIZE - wtop);
+        }
+
+        // A neon cornice strip along a floor line (repeats as a lit band).
+        var neon = new THREE.Color(style.glow);
+        e.fillStyle = '#' + neon.getHexString();
+        e.globalAlpha = 0.85;
+        e.fillRect(0, ch - 7, SIZE, 5);
         e.globalAlpha = 1;
 
-        var map = new THREE.CanvasTexture(mc);
-        map.anisotropy = 4;
-        if (map.colorSpace !== undefined) {
-            map.colorSpace = THREE.SRGBColorSpace;
-        }
-        var emissive = new THREE.CanvasTexture(ec);
-        emissive.anisotropy = 4;
-        var out = {map: map, emissive: emissive};
+        var out = {
+            map: this.canvasTexture(g.canvas, true),
+            normal: this.canvasTexture(this.heightToNormal(b.canvas, 2.2), false),
+            rough: this.canvasTexture(r.canvas, false),
+            emissive: this.canvasTexture(e.canvas, true)
+        };
         this.texCache[key] = out;
         return out;
     };
 
     /**
-     * A lit building-body material for a style: concrete/steel surface with
-     * windows that glow at night (their emissive strength follows the clock).
+     * Convert a grayscale height canvas into a tangent-space normal map, so the
+     * relief (ledges, mullions, recessed windows, scratches) catches light.
+     *
+     * @param {Object} height The height canvas (its light = high).
+     * @param {Number} strength Slope multiplier.
+     * @return {Object} A new canvas holding the normal map.
+     */
+    Cyberspace.prototype.heightToNormal = function(height, strength) {
+        var n = height.width;
+        var src = height.getContext('2d').getImageData(0, 0, n, n).data;
+        var out = this.newCanvasCtx(n);
+        var img = out.createImageData(n, n);
+        var d = img.data;
+        var at = function(x, y) {
+            var xx = (x + n) % n;
+            var yy = (y + n) % n;
+            return src[(yy * n + xx) * 4]; // Red channel = height.
+        };
+        for (var y = 0; y < n; y++) {
+            for (var x = 0; x < n; x++) {
+                var dx = (at(x - 1, y) - at(x + 1, y)) / 255 * strength;
+                var dy = (at(x, y - 1) - at(x, y + 1)) / 255 * strength;
+                var len = Math.sqrt(dx * dx + dy * dy + 1);
+                var i = (y * n + x) * 4;
+                d[i] = Math.round((dx / len * 0.5 + 0.5) * 255);
+                d[i + 1] = Math.round((dy / len * 0.5 + 0.5) * 255);
+                d[i + 2] = Math.round((1 / len * 0.5 + 0.5) * 255);
+                d[i + 3] = 255;
+            }
+        }
+        out.putImageData(img, 0, 0);
+        return out.canvas;
+    };
+
+    /**
+     * A fresh 2D canvas context of a given square size.
+     *
+     * @param {Number} size Canvas edge in pixels.
+     * @return {Object} The 2D context (its .canvas is the element).
+     */
+    Cyberspace.prototype.newCanvasCtx = function(size) {
+        var c = document.createElement('canvas');
+        c.width = size;
+        c.height = size;
+        return c.getContext('2d');
+    };
+
+    /**
+     * Wrap a canvas as a repeating texture.
+     *
+     * @param {Object} canvas The source canvas.
+     * @param {Boolean} srgb True for colour maps, false for data (bump/rough).
+     * @return {Object} A Three.CanvasTexture set to repeat.
+     */
+    Cyberspace.prototype.canvasTexture = function(canvas, srgb) {
+        var THREE = this.THREE;
+        var t = new THREE.CanvasTexture(canvas);
+        t.wrapS = THREE.RepeatWrapping;
+        t.wrapT = THREE.RepeatWrapping;
+        t.anisotropy = 8;
+        if (srgb && t.colorSpace !== undefined) {
+            t.colorSpace = THREE.SRGBColorSpace;
+        }
+        return t;
+    };
+
+    /**
+     * A lit, textured building-body material for a style at a given size. The
+     * facade tile repeats to keep windows a consistent size; the result is
+     * cached per style and repeat so buildings share GPU textures.
      *
      * @param {Object} style One of the STYLES recipes.
-     * @param {Number} cols Approximate window columns.
-     * @param {Number} rows Approximate window rows.
+     * @param {Number} width Body width in metres.
+     * @param {Number} height Body height in metres.
      * @return {Object} A Three.MeshStandardMaterial.
      */
-    Cyberspace.prototype.facadeMaterial = function(style, cols, rows) {
+    Cyberspace.prototype.facadeMaterial = function(style, width, height) {
         var THREE = this.THREE;
-        var tex = this.facadeTextures(style, cols, rows);
-        return new THREE.MeshStandardMaterial({
-            color: style.body,
-            map: tex.map,
-            roughness: style.rough,
+        var rx = Math.max(1, Math.round(width / MODULE_W));
+        var ry = Math.max(1, Math.round(height / MODULE_H));
+        var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry;
+        if (this.matCache[key]) {
+            return this.matCache[key];
+        }
+        var tex = this.facadeTextures(style);
+        var map = tex.map.clone();
+        var normal = tex.normal.clone();
+        var rough = tex.rough.clone();
+        var emissive = tex.emissive.clone();
+        [map, normal, rough, emissive].forEach(function(t) {
+            t.repeat.set(rx, ry);
+            t.needsUpdate = true;
+        });
+        var mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: map,
+            normalMap: normal,
+            normalScale: new THREE.Vector2(0.8, 0.8),
+            roughnessMap: rough,
+            roughness: 1,
             metalness: style.metal,
             emissive: new THREE.Color(style.lit),
-            emissiveMap: tex.emissive,
+            emissiveMap: emissive,
             emissiveIntensity: this.day.windowEmissive
         });
+        this.matCache[key] = mat;
+        return mat;
+    };
+
+    /**
+     * Build the trim sheet for a style: one texture packing four reusable
+     * greeble details in a 2x2 grid - vent louvers, a pipe bundle, a bolted
+     * panel and an air-handling unit - with matching normal, roughness and
+     * emissive maps. Cached per style.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} {map, normal, rough, emissive} base Three.CanvasTextures.
+     */
+    Cyberspace.prototype.trimSheet = function(style) {
+        var key = 'trim_' + style.body;
+        if (this.texCache[key]) {
+            return this.texCache[key];
+        }
+        var THREE = this.THREE;
+        var SIZE = 256;
+        var cell = 128;
+        var g = this.newCanvasCtx(SIZE);
+        var b = this.newCanvasCtx(SIZE);
+        var r = this.newCanvasCtx(SIZE);
+        var e = this.newCanvasCtx(SIZE);
+        var metal = new THREE.Color(style.body).multiplyScalar(0.7);
+
+        g.fillStyle = '#' + metal.getHexString();
+        g.fillRect(0, 0, SIZE, SIZE);
+        b.fillStyle = 'rgb(128,128,128)';
+        b.fillRect(0, 0, SIZE, SIZE);
+        r.fillStyle = 'rgb(150,150,150)';
+        r.fillRect(0, 0, SIZE, SIZE);
+        e.fillStyle = '#000000';
+        e.fillRect(0, 0, SIZE, SIZE);
+
+        var dark = metal.clone().multiplyScalar(0.5).getStyle();
+        var lite = metal.clone().multiplyScalar(1.4).getStyle();
+        var i;
+
+        // Vent louvers (0,0): horizontal slats.
+        for (i = 0; i < 9; i++) {
+            var vy = 14 + i * 12;
+            g.fillStyle = dark;
+            g.fillRect(12, vy, cell - 24, 7);
+            g.fillStyle = lite;
+            g.fillRect(12, vy, cell - 24, 2);
+            b.fillStyle = 'rgb(70,70,70)';
+            b.fillRect(12, vy, cell - 24, 7);
+            b.fillStyle = 'rgb(190,190,190)';
+            b.fillRect(12, vy, cell - 24, 2);
+        }
+
+        // Pipe bundle (1,0): vertical rounded pipes.
+        for (i = 0; i < 4; i++) {
+            var pxc = cell + 22 + i * 22;
+            var pgd = g.createLinearGradient(pxc - 8, 0, pxc + 8, 0);
+            pgd.addColorStop(0, dark);
+            pgd.addColorStop(0.5, lite);
+            pgd.addColorStop(1, dark);
+            g.fillStyle = pgd;
+            g.fillRect(pxc - 8, 8, 16, cell - 16);
+            b.fillStyle = 'rgb(180,180,180)';
+            b.fillRect(pxc - 3, 8, 4, cell - 16);
+        }
+
+        // Bolted panel (0,1): seams and corner rivets.
+        g.strokeStyle = dark;
+        g.lineWidth = 2;
+        g.strokeRect(10, cell + 10, cell - 20, cell - 20);
+        for (i = 0; i < 4; i++) {
+            var bx = 18 + (i % 2) * (cell - 36);
+            var by = cell + 18 + Math.floor(i / 2) * (cell - 36);
+            g.fillStyle = lite;
+            g.beginPath();
+            g.arc(bx, by, 3, 0, Math.PI * 2);
+            g.fill();
+            b.fillStyle = 'rgb(210,210,210)';
+            b.beginPath();
+            b.arc(bx, by, 3, 0, Math.PI * 2);
+            b.fill();
+        }
+
+        // Air-handling unit (1,1): housing, fan grille and a warning light.
+        g.fillStyle = dark;
+        g.fillRect(cell + 14, cell + 14, cell - 28, cell - 28);
+        g.strokeStyle = lite;
+        g.lineWidth = 2;
+        var fcx = cell + cell / 2;
+        var fcy = cell + cell / 2;
+        g.beginPath();
+        g.arc(fcx, fcy, 34, 0, Math.PI * 2);
+        g.stroke();
+        for (i = 0; i < 8; i++) {
+            var an = (i / 8) * Math.PI * 2;
+            g.beginPath();
+            g.moveTo(fcx, fcy);
+            g.lineTo(fcx + Math.cos(an) * 34, fcy + Math.sin(an) * 34);
+            g.stroke();
+        }
+        e.fillStyle = '#ff3b3b';
+        e.fillRect(cell + 20, cell + 20, 6, 6);
+
+        var out = {
+            map: this.canvasTexture(g.canvas, true),
+            normal: this.canvasTexture(this.heightToNormal(b.canvas, 1.6), false),
+            rough: this.canvasTexture(r.canvas, false),
+            emissive: this.canvasTexture(e.canvas, true)
+        };
+        this.texCache[key] = out;
+        return out;
+    };
+
+    /**
+     * A material that shows one cell of a style's trim sheet.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @param {Number} cx Cell column (0 or 1).
+     * @param {Number} cy Cell row (0 or 1).
+     * @return {Object} A Three.MeshStandardMaterial, cached per style + cell.
+     */
+    Cyberspace.prototype.trimMaterial = function(style, cx, cy) {
+        var THREE = this.THREE;
+        var key = 'trimmat_' + style.body + '_' + cx + cy;
+        if (this.matCache[key]) {
+            return this.matCache[key];
+        }
+        var tex = this.trimSheet(style);
+        var parts = {};
+        ['map', 'normal', 'rough', 'emissive'].forEach(function(name) {
+            var t = tex[name].clone();
+            t.wrapS = THREE.ClampToEdgeWrapping;
+            t.wrapT = THREE.ClampToEdgeWrapping;
+            t.repeat.set(0.5, 0.5);
+            t.offset.set(cx * 0.5, (1 - cy) * 0.5);
+            t.needsUpdate = true;
+            parts[name] = t;
+        });
+        var mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: parts.map,
+            normalMap: parts.normal,
+            roughnessMap: parts.rough,
+            roughness: 1,
+            metalness: 0.5,
+            emissive: 0xffffff,
+            emissiveMap: parts.emissive,
+            emissiveIntensity: Math.max(0.35, this.day.windowEmissive)
+        });
+        this.matCache[key] = mat;
+        return mat;
+    };
+
+    /**
+     * Bolt lived-in greebles onto a building from its style trim sheet: a base
+     * vent, a wall access panel, a corner pipe run and a rooftop unit.
+     *
+     * @param {Object} group The building group to add to.
+     * @param {Object} style The STYLES recipe.
+     * @param {Number} w Body width.
+     * @param {Number} d Body depth.
+     * @param {Number} h Body height.
+     */
+    Cyberspace.prototype.addGreebles = function(group, style, w, d, h) {
+        var THREE = this.THREE;
+        var vent = new THREE.Mesh(
+            new THREE.BoxGeometry(w * 0.82, 1.1, 0.35), this.trimMaterial(style, 0, 0)
+        );
+        vent.position.set(0, 0.75, d / 2 + 0.16);
+        group.add(vent);
+
+        var panel = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 1.6, 0.2), this.trimMaterial(style, 0, 1)
+        );
+        panel.position.set(-w / 2 + 0.9, 1.7, d / 2 + 0.1);
+        group.add(panel);
+
+        var pipe = new THREE.Mesh(
+            new THREE.BoxGeometry(0.4, h * 0.9, 0.4), this.trimMaterial(style, 1, 0)
+        );
+        pipe.position.set(w / 2 - 0.3, h * 0.45, d / 2 - 0.3);
+        group.add(pipe);
+
+        var unit = new THREE.Mesh(
+            new THREE.BoxGeometry(1.7, 1.1, 1.7), this.trimMaterial(style, 1, 1)
+        );
+        unit.position.set((Math.random() - 0.5) * w * 0.4, h + 0.55, (Math.random() - 0.5) * d * 0.4);
+        group.add(unit);
     };
 
     /**
@@ -529,7 +1071,7 @@ define('format_mnemo/vr', [], function() {
             // Lit slab with a wall of windows on every face.
             var body = new THREE.Mesh(
                 new THREE.BoxGeometry(w, h, d),
-                this.facadeMaterial(style, 10, 22)
+                this.facadeMaterial(style, w, h)
             );
             body.position.set(x, h / 2, z);
             this.scene.add(body);
@@ -617,7 +1159,7 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildSlumCluster = function(cx, cz) {
         var THREE = this.THREE;
         var style = STYLES.entropism;
-        var mat = this.facadeMaterial(style, 4, 6);
+        var mat = this.facadeMaterial(style, 4, 5);
         var y = 0;
         var boxes = 3 + Math.floor(Math.random() * 4);
         for (var b = 0; b < boxes; b++) {
@@ -763,6 +1305,11 @@ define('format_mnemo/vr', [], function() {
         var startZ = -20;
         var endZ = startZ - Math.max(1, sections.length) * spacing - 10;
 
+        // Road corridors for movement: the avenue, plus each side street (filled
+        // in by buildSideStreet). On foot the player is kept within these; only
+        // flying lifts the constraint.
+        this.roads = [{xMin: -roadHalf, xMax: roadHalf, zMin: endZ, zMax: 12}];
+
         // Main avenue surface with glowing edge lines.
         this.paveStrip(0, (12 + endZ) / 2, roadHalf * 2, 12 - endZ, 0);
         [-roadHalf, roadHalf].forEach(function(x) {
@@ -799,6 +1346,15 @@ define('format_mnemo/vr', [], function() {
         var streetLen = first + Math.max(1, slots) * step + 3;
         var mouthX = side * roadHalf;
         var midX = mouthX + side * streetLen / 2;
+
+        // Record this street as a walkable corridor (overlapping the avenue at
+        // the mouth so the player can flow between them on foot).
+        var xa = mouthX;
+        var xb = mouthX + side * streetLen;
+        this.roads.push({
+            xMin: Math.min(xa, xb), xMax: Math.max(xa, xb),
+            zMin: z - streetHalf, zMax: z + streetHalf
+        });
 
         // Side-street road surface + neon kerb lines.
         this.paveStrip(midX, z, streetLen, streetHalf * 2, 0);
@@ -998,7 +1554,7 @@ define('format_mnemo/vr', [], function() {
         // crisp neon edge outline that reads strongest after dark.
         var body = new THREE.Mesh(
             new THREE.BoxGeometry(w, h, d),
-            this.facadeMaterial(style, 6, Math.max(4, Math.round(h / 2)))
+            this.facadeMaterial(style, w, h)
         );
         body.position.y = h / 2;
         group.add(body);
@@ -1027,6 +1583,8 @@ define('format_mnemo/vr', [], function() {
 
         // Style-specific silhouette and roofline.
         this.dressRoof(group, style, w, d, h);
+        // Lived-in greebles from the style's trim sheet.
+        this.addGreebles(group, style, w, d, h);
 
         // The lit signboard: the clickable face. State colour tints its frame so
         // completion/restriction still reads at a glance.
@@ -1673,6 +2231,7 @@ define('format_mnemo/vr', [], function() {
         }
 
         this.clampToWorld();
+        this.constrainToRoad();
 
         this.renderer.render(this.scene, this.camera);
     };
@@ -1689,6 +2248,39 @@ define('format_mnemo/vr', [], function() {
         } else if (this.player.position.y > 45) {
             this.player.position.y = 45;
         }
+    };
+
+    /**
+     * Keep ground-level movement on the roads: while not flying, clamp the rig
+     * into the nearest road corridor (avenue or a side street). Lifting off the
+     * ground (flying) releases the constraint so the whole city is reachable.
+     */
+    Cyberspace.prototype.constrainToRoad = function() {
+        if (!this.roads || !this.roads.length) {
+            return;
+        }
+        // Flying = risen clear of the street; then movement is unconstrained.
+        if (this.player.position.y > this.flyThreshold) {
+            return;
+        }
+        var px = this.player.position.x;
+        var pz = this.player.position.z;
+        var bestX = px;
+        var bestZ = pz;
+        var bestDist = Infinity;
+        for (var i = 0; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            var cx = Math.max(r.xMin, Math.min(r.xMax, px));
+            var cz = Math.max(r.zMin, Math.min(r.zMax, pz));
+            var dist = (px - cx) * (px - cx) + (pz - cz) * (pz - cz);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestX = cx;
+                bestZ = cz;
+            }
+        }
+        this.player.position.x = bestX;
+        this.player.position.z = bestZ;
     };
 
     /**

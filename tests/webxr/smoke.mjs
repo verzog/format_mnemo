@@ -209,6 +209,55 @@ const scenarios = [
             const pass = s.brake === false && Math.abs(s.z + 0.45) < 0.02;
             return {pass, detail: `brake=${s.brake} z=${s.z.toFixed(4)}`};
         }
+    },
+    {
+        name: 'road: on foot, off-road position is clamped to the corridor',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const fake = {
+                flyThreshold: 1.2,
+                roads: [{xMin: -5, xMax: 5, zMin: -100, zMax: 12}],
+                player: {position: {x: 20, y: 0, z: 0}}
+            };
+            CS.prototype.constrainToRoad.call(fake);
+            const p = fake.player.position;
+            const pass = Math.abs(p.x - 5) < 1e-9 && Math.abs(p.z) < 1e-9;
+            return {pass, detail: `x=${p.x} z=${p.z} (want x=5)`};
+        }
+    },
+    {
+        name: 'road: while flying, movement is unconstrained',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const fake = {
+                flyThreshold: 1.2,
+                roads: [{xMin: -5, xMax: 5, zMin: -100, zMax: 12}],
+                player: {position: {x: 20, y: 3, z: 0}}
+            };
+            CS.prototype.constrainToRoad.call(fake);
+            const p = fake.player.position;
+            const pass = Math.abs(p.x - 20) < 1e-9;
+            return {pass, detail: `x=${p.x} (want 20, unclamped)`};
+        }
+    },
+    {
+        name: 'road: nearest of avenue/side-street corridors is chosen',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const fake = {
+                flyThreshold: 1.2,
+                roads: [
+                    {xMin: -5, xMax: 5, zMin: -100, zMax: 12},
+                    {xMin: 5, xMax: 25, zMin: -54, zMax: -46}
+                ],
+                // Just off the side street; should clamp into it, not the avenue.
+                player: {position: {x: 18, y: 0, z: -44}}
+            };
+            CS.prototype.constrainToRoad.call(fake);
+            const p = fake.player.position;
+            const pass = Math.abs(p.x - 18) < 1e-9 && Math.abs(p.z + 46) < 1e-9;
+            return {pass, detail: `x=${p.x} z=${p.z} (want x=18 z=-46)`};
+        }
     }
 ];
 

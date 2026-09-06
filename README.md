@@ -54,6 +54,17 @@ off).
   sun and sky by day (hazy blue, atmospheric depth), warm light at dawn/dusk,
   and a dark, neon- and window-lit skyline at night. The neon signs, holo-ads
   and lit windows intensify as it gets dark.
+- **Textured, lived-in surfaces** — buildings use seamless, tileable facades
+  with colour, **normal**, **roughness** and **emissive** maps (floor ledges,
+  mullions, glass, scratches, rust and water streaks) plus a **trim sheet** of
+  greebles (vents, pipes, bolted panels, rooftop units) bolted on for detail.
+- **Per-environment backgrounds** — **Cyberspace** is the full city under the
+  day/night sky, **Grid** a clean data-plane, and **Void** is deep space: the
+  streets float among a starfield, drifting nebulae and lit planets (one
+  ringed) under a distant star.
+- **Road-constrained movement** — on foot (and gliding) the learner is kept on
+  the avenue and side streets; **flying** (rising off the ground) releases the
+  constraint so the whole city is free to explore.
 - **Accessible list view** — a full, semantic list of every section and activity
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers
