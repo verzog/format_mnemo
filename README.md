@@ -152,9 +152,14 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
   any) or the plugin's own models. If set, it takes precedence over an upload.
 - **Upload prop asset pack** — upload your own `.glb` prop models directly into
   Moodle (served from the plugin's system-context file area) as an alternative to
-  hosting them at a URL. Name each file for the prop it replaces (`av.glb`,
-  `lamp.glb`, `kiosk.glb`, `barrier.glb`); textures may be embedded in the
-  `.glb`. Used only when the URL above is blank.
+  hosting them at a URL. Name each file exactly for the prop it replaces:
+  - `av.glb` — flying car (glides above the streets as traffic)
+  - `lamp.glb` — street lamp (lines the avenue kerbs)
+  - `kiosk.glb` — street kiosk (sits at the mouth of each side street)
+  - `barrier.glb` — road barrier (lines the avenue kerbs)
+
+  Any prop you don't upload keeps its bundled model; textures may be embedded in
+  the `.glb`. Used only when the URL above is blank.
 
 ### Content Security Policy note
 
