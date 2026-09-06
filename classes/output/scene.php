@@ -342,6 +342,10 @@ class scene implements renderable, templatable {
             'rootid' => $this->rootid(),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
+            // Base URL of the bundled Three.js addon modules (GLTFLoader and the
+            // Draco/KTX2/meshopt decoders), used by the client's import map so
+            // compressed glTF asset packs load.
+            'addonsbaseurl' => (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false),
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),

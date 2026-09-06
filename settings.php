@@ -67,7 +67,8 @@ if ($ADMIN->fulltree) {
     // Base URL of an external glTF (.glb) prop asset pack. Left blank, the
     // plugin loads the original props it bundles (models/). Point this at a
     // directory of .glb files (av, lamp, kiosk, barrier, ...) to swap in your
-    // own CC0/licensed models; they must be uncompressed glTF (no Draco).
+    // own CC0/licensed models; Draco/meshopt geometry and KTX2 textures are
+    // supported via the bundled addon loaders.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/assetbaseurl',
         get_string('setting_assetbaseurl', 'format_mnemo'),
@@ -79,8 +80,8 @@ if ($ADMIN->fulltree) {
     // Upload a prop asset pack straight into Moodle instead of hosting it at a
     // URL. Files land in the 'assetpack' file area at system context and are
     // served via pluginfile; the loader reads them by the same
-    // av/lamp/kiosk/barrier naming convention. Only uncompressed .glb models are
-    // accepted (no Draco). The URL setting above, if set, takes precedence.
+    // av/lamp/kiosk/barrier naming convention. Draco/meshopt-compressed .glb
+    // models are supported. The URL setting above, if set, takes precedence.
     $settings->add(new admin_setting_configstoredfile(
         'format_mnemo/assetpack',
         get_string('setting_assetpack', 'format_mnemo'),

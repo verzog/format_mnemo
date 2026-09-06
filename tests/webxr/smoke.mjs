@@ -467,7 +467,9 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2)));
-            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const sign = new THREE.Group();
+            sign.position.set(0, 2, 2.12);
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, sign: sign, group: new THREE.Group()};
             const sm = {needsUpdate: false};
             const self = {
                 THREE: THREE, renderer: {shadowMap: sm},
@@ -476,9 +478,12 @@ const scenarios = [
                 loadModel: () => Promise.resolve(tpl)
             };
             await CS.prototype.applyBuildingModel.call(self, {}, built);
+            // Model (2x2x2) fitted into 3.6x3.6x8 -> scale 1.8 -> front at z=1.8;
+            // the sign should sit just in front of it (1.8 + 0.2 = 2.0).
             const pass = built.body.visible === false && sm.needsUpdate === true &&
-                built.group.children.length === 1;
-            return {pass, detail: `vis=${built.body.visible} sm=${sm.needsUpdate}`};
+                built.group.children.length === 1 &&
+                Math.abs(sign.position.z - 2.0) < 1e-6;
+            return {pass, detail: `vis=${built.body.visible} signz=${sign.position.z}`};
         }
     }
 ];

@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+    Addon glTF-loader test harness (not shipped, not loaded by the plugin).
+
+    Loads the bundled Three.js and its addon glTF loader stack (GLTFLoader +
+    Draco/KTX2/meshopt) exactly the way the plugin does at runtime — through an
+    import map that maps 'three' and 'three/addons/' — then exposes the addon
+    classes and the real amd/src/vr.js module so tests/webxr/gltf-loader.mjs can
+    drive Cyberspace.loadModel() against compressed .glb fixtures.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>format_mnemo addon loader harness</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "../../thirdparty/three.module.min.js",
+    "three/addons/": "../../thirdparty/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<script>
+// Capture the AMD factory output without a loader: vr.js calls define(...).
+window.define = function(name, deps, factory) {
+    window.__mnemoModule = factory();
+};
+</script>
+<script src="../../amd/src/vr.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
+import {KTX2Loader} from 'three/addons/loaders/KTX2Loader.js';
+import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+
+window.__mnemoLoader = {
+    THREE: THREE,
+    loaders: {GLTFLoader: GLTFLoader, DRACOLoader: DRACOLoader, KTX2Loader: KTX2Loader, MeshoptDecoder: MeshoptDecoder}
+};
+window.__loaderReady = true;
+</script>
+</body>
+</html>
