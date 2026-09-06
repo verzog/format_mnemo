@@ -331,6 +331,44 @@ const scenarios = [
                 Math.abs((box.min.z + box.max.z) / 2) < 1e-6;
             return {pass, detail: `scale=${m.scale.x} miny=${box.min.y.toFixed(3)}`};
         }
+    },
+    {
+        name: 'prop: falls back to bundled models when the pack lacks one',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/'},
+                joinBase: CS.prototype.joinBase,
+                loadModel: (url) => {
+                    calls.push(url);
+                    return url.indexOf('pack/') === 0
+                        ? Promise.reject(new Error('404'))
+                        : Promise.resolve({tpl: true});
+                }
+            };
+            const r = await CS.prototype.loadProp.call(self, 'lamp');
+            const pass = calls[0] === 'pack/lamp.glb' &&
+                calls[1] === 'bundled/lamp.glb' && !!r && r.tpl === true;
+            return {pass, detail: calls.join(',')};
+        }
+    },
+    {
+        name: 'prop: no redundant fallback when the pack is the bundled base',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'm/', modelsfallbackurl: 'm/'},
+                joinBase: CS.prototype.joinBase,
+                loadModel: (url) => {
+                    calls.push(url);
+                    return Promise.resolve({});
+                }
+            };
+            await CS.prototype.loadProp.call(self, 'av');
+            return {pass: calls.length === 1 && calls[0] === 'm/av.glb', detail: calls.join(',')};
+        }
     }
 ];
 

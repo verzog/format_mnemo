@@ -1959,16 +1959,12 @@ define('format_mnemo/vr', [], function() {
      * fails.
      */
     Cyberspace.prototype.buildProps = function() {
-        var base = this.config.modelsbaseurl;
-        if (!base) {
+        if (!this.config.modelsbaseurl) {
             return;
-        }
-        if (base.charAt(base.length - 1) !== '/') {
-            base += '/';
         }
         var self = this;
         var load = function(name, onReady) {
-            self.loadModel(base + name + '.glb').then(function(tpl) {
+            self.loadProp(name).then(function(tpl) {
                 onReady(tpl);
                 return null;
             }).catch(function(e) {
@@ -1990,6 +1986,27 @@ define('format_mnemo/vr', [], function() {
         load('av', function(tpl) {
             self.spawnTraffic(tpl);
         });
+    };
+
+    /**
+     * Load a named prop model from the configured pack, falling back to the
+     * plugin's bundled models when the pack does not provide it. This lets a
+     * partial asset pack (only some props) keep the bundled models for the rest.
+     *
+     * @param {String} name The prop base name (lamp, barrier, kiosk, av).
+     * @return {Promise} Resolves with a Three.Group template.
+     */
+    Cyberspace.prototype.loadProp = function(name) {
+        var self = this;
+        var base = this.config.modelsbaseurl;
+        var fallback = this.config.modelsfallbackurl;
+        var p = this.loadModel(this.joinBase(base, name + '.glb'));
+        if (fallback && fallback !== base) {
+            p = p.catch(function() {
+                return self.loadModel(self.joinBase(fallback, name + '.glb'));
+            });
+        }
+        return p;
     };
 
     /**

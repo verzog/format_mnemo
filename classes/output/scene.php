@@ -208,6 +208,10 @@ class scene implements renderable, templatable {
             // Base URL for glTF prop models. Defaults to the plugin's bundled
             // models; an admin can point it at an external asset pack.
             'modelsbaseurl' => $this->models_base_url(),
+            // The plugin's own bundled models URL, always available as a
+            // per-model fallback so a partial asset pack (only some props) keeps
+            // the bundled models for the props it omits.
+            'modelsfallbackurl' => (new moodle_url('/course/format/mnemo/models/'))->out(false),
             // Module types that have a building-<modname>.glb model available, so
             // the client only attempts to load buildings it can expect to find.
             'buildingmodels' => $this->building_models($nodes),
