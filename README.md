@@ -65,6 +65,11 @@ off).
 - **Road-constrained movement** — on foot (and gliding) the learner is kept on
   the avenue and side streets; **flying** (rising off the ground) releases the
   constraint so the whole city is free to explore.
+- **Cinematic rendering** — filmic **ACES tone mapping**, **sun shadow maps**,
+  and a hand-rolled **bloom** pass (threshold + separable blur) make the neon
+  glow. Bloom is subtle by day and strong at night. The full post pipeline
+  runs on the **on-screen** view; the headset renders directly (tone mapping
+  and shadows still apply) so framerate stays comfortable.
 - **Accessible list view** — a full, semantic list of every section and activity
   is always rendered. It is the no-JavaScript fallback, the graceful-degradation
   path if the 3D scene can't load, and a one-click toggle for anyone who prefers
