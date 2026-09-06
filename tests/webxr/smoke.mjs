@@ -273,6 +273,64 @@ const scenarios = [
             const pass = Math.abs(p.x - 18) < 1e-9 && Math.abs(p.z + 46) < 1e-9;
             return {pass, detail: `x=${p.x} z=${p.z} (want x=18 z=-46)`};
         }
+    },
+    {
+        name: 'building: type-based URL for a confirmed module type',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz']},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
+            return {pass: url === 'm/building-quiz.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: no model for an unconfirmed module type',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz']},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'forum'});
+            return {pass: url === null, detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: per-activity filename override resolves against the pack',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: []},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self,
+                {modname: 'quiz', building: 'library.glb'});
+            return {pass: url === 'm/library.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: per-activity URL override is kept as-is',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: []},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self,
+                {modname: 'quiz', building: 'https://cdn/x.glb'});
+            return {pass: url === 'https://cdn/x.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: fitModel scales to the footprint and grounds the base',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 2));
+            m.position.set(5, 9, -3);
+            CS.prototype.fitModel.call({THREE: THREE}, m, 6, 6, 6);
+            const box = new THREE.Box3().setFromObject(m);
+            const pass = Math.abs(m.scale.x - 1.5) < 1e-6 &&
+                Math.abs(box.min.y) < 1e-6 &&
+                Math.abs((box.min.x + box.max.x) / 2) < 1e-6 &&
+                Math.abs((box.min.z + box.max.z) / 2) < 1e-6;
+            return {pass, detail: `scale=${m.scale.x} miny=${box.min.y.toFixed(3)}`};
+        }
     }
 ];
 

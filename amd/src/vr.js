@@ -2191,6 +2191,8 @@ define('format_mnemo/vr', [], function() {
             // Face the street centreline so the signboard reads from the street.
             built.group.lookAt(bx, built.group.position.y, z);
             self.scene.add(built.group);
+            // Swap in an attached building model for this activity, if any.
+            self.applyBuildingModel(act, built);
         });
     };
 
@@ -2362,20 +2364,24 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.makeStructure = function(act, style) {
         var THREE = this.THREE;
         var group = new THREE.Group();
+        // The procedural mass lives in its own sub-group so an attached building
+        // model (buildingModelUrl) can hide it while the sign stays.
+        var body = new THREE.Group();
+        group.add(body);
         var w = style.footprint[0];
         var d = style.footprint[1];
         var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
 
-        // Body: a lit concrete/steel mass whose windows glow at night, with a
+        // Mass: a lit concrete/steel volume whose windows glow at night, with a
         // crisp neon edge outline that reads strongest after dark.
-        var body = new THREE.Mesh(
+        var mass = new THREE.Mesh(
             new THREE.BoxGeometry(w, h, d),
             this.facadeMaterial(style, w, h)
         );
-        body.position.y = h / 2;
-        body.castShadow = true;
-        body.receiveShadow = true;
-        group.add(body);
+        mass.position.y = h / 2;
+        mass.castShadow = true;
+        mass.receiveShadow = true;
+        body.add(mass);
 
         var edges = new THREE.LineSegments(
             new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
@@ -2384,7 +2390,7 @@ define('format_mnemo/vr', [], function() {
             })
         );
         edges.position.y = h / 2;
-        group.add(edges);
+        body.add(edges);
 
         // Entropism buildings wear a broken, weathered wireframe overlay.
         if (style.wireframe) {
@@ -2396,13 +2402,13 @@ define('format_mnemo/vr', [], function() {
                 })
             );
             rust.position.y = h / 2;
-            group.add(rust);
+            body.add(rust);
         }
 
         // Style-specific silhouette and roofline.
-        this.dressRoof(group, style, w, d, h);
+        this.dressRoof(body, style, w, d, h);
         // Lived-in greebles from the style's trim sheet.
-        this.addGreebles(group, style, w, d, h);
+        this.addGreebles(body, style, w, d, h);
 
         // The lit signboard: the clickable face. State colour tints its frame so
         // completion/restriction still reads at a glance.
@@ -2418,7 +2424,98 @@ define('format_mnemo/vr', [], function() {
         sign.group.position.set(0, Math.min(h - 1.1, 2.6), d / 2 + 0.12);
         group.add(sign.group);
 
-        return {group: group, panel: sign.panel};
+        return {group: group, panel: sign.panel, body: body, w: w, d: d, h: h};
+    };
+
+    /**
+     * The URL of a building model to attach to an activity, or null to keep the
+     * procedural building. A per-activity override (act.building) wins — either a
+     * full URL/data URI or a filename resolved against the models base URL.
+     * Otherwise a type-based model (building-<modname>.glb) is used, but only for
+     * module types the server confirmed a model exists for (config.buildingmodels).
+     *
+     * @param {Object} act The activity node (modname, building).
+     * @return {String|null} The model URL, or null.
+     */
+    Cyberspace.prototype.buildingModelUrl = function(act) {
+        var base = this.config.modelsbaseurl;
+        if (act.building) {
+            if (/^https?:/.test(act.building) || act.building.charAt(0) === '/' ||
+                act.building.indexOf('data:') === 0) {
+                return act.building;
+            }
+            return base ? this.joinBase(base, act.building) : act.building;
+        }
+        var list = this.config.buildingmodels || [];
+        if (base && act.modname && list.indexOf(act.modname) !== -1) {
+            return this.joinBase(base, 'building-' + act.modname + '.glb');
+        }
+        return null;
+    };
+
+    /**
+     * Join a base URL and a file name with exactly one separating slash.
+     *
+     * @param {String} base The base URL.
+     * @param {String} name The file name.
+     * @return {String} The joined URL.
+     */
+    Cyberspace.prototype.joinBase = function(base, name) {
+        return (base.charAt(base.length - 1) === '/' ? base : base + '/') + name;
+    };
+
+    /**
+     * Attach an activity's building model, if any: load it, fit it to the
+     * procedural building's footprint, hide the procedural mass (keeping the
+     * sign), and drop it into the structure. A missing/failed model leaves the
+     * procedural building in place.
+     *
+     * @param {Object} act The activity node.
+     * @param {Object} built The makeStructure() result (group, body, w, d, h).
+     */
+    Cyberspace.prototype.applyBuildingModel = function(act, built) {
+        var url = this.buildingModelUrl(act);
+        if (!url) {
+            return;
+        }
+        var self = this;
+        this.loadModel(url).then(function(tpl) {
+            var model = tpl.clone();
+            self.fitModel(model, built.w, built.d, built.h);
+            self.setShadow(model, true);
+            built.body.visible = false;
+            built.group.add(model);
+            return null;
+        }).catch(function(e) {
+            if (window.console) {
+                window.console.warn('format_mnemo: building model ' + url + ' unavailable', e);
+            }
+        });
+    };
+
+    /**
+     * Scale a loaded model to fit within a w x d x h box, then sit its base on
+     * the ground centred on the local x/z origin.
+     *
+     * @param {Object} model The Three.Object3D to fit.
+     * @param {Number} w Target width (x).
+     * @param {Number} d Target depth (z).
+     * @param {Number} h Target height (y).
+     */
+    Cyberspace.prototype.fitModel = function(model, w, d, h) {
+        var THREE = this.THREE;
+        var box = new THREE.Box3().setFromObject(model);
+        var size = new THREE.Vector3();
+        box.getSize(size);
+        var s = Math.min(w / (size.x || 1), d / (size.z || 1), h / (size.y || 1));
+        if (!isFinite(s) || s <= 0) {
+            s = 1;
+        }
+        model.scale.setScalar(s);
+        box.setFromObject(model);
+        model.position.x -= (box.min.x + box.max.x) / 2;
+        model.position.z -= (box.min.z + box.max.z) / 2;
+        model.position.y -= box.min.y;
     };
 
     /**
