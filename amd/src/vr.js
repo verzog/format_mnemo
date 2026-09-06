@@ -140,6 +140,9 @@ define('format_mnemo/vr', [], function() {
         this.flyThreshold = 1.2; // Rig height above which movement is free-flight.
         this.captureMargin = 3; // Only clamp to a road within this distance.
         this.postfx = null; // On-screen bloom pipeline (built after the scene).
+        this.sun = null; // Shadow-casting sun (non-void), followed to the learner.
+        this.sunDir = null; // Sun direction unit vector.
+        this.lastShadowPos = new THREE.Vector3(1e9, 0, 1e9); // Last shadow recentre.
 
         this.build();
     }
@@ -158,9 +161,13 @@ define('format_mnemo/vr', [], function() {
         // in both the desktop and headset render paths.
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.0;
-        // Soft sun shadows for grounding depth.
+        // Soft sun shadows for grounding depth. The scene is static, so the
+        // shadow map is only re-rendered when the shadow frustum follows the
+        // learner (see tick), not every frame.
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.autoUpdate = false;
+        renderer.shadowMap.needsUpdate = true;
         this.root.appendChild(renderer.domElement);
         this.renderer = renderer;
 
@@ -301,7 +308,9 @@ define('format_mnemo/vr', [], function() {
         sun.shadow.bias = -0.0006;
         sun.shadow.normalBias = 0.6;
         this.scene.add(sun);
-        this.scene.add(sun.target); // Aim at the world origin (avenue start).
+        this.scene.add(sun.target); // Aim followed to the learner in tick().
+        this.sun = sun;
+        this.sunDir = d.sunDir.clone();
 
         // A fill from the opposite side so shadowed faces keep some form.
         var fill = new THREE.DirectionalLight(d.horizon.getHex(), 0.25 + d.day * 0.25);
@@ -1428,12 +1437,17 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.paveStrip = function(cx, cz, w, d, y) {
         var THREE = this.THREE;
+        // A lit (dark, wet-looking) asphalt strip that receives the sun's
+        // shadows, so buildings are grounded on the streets the learner walks.
         var road = new THREE.Mesh(
             new THREE.PlaneGeometry(w, d),
-            new THREE.MeshBasicMaterial({color: 0x04060c, transparent: true, opacity: 0.9})
+            new THREE.MeshStandardMaterial({
+                color: 0x05070d, roughness: 0.5, metalness: 0.5
+            })
         );
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
+        road.receiveShadow = true;
         this.scene.add(road);
     };
 
@@ -2268,6 +2282,7 @@ define('format_mnemo/vr', [], function() {
 
         this.clampToWorld();
         this.constrainToRoad();
+        this.followShadow();
 
         // Headset rendering must go straight to the XR framebuffer (the post
         // pipeline's render targets cannot present to it); tone mapping and
@@ -2289,7 +2304,10 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         var w = Math.max(1, this.root.clientWidth);
         var h = Math.max(1, this.root.clientHeight || 480);
-        var full = {depthBuffer: true};
+        // Multisample the scene target so geometry/neon edges stay smooth; the
+        // plain default framebuffer's antialias no longer applies once we render
+        // through an offscreen target.
+        var full = {depthBuffer: true, samples: 4};
         var half = {depthBuffer: false};
 
         var scene = new THREE.WebGLRenderTarget(w, h, full);
@@ -2419,6 +2437,25 @@ define('format_mnemo/vr', [], function() {
         fx.quad.material = material;
         this.renderer.setRenderTarget(target);
         this.renderer.render(fx.quadScene, fx.quadCam);
+    };
+
+    /**
+     * Recentre the sun's shadow frustum on the learner as they travel, so
+     * shadows cover wherever they are (not just the avenue start). The static
+     * shadow map is only re-rendered on the frames the frustum actually moves.
+     */
+    Cyberspace.prototype.followShadow = function() {
+        if (!this.sun) {
+            return;
+        }
+        var p = this.player.position;
+        if (this.lastShadowPos.distanceToSquared(p) < 64) {
+            return; // Moved less than ~8 units; keep the current shadow map.
+        }
+        this.lastShadowPos.copy(p);
+        this.sun.target.position.set(p.x, 0, p.z);
+        this.sun.position.set(p.x, 0, p.z).addScaledVector(this.sunDir, 220);
+        this.renderer.shadowMap.needsUpdate = true;
     };
 
     /**
