@@ -273,6 +273,140 @@ const scenarios = [
             const pass = Math.abs(p.x - 18) < 1e-9 && Math.abs(p.z + 46) < 1e-9;
             return {pass, detail: `x=${p.x} z=${p.z} (want x=18 z=-46)`};
         }
+    },
+    {
+        name: 'building: type-based URL for a confirmed module type',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz']},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
+            return {pass: url === 'm/building-quiz.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: no model for an unconfirmed module type',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz']},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'forum'});
+            return {pass: url === null, detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: per-activity filename override resolves against the pack',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: []},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self,
+                {modname: 'quiz', building: 'library.glb'});
+            return {pass: url === 'm/library.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: per-activity URL override is kept as-is',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: []},
+                joinBase: CS.prototype.joinBase};
+            const url = CS.prototype.buildingModelUrl.call(self,
+                {modname: 'quiz', building: 'https://cdn/x.glb'});
+            return {pass: url === 'https://cdn/x.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'building: fitModel scales to the footprint and grounds the base',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const m = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 2));
+            m.position.set(5, 9, -3);
+            CS.prototype.fitModel.call({THREE: THREE}, m, 6, 6, 6);
+            const box = new THREE.Box3().setFromObject(m);
+            const pass = Math.abs(m.scale.x - 1.5) < 1e-6 &&
+                Math.abs(box.min.y) < 1e-6 &&
+                Math.abs((box.min.x + box.max.x) / 2) < 1e-6 &&
+                Math.abs((box.min.z + box.max.z) / 2) < 1e-6;
+            return {pass, detail: `scale=${m.scale.x} miny=${box.min.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'prop: falls back to bundled models when the pack lacks one',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/'},
+                joinBase: CS.prototype.joinBase,
+                loadModel: (url) => {
+                    calls.push(url);
+                    return url.indexOf('pack/') === 0
+                        ? Promise.reject(new Error('404'))
+                        : Promise.resolve({tpl: true});
+                }
+            };
+            const r = await CS.prototype.loadProp.call(self, 'lamp');
+            const pass = calls[0] === 'pack/lamp.glb' &&
+                calls[1] === 'bundled/lamp.glb' && !!r && r.tpl === true;
+            return {pass, detail: calls.join(',')};
+        }
+    },
+    {
+        name: 'prop: no redundant fallback when the pack is the bundled base',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'm/', modelsfallbackurl: 'm/'},
+                joinBase: CS.prototype.joinBase,
+                loadModel: (url) => {
+                    calls.push(url);
+                    return Promise.resolve({});
+                }
+            };
+            await CS.prototype.loadProp.call(self, 'av');
+            return {pass: calls.length === 1 && calls[0] === 'm/av.glb', detail: calls.join(',')};
+        }
+    },
+    {
+        name: 'building: an empty model keeps the procedural body',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const self = {
+                THREE: THREE, renderer: {shadowMap: {}},
+                buildingModelUrl: () => 'x.glb',
+                fitModel: CS.prototype.fitModel, setShadow: () => {},
+                loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
+            };
+            await CS.prototype.applyBuildingModel.call(self, {}, built);
+            return {pass: built.body.visible === true && built.group.children.length === 0,
+                detail: `visible=${built.body.visible}`};
+        }
+    },
+    {
+        name: 'building: a real model hides the body and refreshes shadows',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2)));
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const sm = {needsUpdate: false};
+            const self = {
+                THREE: THREE, renderer: {shadowMap: sm},
+                buildingModelUrl: () => 'x.glb',
+                fitModel: CS.prototype.fitModel, setShadow: () => {},
+                loadModel: () => Promise.resolve(tpl)
+            };
+            await CS.prototype.applyBuildingModel.call(self, {}, built);
+            const pass = built.body.visible === false && sm.needsUpdate === true &&
+                built.group.children.length === 1;
+            return {pass, detail: `vis=${built.body.visible} sm=${sm.needsUpdate}`};
+        }
     }
 ];
 

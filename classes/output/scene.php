@@ -208,6 +208,13 @@ class scene implements renderable, templatable {
             // Base URL for glTF prop models. Defaults to the plugin's bundled
             // models; an admin can point it at an external asset pack.
             'modelsbaseurl' => $this->models_base_url(),
+            // The plugin's own bundled models URL, always available as a
+            // per-model fallback so a partial asset pack (only some props) keeps
+            // the bundled models for the props it omits.
+            'modelsfallbackurl' => (new moodle_url('/course/format/mnemo/models/'))->out(false),
+            // Module types that have a building-<modname>.glb model available, so
+            // the client only attempts to load buildings it can expect to find.
+            'buildingmodels' => $this->building_models($nodes),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -293,6 +300,80 @@ class scene implements renderable, templatable {
             $sentinel
         )->out(false);
         return substr($url, 0, -strlen($sentinel));
+    }
+
+    /**
+     * The module types (modnames) that have a building model
+     * (<code>building-&lt;modname&gt;.glb</code>) available at the models base
+     * URL, so the client only attempts to load buildings it can expect to find.
+     *
+     * The source is matched to models_base_url()'s precedence: an external URL
+     * pack cannot be enumerated, so every module type the course actually uses is
+     * offered (missing ones fall back to the procedural building); an uploaded or
+     * bundled pack is enumerated exactly.
+     *
+     * @param array $nodes The build_nodes() result.
+     * @return array List of modname strings.
+     */
+    protected function building_models(array $nodes): array {
+        if (!empty(get_config('format_mnemo', 'assetbaseurl'))) {
+            return $this->course_modnames($nodes);
+        }
+        $uploaded = $this->uploaded_building_modnames();
+        if (!empty($uploaded)) {
+            return $uploaded;
+        }
+        return $this->bundled_building_modnames();
+    }
+
+    /**
+     * The distinct module types used across the course's activities.
+     *
+     * @param array $nodes The build_nodes() result.
+     * @return array List of modname strings.
+     */
+    protected function course_modnames(array $nodes): array {
+        $set = [];
+        foreach ($nodes['sections'] as $section) {
+            foreach ($section['activities'] as $act) {
+                $set[$act['modname']] = true;
+            }
+        }
+        return array_keys($set);
+    }
+
+    /**
+     * The modnames of building models uploaded into the asset-pack file area.
+     *
+     * @return array List of modname strings.
+     */
+    protected function uploaded_building_modnames(): array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
+        $names = [];
+        foreach ($files as $file) {
+            if (preg_match('/^building-(.+)\.glb$/', $file->get_filename(), $m)) {
+                $names[] = $m[1];
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * The modnames of building models bundled in the plugin's models/ directory.
+     *
+     * @return array List of modname strings.
+     */
+    protected function bundled_building_modnames(): array {
+        $dir = dirname(__DIR__, 2) . '/models';
+        $names = [];
+        foreach (glob($dir . '/building-*.glb') ?: [] as $path) {
+            if (preg_match('/^building-(.+)\.glb$/', basename($path), $m)) {
+                $names[] = $m[1];
+            }
+        }
+        return $names;
     }
 
     /**

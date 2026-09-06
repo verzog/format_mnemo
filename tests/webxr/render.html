@@ -69,6 +69,7 @@ var config = {
     invertlook: false,
     hour: parseFloat(q('hour', '13')),
     modelsbaseurl: '../../models/',
+    buildingmodels: q('buildings', '') ? q('buildings').split(',') : [],
     strings: strings,
     sections: sections(parseInt(q('n', '5'), 10))
 };

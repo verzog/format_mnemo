@@ -79,6 +79,13 @@ off).
   sets, samplers, alpha modes, and PBR **base-colour / metallic-roughness /
   normal / occlusion / emissive textures** (embedded, data-URI or external),
   plus the emissive-strength and texture-transform extensions.
+- **Activity buildings from models** — beyond the procedural styling, an asset
+  pack can supply a real building model per activity **type** by including
+  `building-<modname>.glb` (e.g. `building-quiz.glb`, `building-forum.glb`,
+  `building-page.glb`). Matching activities render that model — fitted to the
+  building footprint, keeping their clickable sign — instead of the procedural
+  block, so the cityscape reflects what each activity actually is. Any type
+  without a model keeps its procedural building.
 - **Bring-your-own asset packs** — swap the bundled props for your own
   CC0/licensed models, either by **uploading `.glb` files straight into Moodle**
   (admin settings) or by pointing the plugin at a **URL** of a hosted pack. Name
