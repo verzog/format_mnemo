@@ -2493,15 +2493,27 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.applyBuildingModel = function(act, built) {
         var url = this.buildingModelUrl(act);
         if (!url) {
-            return;
+            return null;
         }
         var self = this;
-        this.loadModel(url).then(function(tpl) {
+        return this.loadModel(url).then(function(tpl) {
             var model = tpl.clone();
+            // A model that parses but has no renderable geometry gives an empty
+            // Box3 (infinite bounds -> NaN placement); keep the procedural
+            // building rather than hiding it and leaving only the sign.
+            if (new self.THREE.Box3().setFromObject(model).isEmpty()) {
+                return null;
+            }
             self.fitModel(model, built.w, built.d, built.h);
             self.setShadow(model, true);
             built.body.visible = false;
             built.group.add(model);
+            // The scene uses a static shadow map (autoUpdate off, refreshed only
+            // as the player moves), so force one refresh now that the geometry
+            // changed or the swap leaves a stale shadow for a still viewer.
+            if (self.renderer && self.renderer.shadowMap) {
+                self.renderer.shadowMap.needsUpdate = true;
+            }
             return null;
         }).catch(function(e) {
             if (window.console) {

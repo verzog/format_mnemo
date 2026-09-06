@@ -369,6 +369,44 @@ const scenarios = [
             await CS.prototype.loadProp.call(self, 'av');
             return {pass: calls.length === 1 && calls[0] === 'm/av.glb', detail: calls.join(',')};
         }
+    },
+    {
+        name: 'building: an empty model keeps the procedural body',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const self = {
+                THREE: THREE, renderer: {shadowMap: {}},
+                buildingModelUrl: () => 'x.glb',
+                fitModel: CS.prototype.fitModel, setShadow: () => {},
+                loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
+            };
+            await CS.prototype.applyBuildingModel.call(self, {}, built);
+            return {pass: built.body.visible === true && built.group.children.length === 0,
+                detail: `visible=${built.body.visible}`};
+        }
+    },
+    {
+        name: 'building: a real model hides the body and refreshes shadows',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2)));
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const sm = {needsUpdate: false};
+            const self = {
+                THREE: THREE, renderer: {shadowMap: sm},
+                buildingModelUrl: () => 'x.glb',
+                fitModel: CS.prototype.fitModel, setShadow: () => {},
+                loadModel: () => Promise.resolve(tpl)
+            };
+            await CS.prototype.applyBuildingModel.call(self, {}, built);
+            const pass = built.body.visible === false && sm.needsUpdate === true &&
+                built.group.children.length === 1;
+            return {pass, detail: `vis=${built.body.visible} sm=${sm.needsUpdate}`};
+        }
     }
 ];
 
