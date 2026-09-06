@@ -139,6 +139,10 @@ define('format_mnemo/vr', [], function() {
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
         this.flyThreshold = 1.2; // Rig height above which movement is free-flight.
         this.captureMargin = 3; // Only clamp to a road within this distance.
+        this.postfx = null; // On-screen bloom pipeline (built after the scene).
+        this.sun = null; // Shadow-casting sun (non-void), followed to the learner.
+        this.sunDir = null; // Sun direction unit vector.
+        this.lastShadowPos = new THREE.Vector3(1e9, 0, 1e9); // Last shadow recentre.
 
         this.build();
     }
@@ -153,6 +157,17 @@ define('format_mnemo/vr', [], function() {
         // stylesheet sizes it responsively to the stage instead.
         renderer.setSize(this.root.clientWidth, this.root.clientHeight || 480, false);
         renderer.xr.enabled = true;
+        // Filmic tone mapping turns the flat WebGL output cinematic; it applies
+        // in both the desktop and headset render paths.
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        // Soft sun shadows for grounding depth. The scene is static, so the
+        // shadow map is only re-rendered when the shadow frustum follows the
+        // learner (see tick), not every frame.
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.autoUpdate = false;
+        renderer.shadowMap.needsUpdate = true;
         this.root.appendChild(renderer.domElement);
         this.renderer = renderer;
 
@@ -200,6 +215,8 @@ define('format_mnemo/vr', [], function() {
         this.buildVrButton();
         this.buildFullscreenButton();
         this.bindDesktopControls();
+        // Cinematic post pipeline (bloom) for the on-screen view.
+        this.buildPostFX();
 
         window.addEventListener('resize', this.onResize.bind(this));
 
@@ -278,7 +295,22 @@ define('format_mnemo/vr', [], function() {
 
         var sun = new THREE.DirectionalLight(d.sunColor.getHex(), d.sunIntensity);
         sun.position.copy(d.sunDir).multiplyScalar(220);
+        // The sun casts shadows over the streets nearest the learner. A tight
+        // frustum keeps the shadow map crisp where it counts.
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.near = 40;
+        sun.shadow.camera.far = 460;
+        sun.shadow.camera.left = -90;
+        sun.shadow.camera.right = 90;
+        sun.shadow.camera.top = 90;
+        sun.shadow.camera.bottom = -90;
+        sun.shadow.bias = -0.0006;
+        sun.shadow.normalBias = 0.6;
         this.scene.add(sun);
+        this.scene.add(sun.target); // Aim followed to the learner in tick().
+        this.sun = sun;
+        this.sunDir = d.sunDir.clone();
 
         // A fill from the opposite side so shadowed faces keep some form.
         var fill = new THREE.DirectionalLight(d.horizon.getHex(), 0.25 + d.day * 0.25);
@@ -320,6 +352,7 @@ define('format_mnemo/vr', [], function() {
             );
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = -0.02;
+            ground.receiveShadow = true;
             this.scene.add(ground);
 
             // Faint kerb grid; a neon accent, so it fades out in daylight.
@@ -1082,6 +1115,8 @@ define('format_mnemo/vr', [], function() {
                 this.facadeMaterial(style, w, h)
             );
             body.position.set(x, h / 2, z);
+            body.castShadow = true;
+            body.receiveShadow = true;
             this.scene.add(body);
 
             // Crown edge glow (a neon accent, so it fades by day) and an
@@ -1402,12 +1437,17 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.paveStrip = function(cx, cz, w, d, y) {
         var THREE = this.THREE;
+        // A lit (dark, wet-looking) asphalt strip that receives the sun's
+        // shadows, so buildings are grounded on the streets the learner walks.
         var road = new THREE.Mesh(
             new THREE.PlaneGeometry(w, d),
-            new THREE.MeshBasicMaterial({color: 0x04060c, transparent: true, opacity: 0.9})
+            new THREE.MeshStandardMaterial({
+                color: 0x05070d, roughness: 0.5, metalness: 0.5
+            })
         );
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
+        road.receiveShadow = true;
         this.scene.add(road);
     };
 
@@ -1565,6 +1605,8 @@ define('format_mnemo/vr', [], function() {
             this.facadeMaterial(style, w, h)
         );
         body.position.y = h / 2;
+        body.castShadow = true;
+        body.receiveShadow = true;
         group.add(body);
 
         var edges = new THREE.LineSegments(
@@ -2240,8 +2282,189 @@ define('format_mnemo/vr', [], function() {
 
         this.clampToWorld();
         this.constrainToRoad();
+        this.followShadow();
 
-        this.renderer.render(this.scene, this.camera);
+        // Headset rendering must go straight to the XR framebuffer (the post
+        // pipeline's render targets cannot present to it); tone mapping and
+        // shadows still apply there. The on-screen view gets the bloom pass.
+        if (presenting || !this.postfx) {
+            this.renderer.render(this.scene, this.camera);
+        } else {
+            this.renderPostFX();
+        }
+    };
+
+    /**
+     * Build the on-screen post-processing pipeline: a threshold + separable
+     * blur bloom composited back over the scene. Hand-rolled on core Three.js
+     * (render targets + fullscreen shader passes) so it needs no addon modules,
+     * keeping the same-origin, single-bundle loading the plugin relies on.
+     */
+    Cyberspace.prototype.buildPostFX = function() {
+        var THREE = this.THREE;
+        var w = Math.max(1, this.root.clientWidth);
+        var h = Math.max(1, this.root.clientHeight || 480);
+        // Multisample the scene target so geometry/neon edges stay smooth; the
+        // plain default framebuffer's antialias no longer applies once we render
+        // through an offscreen target.
+        var full = {depthBuffer: true, samples: 4};
+        var half = {depthBuffer: false};
+
+        // All post targets stay linear: tone mapping is applied writing the
+        // scene here, bloom is summed in linear light, and the final composite
+        // encodes to sRGB for display (see compositeMat).
+        var scene = new THREE.WebGLRenderTarget(w, h, full);
+        var bright = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
+        var blurA = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
+        var blurB = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
+
+        var quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        var quadScene = new THREE.Scene();
+        var quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), null);
+        quadScene.add(quad);
+
+        var vert = [
+            'varying vec2 vUv;',
+            'void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }'
+        ].join('\n');
+
+        var thresholdMat = new THREE.ShaderMaterial({
+            uniforms: {tDiffuse: {value: null}, threshold: {value: 0.62}, knee: {value: 0.2}},
+            toneMapped: false,
+            vertexShader: vert,
+            fragmentShader: [
+                'varying vec2 vUv;',
+                'uniform sampler2D tDiffuse;',
+                'uniform float threshold; uniform float knee;',
+                'void main(){',
+                '  vec3 c = texture2D(tDiffuse, vUv).rgb;',
+                '  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));',
+                '  float f = smoothstep(threshold, threshold + knee, l);',
+                '  gl_FragColor = vec4(c * f, 1.0);',
+                '}'
+            ].join('\n')
+        });
+
+        var blurMat = new THREE.ShaderMaterial({
+            uniforms: {tDiffuse: {value: null}, dir: {value: new THREE.Vector2()},
+                texel: {value: new THREE.Vector2(1 / (w / 2), 1 / (h / 2))}},
+            toneMapped: false,
+            vertexShader: vert,
+            fragmentShader: [
+                'varying vec2 vUv;',
+                'uniform sampler2D tDiffuse; uniform vec2 dir; uniform vec2 texel;',
+                'void main(){',
+                '  vec2 o1 = dir * texel * 1.3846153846;',
+                '  vec2 o2 = dir * texel * 3.2307692308;',
+                '  vec3 s = texture2D(tDiffuse, vUv).rgb * 0.2270270270;',
+                '  s += texture2D(tDiffuse, vUv + o1).rgb * 0.3162162162;',
+                '  s += texture2D(tDiffuse, vUv - o1).rgb * 0.3162162162;',
+                '  s += texture2D(tDiffuse, vUv + o2).rgb * 0.0702702703;',
+                '  s += texture2D(tDiffuse, vUv - o2).rgb * 0.0702702703;',
+                '  gl_FragColor = vec4(s, 1.0);',
+                '}'
+            ].join('\n')
+        });
+
+        // Bloom is subtle by day (so the bright sky does not wash out) and
+        // strong after dark, when neon and lit windows should blaze.
+        var bloomStrength = 0.12 + 0.9 * this.day.night;
+        var compositeMat = new THREE.ShaderMaterial({
+            uniforms: {tScene: {value: null}, tBloom: {value: null}, strength: {value: bloomStrength}},
+            toneMapped: false,
+            vertexShader: vert,
+            fragmentShader: [
+                'varying vec2 vUv;',
+                'uniform sampler2D tScene; uniform sampler2D tBloom; uniform float strength;',
+                '// Encode linear light to sRGB for the display (the intermediate',
+                '// targets are linear, and this raw shader is not auto-encoded).',
+                'vec3 lin2srgb(vec3 c){',
+                '  vec3 lo = c * 12.92;',
+                '  vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;',
+                '  return mix(hi, lo, step(c, vec3(0.0031308)));',
+                '}',
+                'void main(){',
+                '  vec3 base = texture2D(tScene, vUv).rgb;',
+                '  vec3 bloom = texture2D(tBloom, vUv).rgb;',
+                '  gl_FragColor = vec4(lin2srgb(base + bloom * strength), 1.0);',
+                '}'
+            ].join('\n')
+        });
+
+        this.postfx = {
+            scene: scene, bright: bright, blurA: blurA, blurB: blurB,
+            quadCam: quadCam, quadScene: quadScene, quad: quad,
+            thresholdMat: thresholdMat, blurMat: blurMat, compositeMat: compositeMat
+        };
+    };
+
+    /**
+     * Render the scene through the bloom pipeline to the screen.
+     */
+    Cyberspace.prototype.renderPostFX = function() {
+        var fx = this.postfx;
+        var r = this.renderer;
+
+        // 1. Scene to an offscreen target (tone-mapped, sRGB).
+        r.setRenderTarget(fx.scene);
+        r.render(this.scene, this.camera);
+
+        // 2. Threshold the bright areas into a half-res target.
+        this.drawQuad(fx.thresholdMat, {tDiffuse: fx.scene.texture}, fx.bright);
+
+        // 3. Separable Gaussian blur (two ping-pong passes for a wide glow).
+        fx.blurMat.uniforms.texel.value.set(
+            1 / fx.bright.width, 1 / fx.bright.height
+        );
+        var src = fx.bright;
+        var dirs = [[1, 0], [0, 1], [1, 0], [0, 1]];
+        var dests = [fx.blurA, fx.blurB, fx.blurA, fx.blurB];
+        for (var i = 0; i < dirs.length; i++) {
+            fx.blurMat.uniforms.dir.value.set(dirs[i][0], dirs[i][1]);
+            this.drawQuad(fx.blurMat, {tDiffuse: src.texture}, dests[i]);
+            src = dests[i];
+        }
+
+        // 4. Composite bloom over the scene, to the screen.
+        r.setRenderTarget(null);
+        this.drawQuad(fx.compositeMat, {tScene: fx.scene.texture, tBloom: src.texture}, null);
+    };
+
+    /**
+     * Draw a fullscreen quad with a material and uniform values into a target.
+     *
+     * @param {Object} material The ShaderMaterial to draw with.
+     * @param {Object} uniforms Uniform name -> value to set before drawing.
+     * @param {Object|null} target The render target, or null for the screen.
+     */
+    Cyberspace.prototype.drawQuad = function(material, uniforms, target) {
+        var fx = this.postfx;
+        var names = Object.keys(uniforms);
+        for (var i = 0; i < names.length; i++) {
+            material.uniforms[names[i]].value = uniforms[names[i]];
+        }
+        fx.quad.material = material;
+        this.renderer.setRenderTarget(target);
+        this.renderer.render(fx.quadScene, fx.quadCam);
+    };
+
+    /**
+     * Recentre the sun's shadow frustum on the learner as they travel, so
+     * shadows cover wherever they are (not just the avenue start). The static
+     * shadow map is only re-rendered on the frames the frustum actually moves.
+     */
+    Cyberspace.prototype.followShadow = function() {
+        if (!this.sun) {
+            return;
+        }
+        var p = this.player.position;
+        if (this.lastShadowPos.distanceToSquared(p) < 64) {
+            return; // Moved less than ~8 units; keep the current shadow map.
+        }
+        this.lastShadowPos.copy(p);
+        this.sun.target.position.set(p.x, 0, p.z);
+        this.sun.position.set(p.x, 0, p.z).addScaledVector(this.sunDir, 220);
+        this.renderer.shadowMap.needsUpdate = true;
     };
 
     /**
@@ -2420,6 +2643,13 @@ define('format_mnemo/vr', [], function() {
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h, false);
+        if (this.postfx) {
+            var fx = this.postfx;
+            fx.scene.setSize(w, h);
+            fx.bright.setSize(w / 2, h / 2);
+            fx.blurA.setSize(w / 2, h / 2);
+            fx.blurB.setSize(w / 2, h / 2);
+        }
     };
 
     /**
