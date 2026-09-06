@@ -22,6 +22,9 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+$string['activitybuilding'] = 'Cyberspace building model';
+$string['activitybuilding_help'] = 'Show this activity as a specific 3D building in the Mnemo cyberspace view. Enter the file name of a <code>.glb</code> model in the site\'s prop asset pack (for example <code>library.glb</code>), or a full URL to a <code>.glb</code> model. Leave this blank to use the building for the activity\'s type (if any), or the procedural building otherwise. It has no effect in the list view or in courses that use another format.';
+$string['activitybuilding_invalid'] = 'Enter a <code>.glb</code> file name (letters, numbers, dots, dashes) or a full http(s):// URL to a <code>.glb</code> model.';
 $string['addsection'] = 'Add node';
 $string['addsections'] = 'Add node';
 $string['currentsection'] = 'This node';

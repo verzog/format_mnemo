@@ -167,5 +167,141 @@ final class scene_test extends \advanced_testcase {
         $this->assertContains($activity['state'], ['available', 'complete', 'restricted']);
         $this->assertStringContainsString('/mod/page/view.php', $activity['url']);
         $this->assertSame($page->cmid, $activity['id']);
+        // With no override set, the per-activity building field is present and null.
+        $this->assertArrayHasKey('building', $activity);
+        $this->assertNull($activity['building']);
+    }
+
+    /**
+     * A per-activity building override is exposed in the scene config for that
+     * activity only, and other activities keep a null building.
+     */
+    public function test_scene_config_activity_building(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $withmodel = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Library',
+        ]);
+        $plain = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Plain',
+        ]);
+
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $withmodel->cmid, 'model' => 'library.glb', 'timemodified' => time(),
+        ]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $buildings = [];
+        foreach ($config['sections'] as $section) {
+            foreach ($section['activities'] as $act) {
+                $buildings[$act['id']] = $act['building'];
+            }
+        }
+        $this->assertSame('library.glb', $buildings[$withmodel->cmid]);
+        $this->assertNull($buildings[$plain->cmid]);
+    }
+
+    /**
+     * The activity settings hook stores an override, updates it, and clears it
+     * again when the field is emptied.
+     */
+    public function test_coursemodule_building_save_update_and_clear(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 0,
+        ]);
+
+        // Save a new override.
+        $data = (object)['coursemodule' => $page->cmid, 'format_mnemo_building' => 'library.glb'];
+        format_mnemo_coursemodule_edit_post_actions($data, $course);
+        $this->assertSame('library.glb', $DB->get_field('format_mnemo_building', 'model', ['cmid' => $page->cmid]));
+
+        // Update it.
+        $data->format_mnemo_building = 'tower.glb';
+        format_mnemo_coursemodule_edit_post_actions($data, $course);
+        $this->assertSame('tower.glb', $DB->get_field('format_mnemo_building', 'model', ['cmid' => $page->cmid]));
+        $this->assertEquals(1, $DB->count_records('format_mnemo_building', ['cmid' => $page->cmid]));
+
+        // Clear it.
+        $data->format_mnemo_building = '';
+        format_mnemo_coursemodule_edit_post_actions($data, $course);
+        $this->assertFalse($DB->record_exists('format_mnemo_building', ['cmid' => $page->cmid]));
+    }
+
+    /**
+     * Deleting an activity removes its stored building override.
+     */
+    public function test_building_removed_when_module_deleted(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 0,
+        ]);
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $page->cmid, 'model' => 'library.glb', 'timemodified' => time(),
+        ]);
+
+        course_delete_module($page->cmid);
+
+        $this->assertFalse($DB->record_exists('format_mnemo_building', ['cmid' => $page->cmid]));
+    }
+
+    /**
+     * The building field validates: blank, a .glb file name, or an http(s) URL
+     * are accepted; anything else is rejected.
+     */
+    public function test_coursemodule_building_validation(): void {
+        $this->resetAfterTest();
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+
+        // A lightweight stand-in for the moodleform_mod wrapper.
+        $wrapper = new class ($course) {
+            /** @var \stdClass The course. */
+            private $course;
+
+            /**
+             * Store the course.
+             *
+             * @param \stdClass $course the course
+             */
+            public function __construct($course) {
+                $this->course = $course;
+            }
+
+            /**
+             * Return the course.
+             *
+             * @return \stdClass the course
+             */
+            public function get_course() {
+                return $this->course;
+            }
+        };
+
+        $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => '']));
+        $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'library.glb']));
+        $this->assertSame(
+            [],
+            format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'https://cdn.example/x.glb'])
+        );
+        $errors = format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'not a model']);
+        $this->assertArrayHasKey('format_mnemo_building', $errors);
     }
 }

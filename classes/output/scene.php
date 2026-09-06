@@ -61,6 +61,7 @@ class scene implements renderable, templatable {
         $completion = new completion_info($course);
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
+        $buildingmodels = $this->preload_building_models(array_keys($modinfo->get_cms()));
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -104,6 +105,10 @@ class scene implements renderable, templatable {
                         'modname' => $cm->modname,
                         'url' => $url ? $url->out(false) : null,
                         'state' => $state,
+                        // A teacher-chosen building model for this specific
+                        // activity (file name or URL), or null to use the
+                        // type-based/procedural building.
+                        'building' => $buildingmodels[(int)$cm->id] ?? null,
                     ];
                 }
             }
@@ -151,6 +156,28 @@ class scene implements renderable, templatable {
             if (!isset($map[$itemid])) {
                 $map[$itemid] = $file;
             }
+        }
+        return $map;
+    }
+
+    /**
+     * Load every activity's building-model override for the course in one query,
+     * keyed by the course module id, so building the scene does not do one query
+     * per activity.
+     *
+     * @param int[] $cmids the course module ids in the course
+     * @return array map of cmid => model (file name or URL)
+     */
+    protected function preload_building_models(array $cmids): array {
+        global $DB;
+        if (empty($cmids)) {
+            return [];
+        }
+        [$insql, $params] = $DB->get_in_or_equal($cmids);
+        $rows = $DB->get_records_select('format_mnemo_building', "cmid $insql", $params, '', 'cmid, model');
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int)$row->cmid] = $row->model;
         }
         return $map;
     }

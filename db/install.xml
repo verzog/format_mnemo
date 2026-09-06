@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="course/format/mnemo/db" VERSION="20260906" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="format_mnemo_building" COMMENT="Per-activity building model overrides for the Mnemo cyberspace scene.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="cmid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course module the building model is attached to."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false" COMMENT="A .glb model file name (resolved against the asset pack) or a full URL."/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the override was last set."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="cmid" UNIQUE="true" FIELDS="cmid"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>

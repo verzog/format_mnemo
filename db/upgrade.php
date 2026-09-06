@@ -29,6 +29,9 @@
  * @return bool
  */
 function xmldb_format_mnemo_upgrade($oldversion) {
+    global $DB;
+    $dbman = $DB->get_manager();
+
     if ($oldversion < 2026083101) {
         // Three.js is now bundled with the plugin and is the default source.
         // Earlier versions defaulted the setting to a public CDN URL, which may
@@ -41,6 +44,22 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         }
 
         upgrade_plugin_savepoint(true, 2026083101, 'format', 'mnemo');
+    }
+
+    if ($oldversion < 2026090601) {
+        // New table storing a per-activity building-model override for the scene.
+        $table = new xmldb_table('format_mnemo_building');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('cmid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('model', XMLDB_TYPE_CHAR, '1333', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('cmid', XMLDB_INDEX_UNIQUE, ['cmid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090601, 'format', 'mnemo');
     }
 
     return true;

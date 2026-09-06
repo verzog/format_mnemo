@@ -517,3 +517,106 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
     send_stored_file($file, null, 0, $forcedownload, $options);
     return true;
 }
+
+/**
+ * Add the "Cyberspace building model" field to every activity's settings form,
+ * but only in courses that use the Mnemo format. Lets a teacher attach a
+ * specific 3D building model to an individual activity.
+ *
+ * @param \moodleform_mod $formwrapper the activity settings form
+ * @param \MoodleQuickForm $mform the raw form being built
+ */
+function format_mnemo_coursemodule_standard_elements($formwrapper, $mform) {
+    global $DB;
+
+    $course = $formwrapper->get_course();
+    if (empty($course) || $course->format !== 'mnemo') {
+        return;
+    }
+
+    $mform->addElement('header', 'format_mnemo_header', get_string('pluginname', 'format_mnemo'));
+    $mform->addElement(
+        'text',
+        'format_mnemo_building',
+        get_string('activitybuilding', 'format_mnemo'),
+        ['size' => 48, 'maxlength' => 1333]
+    );
+    $mform->setType('format_mnemo_building', PARAM_RAW_TRIMMED);
+    $mform->addHelpButton('format_mnemo_building', 'activitybuilding', 'format_mnemo');
+
+    // Pre-fill the current value when editing an existing activity.
+    $cm = $formwrapper->get_coursemodule();
+    if ($cm && !empty($cm->id)) {
+        $model = $DB->get_field('format_mnemo_building', 'model', ['cmid' => $cm->id]);
+        if ($model !== false) {
+            $mform->setDefault('format_mnemo_building', $model);
+        }
+    }
+}
+
+/**
+ * Validate the "Cyberspace building model" field: it must be blank, a bare .glb
+ * file name, or a full http(s) URL to a .glb model.
+ *
+ * @param \moodleform_mod $formwrapper the activity settings form
+ * @param array $data the submitted form data
+ * @return array an array of "element name => error string" for any problems
+ */
+function format_mnemo_coursemodule_validation($formwrapper, $data) {
+    $errors = [];
+    $course = $formwrapper->get_course();
+    if (empty($course) || $course->format !== 'mnemo') {
+        return $errors;
+    }
+    $model = isset($data['format_mnemo_building']) ? trim($data['format_mnemo_building']) : '';
+    if ($model === '') {
+        return $errors;
+    }
+    $isurl = (bool)preg_match('#^https?://#i', $model);
+    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.glb$/i', $model);
+    if (!$isurl && !$isfile) {
+        $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
+    }
+    return $errors;
+}
+
+/**
+ * Save (or clear) an activity's building-model override after its settings form
+ * is submitted, in Mnemo-format courses only.
+ *
+ * @param stdClass $data the submitted and processed module data (with coursemodule id)
+ * @param stdClass $course the course the activity belongs to
+ * @return stdClass the unmodified module data
+ */
+function format_mnemo_coursemodule_edit_post_actions($data, $course) {
+    global $DB;
+
+    if (empty($course) || $course->format !== 'mnemo') {
+        return $data;
+    }
+
+    $cmid = (int)$data->coursemodule;
+    $model = isset($data->format_mnemo_building) ? trim($data->format_mnemo_building) : '';
+    $existing = $DB->get_record('format_mnemo_building', ['cmid' => $cmid]);
+
+    if ($model === '') {
+        if ($existing) {
+            $DB->delete_records('format_mnemo_building', ['cmid' => $cmid]);
+        }
+        return $data;
+    }
+
+    if ($existing) {
+        $existing->model = $model;
+        $existing->timemodified = time();
+        $DB->update_record('format_mnemo_building', $existing);
+    } else {
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $cmid,
+            'model' => $model,
+            'timemodified' => time(),
+        ]);
+    }
+
+    return $data;
+}
