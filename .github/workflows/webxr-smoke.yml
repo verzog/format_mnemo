@@ -1,8 +1,9 @@
 name: WebXR gesture smoke test
 
 # Runs the headless WebXR tests (tests/webxr): the gesture smoke test that
-# drives the real GestureManager through scripted controller/hand input, and
-# the glTF loader test that parses textured .glb models with the real loader.
+# drives the real GestureManager through scripted controller/hand input, the
+# built-in glTF parser test, and the addon glTF-loader test that decodes
+# Draco- and meshopt-compressed models through the real GLTFLoader stack.
 # Separate from the Moodle CI matrix so it never blocks it.
 on:
   push:
@@ -11,6 +12,8 @@ on:
   pull_request:
     paths:
       - 'amd/src/vr.js'
+      - 'js/three-esm-loader.js'
+      - 'thirdparty/jsm/**'
       - 'tests/webxr/**'
       - '.github/workflows/webxr-smoke.yml'
 

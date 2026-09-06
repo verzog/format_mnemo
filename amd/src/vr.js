@@ -102,11 +102,16 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} THREE The imported Three.js module namespace.
      * @param {HTMLElement} root The scene mount element.
      * @param {Object} config The scene configuration from PHP.
+     * @param {Object} loaders Optional addon classes (GLTFLoader, DRACOLoader,
+     *     KTX2Loader, MeshoptDecoder); absent when only the built-in parser is
+     *     available.
      */
-    function Cyberspace(THREE, root, config) {
+    function Cyberspace(THREE, root, config, loaders) {
         this.THREE = THREE;
         this.root = root;
         this.config = config;
+        this.loaders = loaders || {};
+        this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
         // Hour of day (0-24) from the site clock; drives the day/night cycle.
@@ -1338,15 +1343,14 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Fetch and parse a glTF model (binary .glb or JSON .gltf), cached per URL.
-     * Returns a template group; callers clone it for each instance. Covers the
-     * common glTF 2.0 scope: node hierarchy, all accessor component types
-     * (interleaved and sparse), vertex colours and multiple UV sets, PBR
-     * metallic-roughness with base-colour / metallic-roughness / normal /
-     * occlusion / emissive textures (embedded, data-URI or external images),
-     * samplers, alpha modes, and the emissive-strength and texture-transform
-     * extensions. Draco-compressed primitives are rejected (they need a separate
-     * decoder) so the scene falls back cleanly.
+     * Load a glTF model (binary .glb or JSON .gltf), cached per URL. Returns a
+     * template group; callers clone it for each instance.
+     *
+     * When the addon glTF loader stack is available (the common case), Three's
+     * GLTFLoader is used with the Draco, KTX2/Basis and meshopt decoders, so
+     * compressed authored asset packs load. When the addons could not be loaded
+     * (e.g. a strict CSP blocked the import map), it falls back to the plugin's
+     * built-in uncompressed-glTF parser (parseGlb).
      *
      * @param {String} url The .glb or .gltf URL.
      * @return {Promise} Resolves with a Three.Group template.
@@ -1356,17 +1360,81 @@ define('format_mnemo/vr', [], function() {
             return this.modelCache[url];
         }
         var self = this;
-        var base = url.replace(/[^/]*$/, '');
-        var promise = fetch(url).then(function(res) {
-            if (!res.ok) {
-                throw new Error('model fetch failed: ' + res.status);
-            }
-            return res.arrayBuffer();
-        }).then(function(buffer) {
-            return self.parseGlb(buffer, base);
-        });
+        var promise;
+        if (this.loaders.GLTFLoader) {
+            promise = this.gltf().loadAsync(url).then(function(gltf) {
+                self.dressLoadedModel(gltf.scene);
+                return gltf.scene;
+            });
+        } else {
+            var base = url.replace(/[^/]*$/, '');
+            promise = fetch(url).then(function(res) {
+                if (!res.ok) {
+                    throw new Error('model fetch failed: ' + res.status);
+                }
+                return res.arrayBuffer();
+            }).then(function(buffer) {
+                return self.parseGlb(buffer, base);
+            });
+        }
         this.modelCache[url] = promise;
         return promise;
+    };
+
+    /**
+     * Lazily build and configure the addon GLTFLoader with the Draco, KTX2 and
+     * meshopt decoders (served from the plugin's bundled addons directory).
+     *
+     * @return {Object} The configured GLTFLoader.
+     */
+    Cyberspace.prototype.gltf = function() {
+        if (this.gltfLoader) {
+            return this.gltfLoader;
+        }
+        var addons = this.loaders;
+        var base = this.config.addonsbaseurl;
+        var loader = new addons.GLTFLoader();
+        if (addons.DRACOLoader && base) {
+            loader.setDRACOLoader(new addons.DRACOLoader().setDecoderPath(base + 'libs/draco/gltf/'));
+        }
+        if (addons.KTX2Loader && base && this.renderer) {
+            try {
+                loader.setKTX2Loader(
+                    new addons.KTX2Loader().setTranscoderPath(base + 'libs/basis/').detectSupport(this.renderer)
+                );
+            } catch (e) {
+                // KTX2/Basis support unavailable on this GPU; other formats still load.
+            }
+        }
+        if (addons.MeshoptDecoder) {
+            loader.setMeshoptDecoder(addons.MeshoptDecoder);
+        }
+        this.gltfLoader = loader;
+        return loader;
+    };
+
+    /**
+     * Fold an addon-loaded model into the scene's day/night look: emissive
+     * materials glow more strongly after dark, matching the built-in parser.
+     *
+     * @param {Object} group The loaded Three.Group (gltf.scene).
+     */
+    Cyberspace.prototype.dressLoadedModel = function(group) {
+        var night = (this.day && this.day.night) || 0;
+        group.traverse(function(o) {
+            if (!o.isMesh || !o.material) {
+                return;
+            }
+            var mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (var i = 0; i < mats.length; i++) {
+                var m = mats[i];
+                var em = m.emissive;
+                var glows = !!m.emissiveMap || (em && (em.r + em.g + em.b) > 0);
+                if (glows) {
+                    m.emissiveIntensity = (0.7 + night) * (m.emissiveIntensity || 1);
+                }
+            }
+        });
     };
 
     /**
@@ -4316,6 +4384,27 @@ define('format_mnemo/vr', [], function() {
             window.addEventListener('format_mnemo:three-ready', onReady, {once: true});
             window.addEventListener('format_mnemo:three-error', onError, {once: true});
 
+            // Import map so the addon glTF loaders resolve the bare 'three'
+            // specifier to the same module the client uses, and 'three/addons/'
+            // to the bundled example modules. Must precede the loader script.
+            // Skipped when the page already has an import map (the client then
+            // falls back to its built-in glTF parser).
+            if (config.addonsbaseurl && !document.querySelector('script[type="importmap"]')) {
+                try {
+                    var importmap = document.createElement('script');
+                    importmap.type = 'importmap';
+                    importmap.textContent = JSON.stringify({
+                        imports: {
+                            'three': config.threeurl,
+                            'three/addons/': config.addonsbaseurl
+                        }
+                    });
+                    document.head.appendChild(importmap);
+                } catch (e) {
+                    // Import map unsupported/blocked; the built-in parser is used.
+                }
+            }
+
             var separator = config.loaderurl.indexOf('?') >= 0 ? '&' : '?';
             var script = document.createElement('script');
             script.type = 'module';
@@ -4371,20 +4460,20 @@ define('format_mnemo/vr', [], function() {
 
             // Load Three.js as a native ES module (see loadThree), then build
             // the scene. Kept out of the AMD dependency graph on purpose.
-            loadThree(config).then(function(THREE) {
+            loadThree(config).then(function(loaded) {
                 var loading = root.querySelector('[data-mnemo-loading]');
                 if (loading) {
                     loading.remove();
                 }
                 try {
-                    new Cyberspace(THREE, root, config);
+                    new Cyberspace(loaded.THREE, root, config, loaded);
                 } catch (e) {
                     failGracefully(container, root, config.strings.failed);
                     if (window.console) {
                         window.console.error(e);
                     }
                 }
-                return THREE;
+                return loaded;
             }).catch(function(e) {
                 failGracefully(container, root, config.strings.failed);
                 if (window.console) {

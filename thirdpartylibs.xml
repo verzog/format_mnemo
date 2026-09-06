@@ -11,4 +11,15 @@
       <copyright>2010-2023 three.js authors</copyright>
     </copyrights>
   </library>
+  <library>
+    <location>thirdparty/jsm</location>
+    <name>Three.js addons (GLTFLoader, Draco, KTX2, meshopt)</name>
+    <description>Three.js example modules and their decoders (glTF loader with Draco, KTX2/Basis and meshopt support) used to load compressed authored 3D asset packs.</description>
+    <version>0.160.1</version>
+    <license>MIT</license>
+    <repository>https://github.com/mrdoob/three.js</repository>
+    <copyrights>
+      <copyright>2010-2023 three.js authors</copyright>
+    </copyrights>
+  </library>
 </libraries>
