@@ -143,6 +143,8 @@ define('format_mnemo/vr', [], function() {
         this.sun = null; // Shadow-casting sun (non-void), followed to the learner.
         this.sunDir = null; // Sun direction unit vector.
         this.lastShadowPos = new THREE.Vector3(1e9, 0, 1e9); // Last shadow recentre.
+        this.modelCache = {}; // Loaded .glb templates, keyed by URL.
+        this.traffic = []; // Flying-car instances animated each frame.
 
         this.build();
     }
@@ -210,6 +212,9 @@ define('format_mnemo/vr', [], function() {
         this.buildEnvironment();
         this.buildRaycaster();
         this.buildCity();
+        // Original glTF props (lamps, kiosks, barriers, flying traffic); loads
+        // asynchronously and falls back cleanly if models are unavailable.
+        this.buildProps();
         this.buildControllers();
         this.gestures = new GestureManager(this);
         this.buildVrButton();
@@ -1331,6 +1336,338 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Fetch and parse a binary glTF (.glb) model, cached per URL. Returns a
+     * template group; callers clone it for each instance. Supports the common
+     * subset (geometry + PBR metallic-roughness factors + node hierarchy);
+     * Draco-compressed primitives are rejected so the scene falls back cleanly.
+     *
+     * @param {String} url The .glb URL.
+     * @return {Promise} Resolves with a Three.Group template.
+     */
+    Cyberspace.prototype.loadModel = function(url) {
+        if (this.modelCache[url]) {
+            return this.modelCache[url];
+        }
+        var self = this;
+        var promise = fetch(url).then(function(res) {
+            if (!res.ok) {
+                throw new Error('model fetch failed: ' + res.status);
+            }
+            return res.arrayBuffer();
+        }).then(function(buffer) {
+            return self.parseGlb(buffer);
+        });
+        this.modelCache[url] = promise;
+        return promise;
+    };
+
+    /**
+     * Parse a .glb ArrayBuffer into a Three.Group.
+     *
+     * @param {ArrayBuffer} buffer The .glb bytes.
+     * @return {Object} A Three.Group.
+     */
+    Cyberspace.prototype.parseGlb = function(buffer) {
+        var THREE = this.THREE;
+        var dv = new DataView(buffer);
+        if (dv.getUint32(0, true) !== 0x46546c67) {
+            throw new Error('not a glb');
+        }
+        var json = null;
+        var bin = null;
+        var offset = 12;
+        while (offset < dv.byteLength) {
+            var len = dv.getUint32(offset, true);
+            var type = dv.getUint32(offset + 4, true);
+            var start = offset + 8;
+            if (type === 0x4e4f534a) {
+                json = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, start, len)));
+            } else if (type === 0x004e4942) {
+                bin = new Uint8Array(buffer, start, len);
+            }
+            offset = start + len + ((4 - (len % 4)) % 4);
+        }
+        if (!json) {
+            throw new Error('glb has no JSON chunk');
+        }
+
+        var group = new THREE.Group();
+        var scene = json.scenes[json.scene || 0];
+        for (var i = 0; i < scene.nodes.length; i++) {
+            group.add(this.glbNode(json, bin, scene.nodes[i]));
+        }
+        return group;
+    };
+
+    /**
+     * Build one glTF node (and its children) into a Three.Object3D.
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Object} bin The binary chunk.
+     * @param {Number} index The node index.
+     * @return {Object} A Three.Object3D.
+     */
+    Cyberspace.prototype.glbNode = function(json, bin, index) {
+        var THREE = this.THREE;
+        var node = json.nodes[index];
+        var obj = node.mesh !== undefined ? this.glbMesh(json, bin, node.mesh) : new THREE.Object3D();
+        if (node.matrix) {
+            obj.applyMatrix4(new THREE.Matrix4().fromArray(node.matrix));
+        } else {
+            if (node.translation) {
+                obj.position.fromArray(node.translation);
+            }
+            if (node.rotation) {
+                obj.quaternion.fromArray(node.rotation);
+            }
+            if (node.scale) {
+                obj.scale.fromArray(node.scale);
+            }
+        }
+        if (node.children) {
+            for (var i = 0; i < node.children.length; i++) {
+                obj.add(this.glbNode(json, bin, node.children[i]));
+            }
+        }
+        return obj;
+    };
+
+    /**
+     * Build a glTF mesh into a Three.Group of primitive meshes.
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Object} bin The binary chunk.
+     * @param {Number} index The mesh index.
+     * @return {Object} A Three.Group (or Mesh) for the mesh.
+     */
+    Cyberspace.prototype.glbMesh = function(json, bin, index) {
+        var THREE = this.THREE;
+        var mesh = json.meshes[index];
+        var out = new THREE.Group();
+        for (var p = 0; p < mesh.primitives.length; p++) {
+            var prim = mesh.primitives[p];
+            if (prim.extensions && prim.extensions.KHR_draco_mesh_compression) {
+                throw new Error('Draco compression is not supported');
+            }
+            var geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(
+                this.glbAccessor(json, bin, prim.attributes.POSITION), 3));
+            if (prim.attributes.NORMAL !== undefined) {
+                geo.setAttribute('normal', new THREE.BufferAttribute(
+                    this.glbAccessor(json, bin, prim.attributes.NORMAL), 3));
+            }
+            if (prim.indices !== undefined) {
+                geo.setIndex(new THREE.BufferAttribute(
+                    this.glbAccessor(json, bin, prim.indices), 1));
+            }
+            if (prim.attributes.NORMAL === undefined) {
+                geo.computeVertexNormals();
+            }
+            out.add(new THREE.Mesh(geo, this.glbMaterial(json, prim.material)));
+        }
+        return out;
+    };
+
+    /**
+     * A Three.MeshStandardMaterial from a glTF material's PBR factors, with any
+     * emissive scaled to glow (and bloom) after dark.
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Number} index The material index (may be undefined).
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.glbMaterial = function(json, index) {
+        var THREE = this.THREE;
+        var mat = (index !== undefined && json.materials) ? json.materials[index] : {};
+        var pbr = mat.pbrMetallicRoughness || {};
+        var col = pbr.baseColorFactor || [0.8, 0.8, 0.8, 1];
+        var em = mat.emissiveFactor || [0, 0, 0];
+        var emMax = Math.max(em[0], em[1], em[2]);
+        return new THREE.MeshStandardMaterial({
+            color: new THREE.Color(col[0], col[1], col[2]),
+            metalness: pbr.metallicFactor === undefined ? 0.1 : pbr.metallicFactor,
+            roughness: pbr.roughnessFactor === undefined ? 0.8 : pbr.roughnessFactor,
+            emissive: new THREE.Color(
+                Math.min(1, em[0]), Math.min(1, em[1]), Math.min(1, em[2])),
+            emissiveIntensity: emMax > 0 ? (0.7 + this.day.night) : 0
+        });
+    };
+
+    /**
+     * Read a glTF accessor into a typed array (subset: FLOAT / UNSIGNED_SHORT /
+     * UNSIGNED_INT, tightly packed).
+     *
+     * @param {Object} json The parsed glTF.
+     * @param {Object} bin The binary chunk.
+     * @param {Number} index The accessor index.
+     * @return {Object} A Float32Array / Uint16Array / Uint32Array.
+     */
+    Cyberspace.prototype.glbAccessor = function(json, bin, index) {
+        var acc = json.accessors[index];
+        var view = json.bufferViews[acc.bufferView];
+        var comps = {SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4}[acc.type];
+        var count = acc.count * comps;
+        var start = bin.byteOffset + (view.byteOffset || 0) + (acc.byteOffset || 0);
+        if (acc.componentType === 5126) {
+            return new Float32Array(bin.buffer.slice(start, start + count * 4));
+        }
+        if (acc.componentType === 5123) {
+            return new Uint16Array(bin.buffer.slice(start, start + count * 2));
+        }
+        if (acc.componentType === 5125) {
+            return new Uint32Array(bin.buffer.slice(start, start + count * 4));
+        }
+        throw new Error('unsupported accessor componentType ' + acc.componentType);
+    };
+
+    /**
+     * Load the original prop models and scatter them through the city: street
+     * lamps and barriers along the roads, kiosks at some side-street mouths, and
+     * flying-car traffic above the streets. Skipped (with a clean fallback to
+     * the procedural scene) when no model base URL is configured or a load
+     * fails.
+     */
+    Cyberspace.prototype.buildProps = function() {
+        var base = this.config.modelsbaseurl;
+        if (!base) {
+            return;
+        }
+        if (base.charAt(base.length - 1) !== '/') {
+            base += '/';
+        }
+        var self = this;
+        var load = function(name, onReady) {
+            self.loadModel(base + name + '.glb').then(function(tpl) {
+                onReady(tpl);
+                return null;
+            }).catch(function(e) {
+                if (window.console) {
+                    window.console.warn('format_mnemo: prop ' + name + ' unavailable', e);
+                }
+            });
+        };
+
+        load('lamp', function(tpl) {
+            self.scatterStreetProps(tpl, 'lamp');
+        });
+        load('barrier', function(tpl) {
+            self.scatterStreetProps(tpl, 'barrier');
+        });
+        load('kiosk', function(tpl) {
+            self.scatterKiosks(tpl);
+        });
+        load('av', function(tpl) {
+            self.spawnTraffic(tpl);
+        });
+    };
+
+    /**
+     * Place a repeated static prop (lamp or barrier) along the avenue kerbs.
+     *
+     * @param {Object} tpl The model template group.
+     * @param {String} kind "lamp" or "barrier".
+     */
+    Cyberspace.prototype.scatterStreetProps = function(tpl, kind) {
+        var road = this.roads[0];
+        if (!road) {
+            return;
+        }
+        var step = kind === 'lamp' ? 24 : 16;
+        var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
+        for (var z = road.zMax - 6; z > road.zMin + 6; z -= step) {
+            for (var s = -1; s <= 1; s += 2) {
+                var m = tpl.clone();
+                m.position.set(s * edge, 0, z + (kind === 'barrier' ? 0 : 0));
+                if (s < 0 && kind === 'lamp') {
+                    m.rotation.y = Math.PI; // Arm faces the road on both sides.
+                }
+                this.setShadow(m, true);
+                this.scene.add(m);
+            }
+        }
+    };
+
+    /**
+     * Drop a kiosk near the mouth of each side street.
+     *
+     * @param {Object} tpl The kiosk template group.
+     */
+    Cyberspace.prototype.scatterKiosks = function(tpl) {
+        for (var i = 1; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            var m = tpl.clone();
+            var innerX = r.xMin < 0 ? r.xMax : r.xMin;
+            m.position.set(innerX + (r.xMin < 0 ? -2 : 2), 0, r.zMin - 2);
+            m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
+            this.setShadow(m, true);
+            this.scene.add(m);
+        }
+    };
+
+    /**
+     * Spawn flying-car traffic gliding above the avenue and highways; animated
+     * each frame in updateTraffic().
+     *
+     * @param {Object} tpl The AV template group.
+     */
+    Cyberspace.prototype.spawnTraffic = function(tpl) {
+        var road = this.roads[0];
+        if (!road) {
+            return;
+        }
+        var lanes = this.config.environment === 'void' ? 6 : 10;
+        for (var i = 0; i < lanes; i++) {
+            var car = tpl.clone();
+            var dir = i % 2 === 0 ? 1 : -1;
+            car.scale.setScalar(0.9 + Math.random() * 0.5);
+            car.rotation.y = dir > 0 ? 0 : Math.PI;
+            var laneX = (Math.random() - 0.5) * 40;
+            var y = 13 + Math.random() * 20;
+            var z = road.zMin + Math.random() * (road.zMax - road.zMin);
+            car.position.set(laneX, y, z);
+            this.scene.add(car);
+            this.traffic.push({
+                mesh: car, dir: dir, speed: 10 + Math.random() * 16,
+                zMin: road.zMin - 20, zMax: road.zMax + 20,
+                bob: Math.random() * 6.28
+            });
+        }
+    };
+
+    /**
+     * Advance flying traffic, wrapping cars around the avenue ends.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateTraffic = function(dt) {
+        for (var i = 0; i < this.traffic.length; i++) {
+            var t = this.traffic[i];
+            t.mesh.position.z += t.dir * t.speed * dt;
+            t.mesh.position.y += Math.sin(this.time * 0.8 + t.bob) * 0.02;
+            if (t.dir > 0 && t.mesh.position.z > t.zMax) {
+                t.mesh.position.z = t.zMin;
+            } else if (t.dir < 0 && t.mesh.position.z < t.zMin) {
+                t.mesh.position.z = t.zMax;
+            }
+        }
+    };
+
+    /**
+     * Enable shadow casting/receiving on every mesh under an object.
+     *
+     * @param {Object} obj The root object.
+     * @param {Boolean} on Whether to cast/receive.
+     */
+    Cyberspace.prototype.setShadow = function(obj, on) {
+        obj.traverse(function(child) {
+            if (child.isMesh) {
+                child.castShadow = on;
+                child.receiveShadow = on;
+            }
+        });
+    };
+
+    /**
      * Build the city grid: a main avenue the learner flies down, with each
      * topic branching off as its own neon side street. A glowing gate and a
      * tall Japanese-style pylon stand at the mouth of each side street, and the
@@ -2257,6 +2594,9 @@ define('format_mnemo/vr', [], function() {
         for (var b = 0; b < this.beacons.length; b++) {
             this.beacons[b].material.opacity = on ? 0.95 : 0.12;
         }
+
+        // Glide the flying-car traffic.
+        this.updateTraffic(dt);
 
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort

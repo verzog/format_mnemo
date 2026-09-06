@@ -68,6 +68,8 @@ for (const s of shots) {
         console.error(`${s.label}: scene error:\n${err}`);
         continue;
     }
+    // Give async model loads a moment to fetch, parse and populate.
+    await page.waitForTimeout(1500);
     const file = join(outDir, `scene-${s.label}.png`);
     await page.screenshot({path: file});
     console.log(`wrote ${file}`);

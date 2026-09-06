@@ -64,6 +64,18 @@ if ($ADMIN->fulltree) {
         ]
     ));
 
+    // Base URL of an external glTF (.glb) prop asset pack. Left blank, the
+    // plugin loads the original props it bundles (models/). Point this at a
+    // directory of .glb files (av, lamp, kiosk, barrier, ...) to swap in your
+    // own CC0/licensed models; they must be uncompressed glTF (no Draco).
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/assetbaseurl',
+        get_string('setting_assetbaseurl', 'format_mnemo'),
+        get_string('setting_assetbaseurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
     // Default drag-to-look direction for newly created courses. Teachers can
     // override this per course, so the direction never needs a code change.
     $settings->add(new admin_setting_configcheckbox(
