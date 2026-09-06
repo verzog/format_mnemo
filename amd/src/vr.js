@@ -2519,7 +2519,7 @@ define('format_mnemo/vr', [], function() {
         sign.group.position.set(0, Math.min(h - 1.1, 2.6), d / 2 + 0.12);
         group.add(sign.group);
 
-        return {group: group, panel: sign.panel, body: body, w: w, d: d, h: h};
+        return {group: group, panel: sign.panel, body: body, sign: sign.group, w: w, d: d, h: h};
     };
 
     /**
@@ -2582,8 +2582,18 @@ define('format_mnemo/vr', [], function() {
             if (new self.THREE.Box3().setFromObject(model).isEmpty()) {
                 return null;
             }
-            self.fitModel(model, built.w, built.d, built.h);
+            // Fit within 90% of the footprint so a solid imported building keeps
+            // a gap to its neighbours (procedural footprints are placed close
+            // together) rather than appearing to merge with them.
+            self.fitModel(model, built.w * 0.9, built.d * 0.9, built.h);
             self.setShadow(model, true);
+            // Measure the fitted model (still parentless, so its box is local)
+            // and move the retained activity sign clear of its front face, so
+            // the sign does not embed in the imported building.
+            var mbox = new self.THREE.Box3().setFromObject(model);
+            if (built.sign && isFinite(mbox.max.z)) {
+                built.sign.position.z = mbox.max.z + 0.2;
+            }
             built.body.visible = false;
             built.group.add(model);
             // The scene uses a static shadow map (autoUpdate off, refreshed only
