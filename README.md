@@ -86,6 +86,11 @@ off).
   building footprint, keeping their clickable sign — instead of the procedural
   block, so the cityscape reflects what each activity actually is. Any type
   without a model keeps its procedural building.
+- **Per-activity building override** — a teacher can attach a specific building
+  model to one activity from its **Edit settings** page (a *Cyberspace building
+  model* field: a `.glb` file name in the asset pack, or a full URL). It takes
+  precedence over the type-based building, so a single quiz can look different
+  from the rest.
 - **Bring-your-own asset packs** — swap the bundled props for your own
   CC0/licensed models, either by **uploading `.glb` files straight into Moodle**
   (admin settings) or by pointing the plugin at a **URL** of a hosted pack. Name

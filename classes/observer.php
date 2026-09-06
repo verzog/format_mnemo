@@ -40,4 +40,17 @@ class observer {
             $event->objectid
         );
     }
+
+    /**
+     * Remove an activity's building-model override when the activity is deleted.
+     *
+     * The delete is keyed on the course module id, so it is a harmless no-op for
+     * activities that never had an override set.
+     *
+     * @param \core\event\course_module_deleted $event the module deletion event
+     */
+    public static function course_module_deleted(\core\event\course_module_deleted $event): void {
+        global $DB;
+        $DB->delete_records('format_mnemo_building', ['cmid' => $event->objectid]);
+    }
 }

@@ -61,6 +61,7 @@ class scene implements renderable, templatable {
         $completion = new completion_info($course);
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
+        $buildingmodels = $this->preload_building_models((int)$course->id);
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -104,6 +105,10 @@ class scene implements renderable, templatable {
                         'modname' => $cm->modname,
                         'url' => $url ? $url->out(false) : null,
                         'state' => $state,
+                        // A teacher-chosen building model for this specific
+                        // activity (file name or URL), or null to use the
+                        // type-based/procedural building.
+                        'building' => $buildingmodels[(int)$cm->id] ?? null,
                     ];
                 }
             }
@@ -151,6 +156,29 @@ class scene implements renderable, templatable {
             if (!isset($map[$itemid])) {
                 $map[$itemid] = $file;
             }
+        }
+        return $map;
+    }
+
+    /**
+     * Load every activity's building-model override for the course in one query,
+     * keyed by the course module id, so building the scene does not do one query
+     * per activity. Joined through course_modules by course id, so it stays a
+     * single bounded query however many activities the course has.
+     *
+     * @param int $courseid the course id
+     * @return array map of cmid => model (file name or URL)
+     */
+    protected function preload_building_models(int $courseid): array {
+        global $DB;
+        $sql = "SELECT b.cmid, b.model
+                  FROM {format_mnemo_building} b
+                  JOIN {course_modules} cm ON cm.id = b.cmid
+                 WHERE cm.course = :course";
+        $rows = $DB->get_records_sql($sql, ['course' => $courseid]);
+        $map = [];
+        foreach ($rows as $row) {
+            $map[(int)$row->cmid] = $row->model;
         }
         return $map;
     }
