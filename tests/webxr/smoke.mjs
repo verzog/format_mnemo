@@ -317,6 +317,59 @@ const scenarios = [
         }
     },
     {
+        name: 'video: an embed activity builds a poster screen that opens on click',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {
+                THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
+                makePosterTexture: CS.prototype.makePosterTexture,
+                makeVideoScreen: CS.prototype.makeVideoScreen
+            };
+            const r = obj.makeVideoScreen({name: 'Clip', url: 'https://x/watch', video: {kind: 'embed'}});
+            const pass = r.group.isGroup === true &&
+                r.panel.userData.url === 'https://x/watch' &&
+                !r.panel.userData.videoToggle &&
+                obj.interactive.length === 1 && obj.videos.length === 0;
+            return {pass, detail: `url=${r.panel.userData.url}`};
+        }
+    },
+    {
+        name: 'video: a file activity builds a screen with a playable video element',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {
+                THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
+                makePosterTexture: CS.prototype.makePosterTexture,
+                makeVideoScreen: CS.prototype.makeVideoScreen
+            };
+            const r = obj.makeVideoScreen({name: 'V', url: 'u', video: {kind: 'file', src: 'movie.mp4'}});
+            const v = r.panel.userData.videoToggle;
+            const pass = !!v && v.tagName === 'VIDEO' && !r.panel.userData.url &&
+                obj.videos.length === 1;
+            return {pass, detail: `tag=${v && v.tagName}`};
+        }
+    },
+    {
+        name: 'video: activate toggles a screen video and opens a link',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {open: function(u) {
+                this.opened = u;
+            }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate};
+            const vid = {paused: true, muted: true, play: function() {
+                this.played = true; return {catch: function() {}};
+            }, pause: function() {
+                this.paused = true;
+            }};
+            obj.activate({userData: {videoToggle: vid}});
+            obj.activate({userData: {url: 'openme'}});
+            return {pass: vid.played === true && vid.muted === false && obj.opened === 'openme',
+                detail: `played=${vid.played} opened=${obj.opened}`};
+        }
+    },
+    {
         name: 'building: fitModel scales to the footprint and grounds the base',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

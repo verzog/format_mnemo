@@ -114,6 +114,7 @@ define('format_mnemo/vr', [], function() {
         this.day = null; // Daylight parameters, computed in build().
 
         this.interactive = []; // Meshes that can be gazed/clicked to open.
+        this.videos = []; // HTMLVideoElements driving in-world screens.
         this.hovered = null; // Currently highlighted mesh.
         this.controllers = []; // XR controller target-ray spaces.
         this.keys = {}; // Held keyboard keys.
@@ -2203,6 +2204,14 @@ define('format_mnemo/vr', [], function() {
             var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
             var depth = style.footprint[1];
             var bz = z + zside * (streetHalf + depth / 2 + 0.4);
+            // A video activity is a large screen instead of a building.
+            if (act.video) {
+                var vscreen = self.makeVideoScreen(act);
+                vscreen.group.position.set(bx, 3.2, bz);
+                vscreen.group.lookAt(bx, 3.2, z);
+                self.scene.add(vscreen.group);
+                return;
+            }
             var built = self.makeStructure(act, style);
             built.group.position.set(bx, 0, bz);
             // Face the street centreline so the signboard reads from the street.
@@ -2759,6 +2768,171 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build a large interactive video screen for a video activity. A direct
+     * (same-origin/CORS) video file plays in-world on the screen and toggles
+     * play/pause on click; a YouTube/Vimeo (or other) embed shows a poster that
+     * opens the video on click. A file that fails to load falls back to the
+     * poster + open behaviour.
+     *
+     * @param {Object} act The activity node (name, url, video:{kind, src}).
+     * @return {Object} {group, panel} — the screen group and its raycast target.
+     */
+    Cyberspace.prototype.makeVideoScreen = function(act) {
+        var THREE = this.THREE;
+        var self = this;
+        var group = new THREE.Group();
+        var w = 5.2;
+        var h = 2.95; // Roughly 16:9.
+        var colour = this.palette.primary;
+
+        // Neon frame (glow behind the screen); also the hover-highlight target.
+        var frameMat = new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.9});
+        var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.4, h + 0.4), frameMat);
+
+        var video = null;
+        var screenMat;
+        if (act.video.kind === 'file') {
+            video = document.createElement('video');
+            video.crossOrigin = 'anonymous';
+            video.loop = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.setAttribute('playsinline', '');
+            video.src = act.video.src;
+            var vtex = new THREE.VideoTexture(video);
+            vtex.colorSpace = THREE.SRGBColorSpace;
+            screenMat = new THREE.MeshBasicMaterial({map: vtex});
+            // Muted autoplay is allowed by browsers; ignore a rejected attempt.
+            var playing = video.play();
+            if (playing && playing.catch) {
+                playing.catch(function() {
+                    // Autoplay may be blocked; the viewer can click to play.
+                });
+            }
+            this.videos.push(video);
+        } else {
+            screenMat = new THREE.MeshBasicMaterial({map: this.makePosterTexture(act.name)});
+        }
+
+        var screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), screenMat);
+        screen.position.z = 0.05;
+        frame.add(screen);
+
+        // A support post to the ground so the screen reads as a street fixture.
+        var post = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, 24, 0.16),
+            new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.5})
+        );
+        post.position.set(0, -h / 2 - 12, -0.05);
+        frame.add(post);
+        group.add(frame);
+
+        screen.userData = {
+            name: act.name,
+            material: frameMat,
+            baseColour: colour,
+            interactive: true
+        };
+        if (video) {
+            screen.userData.videoToggle = video;
+            // If the file cannot be decoded (e.g. cross-origin without CORS),
+            // fall back to a poster that opens the activity on click.
+            video.addEventListener('error', function() {
+                screenMat.map = self.makePosterTexture(act.name);
+                screenMat.needsUpdate = true;
+                delete screen.userData.videoToggle;
+                screen.userData.url = act.url;
+            });
+        } else {
+            screen.userData.url = act.url;
+        }
+        this.interactive.push(screen);
+
+        return {group: group, panel: screen};
+    };
+
+    /**
+     * Build a poster texture for a video screen: a dark panel with a neon play
+     * triangle and the activity name.
+     *
+     * @param {String} name The activity name.
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.makePosterTexture = function(name) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 576;
+        var ctx = canvas.getContext('2d');
+        var hex = '#' + ('000000' + this.palette.primary.toString(16)).slice(-6);
+
+        ctx.fillStyle = '#05070d';
+        ctx.fillRect(0, 0, 1024, 576);
+
+        // Play triangle.
+        ctx.fillStyle = hex;
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 40;
+        ctx.beginPath();
+        ctx.moveTo(430, 210);
+        ctx.lineTo(430, 366);
+        ctx.lineTo(610, 288);
+        ctx.closePath();
+        ctx.fill();
+
+        // Activity name.
+        ctx.shadowBlur = 16;
+        ctx.font = 'bold 46px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = hex;
+        var clipped = name.length > 28 ? name.slice(0, 27) + '…' : name;
+        ctx.fillText(clipped, 512, 470);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        return texture;
+    };
+
+    /**
+     * Act on an interactive node: toggle a video screen's playback, or open an
+     * activity URL.
+     *
+     * @param {Object} target The intersected mesh.
+     */
+    Cyberspace.prototype.activate = function(target) {
+        if (!target || !target.userData) {
+            return;
+        }
+        if (target.userData.videoToggle) {
+            this.toggleVideo(target.userData.videoToggle);
+        } else if (target.userData.url) {
+            this.open(target.userData.url);
+        }
+    };
+
+    /**
+     * Toggle a screen video between playing (with sound) and paused. The first
+     * activation is a user gesture, so it may unmute and start audio.
+     *
+     * @param {Object} video The HTMLVideoElement.
+     */
+    Cyberspace.prototype.toggleVideo = function(video) {
+        if (video.paused) {
+            video.muted = false;
+            var playing = video.play();
+            if (playing && playing.catch) {
+                playing.catch(function() {
+                    // Play was rejected (e.g. still no user gesture); ignore.
+                });
+            }
+        } else {
+            video.pause();
+        }
+    };
+
+    /**
      * Build a neon text texture on a transparent canvas for a sign face.
      *
      * @param {String} text The label text.
@@ -2924,12 +3098,12 @@ define('format_mnemo/vr', [], function() {
         var hit = this.intersectController(controller);
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
-        if (target && target.userData && target.userData.url) {
-            // A firm confirmation buzz before navigating away.
+        if (target && target.userData && (target.userData.url || target.userData.videoToggle)) {
+            // A firm confirmation buzz before acting on the node.
             if (this.gestures) {
                 this.gestures.pulse(controller.userData.handedness, 0.6, 40);
             }
-            this.open(target.userData.url);
+            this.activate(target);
         }
     };
 
@@ -3107,8 +3281,8 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.clickOpen = function() {
         this.raycaster.setFromCamera(this.pointerNdc, this.camera);
         var hits = this.raycaster.intersectObjects(this.interactive, false);
-        if (hits.length && hits[0].object.userData.url) {
-            this.open(hits[0].object.userData.url);
+        if (hits.length) {
+            this.activate(hits[0].object);
         }
     };
 

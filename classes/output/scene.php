@@ -55,6 +55,7 @@ class scene implements renderable, templatable {
      * @return array{sections: array, nodecount: int}
      */
     protected function build_nodes(): array {
+        global $DB;
         $course = $this->format->get_course();
         $context = context_course::instance($course->id);
         $modinfo = get_fast_modinfo($course);
@@ -62,6 +63,9 @@ class scene implements renderable, templatable {
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
         $buildingmodels = $this->preload_building_models((int)$course->id);
+        // External URLs of the course's URL activities, so video detection does
+        // not query once per activity.
+        $urlexternals = $DB->get_records_menu('url', ['course' => (int)$course->id], '', 'id, externalurl');
 
         $sections = [];
         $coursesections = $modinfo->get_section_info_all();
@@ -109,6 +113,10 @@ class scene implements renderable, templatable {
                         // activity (file name or URL), or null to use the
                         // type-based/procedural building.
                         'building' => $buildingmodels[(int)$cm->id] ?? null,
+                        // Video info for activities that are videos, so the
+                        // client can render them as an interactive screen; null
+                        // otherwise.
+                        'video' => $this->video_info($cm, $urlexternals),
                     ];
                 }
             }
@@ -181,6 +189,75 @@ class scene implements renderable, templatable {
             $map[(int)$row->cmid] = $row->model;
         }
         return $map;
+    }
+
+    /**
+     * Describe an activity as a video screen, or null when it is not a video.
+     *
+     * A URL activity pointing at YouTube/Vimeo is an embed (poster + open); one
+     * pointing at a direct video file, or a File resource whose file is a video,
+     * is a file that can play in-world.
+     *
+     * @param \cm_info $cm the course module
+     * @param array $urlexternals map of url-instance id => external URL
+     * @return array|null ['kind' => 'file'|'embed', 'src' => string] or null
+     */
+    protected function video_info(\cm_info $cm, array $urlexternals): ?array {
+        if ($cm->modname === 'url') {
+            $external = $urlexternals[$cm->instance] ?? null;
+            return $external ? $this->classify_video_url($external) : null;
+        }
+        if ($cm->modname === 'resource') {
+            return $this->resource_video($cm);
+        }
+        return null;
+    }
+
+    /**
+     * Classify an external URL as a video: an embed (YouTube/Vimeo) shown as a
+     * clickable poster, or a direct video file playable in-world.
+     *
+     * @param string $url the external URL
+     * @return array|null the video descriptor, or null when it is not a video
+     */
+    protected function classify_video_url(string $url): ?array {
+        $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+        foreach (['youtube.com', 'youtu.be', 'vimeo.com'] as $embedhost) {
+            if ($host !== '' && strpos($host, $embedhost) !== false) {
+                return ['kind' => 'embed'];
+            }
+        }
+        $path = strtolower((string)parse_url($url, PHP_URL_PATH));
+        if (preg_match('/\.(mp4|webm|ogv|ogg|m4v|mov)$/', $path)) {
+            return ['kind' => 'file', 'src' => $url];
+        }
+        return null;
+    }
+
+    /**
+     * Describe a File resource as a video screen when its file is a video.
+     *
+     * @param \cm_info $cm the resource course module
+     * @return array|null the video descriptor, or null when it is not a video
+     */
+    protected function resource_video(\cm_info $cm): ?array {
+        $context = \context_module::instance($cm->id);
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'mod_resource', 'content', false, 'sortorder DESC, id ASC', false);
+        foreach ($files as $file) {
+            if (strpos((string)$file->get_mimetype(), 'video/') === 0) {
+                $src = moodle_url::make_pluginfile_url(
+                    $context->id,
+                    'mod_resource',
+                    'content',
+                    0,
+                    $file->get_filepath(),
+                    $file->get_filename()
+                )->out(false);
+                return ['kind' => 'file', 'src' => $src];
+            }
+        }
+        return null;
     }
 
     /**

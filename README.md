@@ -86,6 +86,13 @@ off).
   building footprint, keeping their clickable sign — instead of the procedural
   block, so the cityscape reflects what each activity actually is. Any type
   without a model keeps its procedural building.
+- **Video activities as screens** — an activity that points at a video is shown
+  as a large street-side screen instead of a building. A **direct video file**
+  (a File resource whose file is a video, or a URL ending in `.mp4`/`.webm`/…)
+  **plays in-world** on the screen and toggles play/pause (with sound) on click;
+  a **YouTube/Vimeo** link shows a neon poster with a ▶ that opens the video on
+  click. A file that can't be decoded (e.g. cross-origin without CORS) falls back
+  to the poster automatically.
 - **Per-activity building override** — a teacher can attach a specific building
   model to one activity from its **Edit settings** page (a *Cyberspace building
   model* field: a `.glb` file name in the asset pack, or a full URL). It takes

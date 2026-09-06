@@ -173,6 +173,55 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * Video activities are classified in the scene config: a YouTube URL is an
+     * embed, a direct video-file URL is a playable file, and non-video
+     * activities carry a null video.
+     */
+    public function test_scene_config_video(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $youtube = $this->getDataGenerator()->create_module('url', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Lecture',
+            'externalurl' => 'https://youtu.be/dQw4w9WgXcQ',
+        ]);
+        $mp4 = $this->getDataGenerator()->create_module('url', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Clip',
+            'externalurl' => 'https://cdn.example/clip.mp4',
+        ]);
+        $link = $this->getDataGenerator()->create_module('url', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Docs',
+            'externalurl' => 'https://example.com/page',
+        ]);
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Notes',
+        ]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $videos = [];
+        foreach ($config['sections'] as $section) {
+            foreach ($section['activities'] as $act) {
+                $videos[$act['id']] = $act['video'];
+            }
+        }
+
+        $this->assertSame('embed', $videos[$youtube->cmid]['kind']);
+        $this->assertSame('file', $videos[$mp4->cmid]['kind']);
+        $this->assertSame('https://cdn.example/clip.mp4', $videos[$mp4->cmid]['src']);
+        $this->assertNull($videos[$link->cmid]);
+        $this->assertNull($videos[$page->cmid]);
+    }
+
+    /**
      * A per-activity building override is exposed in the scene config for that
      * activity only, and other activities keep a null building.
      */
