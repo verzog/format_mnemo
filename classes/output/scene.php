@@ -205,6 +205,9 @@ class scene implements renderable, templatable {
             // Hour of day (0-24 float) in the site's timezone, so the client can
             // run a day/night cycle that matches the Moodle site's clock.
             'hour' => $this->site_hour(),
+            // Base URL for glTF prop models. Defaults to the plugin's bundled
+            // models; an admin can point it at an external asset pack.
+            'modelsbaseurl' => $this->models_base_url(),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -233,6 +236,20 @@ class scene implements renderable, templatable {
         $tz = \core_date::get_server_timezone_object();
         $now = new \DateTime('now', $tz);
         return (int)$now->format('G') + ((int)$now->format('i')) / 60.0;
+    }
+
+    /**
+     * The base URL the client loads glTF prop models from. An admin can set a
+     * custom asset pack URL; otherwise the plugin's bundled models are used.
+     *
+     * @return string
+     */
+    protected function models_base_url(): string {
+        $base = get_config('format_mnemo', 'assetbaseurl');
+        if (!empty($base)) {
+            return rtrim($base, '/') . '/';
+        }
+        return (new moodle_url('/course/format/mnemo/models/'))->out(false);
     }
 
     /**
