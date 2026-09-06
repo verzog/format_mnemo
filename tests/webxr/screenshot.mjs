@@ -40,7 +40,8 @@ const port = server.address().port;
 const shots = [
     {label: 'day', q: 'hour=13'},
     {label: 'dusk', q: 'hour=18.5'},
-    {label: 'night', q: 'hour=22'}
+    {label: 'night', q: 'hour=22'},
+    {label: 'void', q: 'hour=22&env=void&px=8&py=5&pz=24&yaw=-0.4'}
 ];
 
 const launchOpts = {
