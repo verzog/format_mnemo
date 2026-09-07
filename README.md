@@ -104,6 +104,20 @@ off).
   (e.g. cross-origin without CORS) falls back to opening the activity. Clicking a
   **YouTube/Vimeo** screen opens the video. Screen audio pauses when you switch
   to the list view or hide the tab.
+- **Open activities without leaving the world** — clicking a building opens the
+  activity in a panel layered over the 3D view (its real Moodle page in a frame)
+  on desktop, phone and magic-window, so a quiz, assignment or resource is done
+  without leaving the scene. **Inside a VR headset** — where the page DOM is
+  invisible — a **readable** activity (a **Page**, a **Book**'s chapters, or the
+  **intro** of a **Label**, **Quiz** or **Assignment**) instead opens on a
+  **native 3D reader panel**: the text is laid out in-world with headings,
+  paragraphs, lists, inline links and images, floating about two metres ahead at
+  eye level. Scroll it with a **thumbstick** or the on-panel **▲/▼** buttons,
+  page through a book with **❮/❯**, and close with **✕** — all by pointing and
+  clicking, no headset removal. Opening a readable activity records its view, so
+  completion-on-view fires and the completion tick appears live. Anything not
+  readable (a quiz *attempt*, an assignment *submission*, an external tool) still
+  falls back to navigating to it, since its form controls cannot render in VR.
 - **Per-activity building override** — a teacher can attach a specific building
   model to one activity from its **Edit settings** page (a *Cyberspace building
   model* field: a `.glb` file name in the asset pack, or a full URL). It takes

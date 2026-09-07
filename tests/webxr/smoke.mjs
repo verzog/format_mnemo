@@ -1726,6 +1726,182 @@ const scenarios = [
             return {pass, detail: `t11=${tick11.visible} hex=${frameMat.color.getHex().toString(16)} ` +
                 `base=${panel11.userData.baseColour.toString(16)} a13=${self.activities[13].state}`};
         }
+    },
+    {
+        name: 'reader: buildReaderPanel builds a content panel and five controls',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            const r = self.buildReaderPanel();
+            const hasContent = r.group.children.some((c) => c.material && c.material.map === r.tex);
+            const keys = Object.keys(r.buttons).sort().join(',');
+            const pass = !!r.group && hasContent && r.group.parent === self.scene &&
+                keys === 'close,nextchapter,prevchapter,scrolldown,scrollup' &&
+                r.buttons.close.userData.readerAction === 'close';
+            return {pass, detail: `content=${hasContent} keys=${keys} parent=${r.group.parent === self.scene}`};
+        }
+    },
+    {
+        name: 'reader: showReader lays blocks out and makes controls clickable',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            const res = {title: 'Notes', chapters: [], chapterid: 0, blocks: [
+                {type: 'heading', level: 1, text: 'A heading'},
+                {type: 'para', runs: [{text: 'Visit '}, {text: 'the link', href: 'https://x/'}]},
+                {type: 'listitem', ordered: false, index: 1, runs: [{text: 'One point'}]}
+            ]};
+            self.showReader(res, 'Notes', 'https://u/view', 5);
+            const r = self.reader;
+            const linkItem = r.items.find((it) => it.kind === 'text' &&
+                it.lines.some((ln) => ln.some((w) => w.href === 'https://x/')));
+            const pass = self.readerOpen === true && r.items.length === 3 &&
+                r.items[0].kind === 'text' && r.contentHeight > 0 &&
+                !!linkItem && self.interactive.indexOf(r.buttons.close) !== -1;
+            return {pass, detail: `open=${self.readerOpen} items=${r.items.length} link=${!!linkItem}`};
+        }
+    },
+    {
+        name: 'reader: scrollReader clamps to the document bounds',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            const blocks = [];
+            for (let i = 0; i < 80; i++) {
+                blocks.push({type: 'para', runs: [{text: 'Line ' + i + ' of a long document.'}]});
+            }
+            self.showReader({title: 'Long', chapters: [], chapterid: 0, blocks}, 'Long', 'https://u/v', 7);
+            const r = self.reader;
+            const max = Math.max(0, r.contentHeight - r.H);
+            self.scrollReader(1e6);
+            const atMax = Math.abs(r.scroll - max) < 1e-6 && max > 0;
+            self.scrollReader(-1e6);
+            const atTop = r.scroll === 0;
+            return {pass: atMax && atTop, detail: `max=${max.toFixed(0)} atMax=${atMax} atTop=${atTop}`};
+        }
+    },
+    {
+        name: 'reader: readerControl close hides the panel and releases controls',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            self.showReader({title: 'X', chapters: [], chapterid: 0,
+                blocks: [{type: 'para', runs: [{text: 'Body'}]}]}, 'X', 'https://u/v', 3);
+            const r = self.reader;
+            const wasClickable = self.interactive.indexOf(r.buttons.close) !== -1;
+            self.readerControl('close');
+            const pass = wasClickable && self.readerOpen === false && r.group.visible === false &&
+                self.interactive.indexOf(r.buttons.close) === -1;
+            return {pass, detail: `open=${self.readerOpen} vis=${r.group.visible}`};
+        }
+    },
+    {
+        name: 'reader: chapter controls show only for a multi-chapter book',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            const r = self.buildReaderPanel();
+            r.chapters = [];
+            self.updateChapterControls();
+            const hiddenAlone = r.buttons.prevchapter.visible === false;
+            r.chapters = [{id: 1}, {id: 2}];
+            self.updateChapterControls();
+            const shownForBook = r.buttons.prevchapter.visible === true;
+            return {pass: hiddenAlone && shownForBook,
+                detail: `alone=${hiddenAlone} book=${shownForBook}`};
+        }
+    },
+    {
+        name: 'reader: openActivity opens the reader in a headset only for readable',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.renderer = {xr: {isPresenting: true}};
+            self._reader = null;
+            self._nav = null;
+            self.openReader = function(cmid) {
+                self._reader = cmid;
+            };
+            self.open = function(url) {
+                self._nav = url;
+            };
+            self.openActivity('https://u/view', 'Notes', {cmid: 5, reader: true});
+            const openedReader = self._reader === 5 && self._nav === null;
+            self._reader = null;
+            self._nav = null;
+            self.openActivity('https://u/x', 'X', {cmid: 6, reader: false});
+            const navigated = self._nav === 'https://u/x' && self._reader === null;
+            return {pass: openedReader && navigated,
+                detail: `reader=${openedReader} nav=${navigated}`};
+        }
+    },
+    {
+        name: 'reader: wrapReaderWords wraps to width and keeps link hrefs',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            const r = self.buildReaderPanel();
+            const words = self.readerWords({runs: [{text: 'alpha beta'}, {text: 'gamma', href: 'https://x/'}]});
+            r.ctx.font = '30px system-ui, sans-serif';
+            const lines = self.wrapReaderWords(r.ctx, words, 30);
+            const linked = words.find((w) => w.href === 'https://x/');
+            const pass = words.length === 3 && !!linked && linked.text === 'gamma' && lines.length >= 2;
+            return {pass, detail: `words=${words.length} lines=${lines.length} linked=${linked && linked.text}`};
+        }
+    },
+    {
+        name: 'reader: an open reader diverts the thumbstick to scrolling',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.cs.readerOpen = true;
+            c.cs._scroll = 0;
+            c.cs.scrollReader = function(d) {
+                c.cs._scroll += d;
+            };
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, 0.8];
+            T.frame(c, 0.1);
+            const s = T.state(c);
+            const moved = Math.abs(s.x) + Math.abs(s.z);
+            const pass = c.cs._scroll < 0 && moved < 1e-6;
+            return {pass, detail: `scroll=${c.cs._scroll.toFixed(1)} moved=${moved.toFixed(4)}`};
+        }
     }
 ];
 

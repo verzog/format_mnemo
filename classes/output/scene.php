@@ -38,6 +38,13 @@ use templatable;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class scene implements renderable, templatable {
+    /**
+     * @var string[] Module types whose body the in-headset reader can render
+     * (a page's content, a book's chapters, and the intro text of a label,
+     * quiz or assignment).
+     */
+    const READABLE_MODS = ['page', 'book', 'label', 'quiz', 'assign'];
+
     /** @var course_format The course format instance. */
     protected $format;
 
@@ -126,6 +133,10 @@ class scene implements renderable, templatable {
                         // actually access, so a restricted activity never leaks a
                         // playable source.
                         'video' => $cm->uservisible ? $this->video_info($cm, $urlrecords, $resourcevideos, $course) : null,
+                        // Whether the in-headset reader can render this module's
+                        // body, so the client opens the native 3D reader in an
+                        // immersive session rather than navigating away.
+                        'reader' => $cm->uservisible && self::is_readable($cm->modname),
                     ];
                 }
             }
@@ -148,6 +159,18 @@ class scene implements renderable, templatable {
             'sections' => $sections,
             'nodecount' => count($sections),
         ];
+    }
+
+    /**
+     * Whether the in-headset reader can render this module type's body, so the
+     * client opens the native 3D reader for it in an immersive session instead
+     * of navigating away.
+     *
+     * @param string $modname The module name.
+     * @return bool True when the reader supports it.
+     */
+    public static function is_readable(string $modname): bool {
+        return in_array($modname, self::READABLE_MODS, true);
     }
 
     /**
