@@ -42,7 +42,12 @@ off).
 - **Live course data** — every section becomes a side street; every activity
   becomes a building or shop with a lit signboard colour-coded by state:
   **green = complete**, **palette colour = available**, **red = restricted**.
-  Completion and access restrictions are respected per user.
+  Completion and access restrictions are respected per user. A **green floating
+  tick** hovers in front of every completed activity, and when you finish one
+  from inside the scene its sign recolours and the tick appears **without a page
+  reload** (the states are re-fetched when you close an activity). Activities
+  that become newly visible — e.g. a restriction that only lifts on reload —
+  still need a page refresh to appear.
 - **Architectural styles by activity type** — activities are built in the four
   Night-City movements: assessment/serious tools (quiz, assignment, lesson…) as
   cold **Neo-Militarist** corporate towers; social/communication tools (forum,

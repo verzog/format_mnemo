@@ -99,15 +99,7 @@ class scene implements renderable, templatable {
                         continue;
                     }
 
-                    $state = 'available';
-                    if (!$cm->uservisible) {
-                        $state = 'restricted';
-                    } else if ($completionenabled && $cm->completion != COMPLETION_TRACKING_NONE) {
-                        $data = $completion->get_data($cm, true);
-                        if (in_array((int)$data->completionstate, [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS], true)) {
-                            $state = 'complete';
-                        }
-                    }
+                    $state = self::compute_state($cm, $completion, $completionenabled);
 
                     $url = $cm->url;
                     $activities[] = [
@@ -156,6 +148,30 @@ class scene implements renderable, templatable {
             'sections' => $sections,
             'nodecount' => count($sections),
         ];
+    }
+
+    /**
+     * The scene state for one course module: 'restricted' when the user cannot
+     * access it, 'complete' when completion is tracked and met, otherwise
+     * 'available'. Shared by the initial scene build and the live-state refresh
+     * (get_states) so both classify an activity the same way.
+     *
+     * @param \cm_info $cm The course module.
+     * @param completion_info $completion The course completion helper.
+     * @param bool $completionenabled Whether completion is enabled for the course.
+     * @return string One of 'restricted', 'complete', 'available'.
+     */
+    public static function compute_state(\cm_info $cm, completion_info $completion, bool $completionenabled): string {
+        if (!$cm->uservisible) {
+            return 'restricted';
+        }
+        if ($completionenabled && $cm->completion != COMPLETION_TRACKING_NONE) {
+            $data = $completion->get_data($cm, true);
+            if (in_array((int)$data->completionstate, [COMPLETION_COMPLETE, COMPLETION_COMPLETE_PASS], true)) {
+                return 'complete';
+            }
+        }
+        return 'available';
     }
 
     /**
