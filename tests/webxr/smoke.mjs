@@ -1501,21 +1501,44 @@ const scenarios = [
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const countSpheres = (arr) => arr.filter((o) =>
-                o.geometry && o.geometry.type === 'SphereGeometry').length;
             const mk = (textures) => {
-                const added = [];
-                const self = {THREE, scene: {add: (o) => added.push(o)}, planetTextures: textures,
+                const self = {THREE, scene: {add: () => {}}, planetTextures: textures,
+                    planetField: null,
                     newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
                     buildPlanets: CS.prototype.buildPlanets};
                 self.buildPlanets();
-                return countSpheres(added);
+                // Planets live under the revolving field group now.
+                let spheres = 0;
+                const pos = [];
+                self.planetField.traverse((o) => {
+                    if (o.geometry && o.geometry.type === 'SphereGeometry') {
+                        spheres++;
+                        pos.push(o.position.clone());
+                    }
+                });
+                return {spheres, pos};
             };
             const none = mk([]);
             const two = mk([new THREE.Texture(), new THREE.Texture()]);
             const many = mk(Array.from({length: 12}, () => new THREE.Texture()));
-            const pass = none === 3 && two === 2 && many === 9; // Capped at nine.
-            return {pass, detail: `none=${none} two=${two} many=${many}`};
+            // Spread in azimuth: the two planets sit well apart (here opposite).
+            const spread = two.pos[0].distanceTo(two.pos[1]) > 100;
+            const pass = none.spheres === 3 && two.spheres === 2 && many.spheres === 9 && spread;
+            return {pass, detail: `none=${none.spheres} two=${two.spheres} many=${many.spheres} spread=${spread}`};
+        }
+    },
+    {
+        name: 'space: spinPlanets revolves the field once per hour',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const field = new THREE.Group();
+            const self = {planetField: field, spinPlanets: CS.prototype.spinPlanets};
+            self.spinPlanets(3600); // One hour -> one full turn.
+            const full = Math.abs(field.rotation.y - Math.PI * 2) < 1e-3;
+            // With no field it is a no-op and must not throw.
+            ({planetField: null, spinPlanets: CS.prototype.spinPlanets}).spinPlanets(1);
+            return {pass: full, detail: `y=${field.rotation.y.toFixed(4)}`};
         }
     },
     {
