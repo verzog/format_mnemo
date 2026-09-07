@@ -62,5 +62,26 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090601, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026090702) {
+        // Per-activity in-view transform (scale, position offset and rotation)
+        // set with the in-view editor. Added to the existing building table so a
+        // single per-cmid row carries both the model override and the transform.
+        $table = new xmldb_table('format_mnemo_building');
+        $fields = [
+            new xmldb_field('scale', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '1', 'model'),
+            new xmldb_field('offsetx', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0', 'scale'),
+            new xmldb_field('offsety', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0', 'offsetx'),
+            new xmldb_field('offsetz', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0', 'offsety'),
+            new xmldb_field('rotation', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0', 'offsetz'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026090702, 'format', 'mnemo');
+    }
+
     return true;
 }

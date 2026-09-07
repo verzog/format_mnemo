@@ -149,6 +149,104 @@
     cursor: not-allowed;
 }
 
+/* In-view object editor: toggle button (top-left) and the controls panel. */
+.format-mnemo__edit-btn {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 5;
+    padding: 0.4rem 0.8rem;
+    font-family: "Courier New", monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #00e5ff;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__edit-btn:hover {
+    background: rgba(0, 229, 255, 0.18);
+}
+
+.format-mnemo__edit-btn--on {
+    color: #02060f;
+    background: #00e5ff;
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.6);
+}
+
+.format-mnemo__editor {
+    position: absolute;
+    top: 60px;
+    left: 12px;
+    z-index: 6;
+    width: 250px;
+    padding: 0.75rem;
+    font-family: "Courier New", monospace;
+    font-size: 0.8rem;
+    color: #cdefff;
+    background: rgba(2, 6, 15, 0.85);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 6px;
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.25);
+}
+
+.format-mnemo__editor-title {
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+    color: #00e5ff;
+    overflow-wrap: anywhere;
+}
+
+.format-mnemo__editor-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.format-mnemo__editor-row span {
+    flex: 0 0 4.5rem;
+}
+
+.format-mnemo__editor-row input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.format-mnemo__editor-row output {
+    flex: 0 0 2.6rem;
+    text-align: right;
+}
+
+.format-mnemo__editor-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.format-mnemo__editor-actions button {
+    flex: 1 1 auto;
+    padding: 0.35rem 0.2rem;
+    font-family: inherit;
+    color: #00e5ff;
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__editor-actions button:hover {
+    background: rgba(0, 229, 255, 0.25);
+}
+
+.format-mnemo__editor-status {
+    margin-top: 0.4rem;
+    min-height: 1em;
+    color: #7fe3ff;
+}
+
 /* Accessible fallback list styling. */
 .format-mnemo__sections {
     list-style: none;

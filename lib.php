@@ -609,7 +609,18 @@ function format_mnemo_coursemodule_edit_post_actions($data, $course) {
 
     if ($model === '') {
         if ($existing) {
-            $DB->delete_records('format_mnemo_building', ['cmid' => $cmid]);
+            // Keep the row if it still carries an in-view transform (set with
+            // the editor); only drop it once nothing custom remains.
+            $hastransform = (float)$existing->scale != 1.0 || (float)$existing->offsetx != 0.0 ||
+                (float)$existing->offsety != 0.0 || (float)$existing->offsetz != 0.0 ||
+                (float)$existing->rotation != 0.0;
+            if ($hastransform) {
+                $existing->model = '';
+                $existing->timemodified = time();
+                $DB->update_record('format_mnemo_building', $existing);
+            } else {
+                $DB->delete_records('format_mnemo_building', ['cmid' => $cmid]);
+            }
         }
         return $data;
     }

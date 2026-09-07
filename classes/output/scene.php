@@ -62,7 +62,7 @@ class scene implements renderable, templatable {
         $completion = new completion_info($course);
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
-        $buildingmodels = $this->preload_building_models((int)$course->id);
+        $buildingrows = $this->preload_building_rows((int)$course->id);
         // URL activity records and Resource video main files for the course, so
         // video detection is a couple of queries rather than one per activity.
         $urlrecords = $DB->get_records('url', ['course' => (int)$course->id]);
@@ -113,7 +113,10 @@ class scene implements renderable, templatable {
                         // A teacher-chosen building model for this specific
                         // activity (file name or URL), or null to use the
                         // type-based/procedural building.
-                        'building' => $buildingmodels[(int)$cm->id] ?? null,
+                        'building' => $this->row_model($buildingrows[(int)$cm->id] ?? null),
+                        // A per-activity in-view transform (scale/position/
+                        // rotation) set with the editor, or null when default.
+                        'transform' => $this->row_transform($buildingrows[(int)$cm->id] ?? null),
                         // Video info for activities that are videos, so the
                         // client can render them as an interactive screen; null
                         // otherwise. Only exposed for activities the user can
@@ -178,20 +181,56 @@ class scene implements renderable, templatable {
      * single bounded query however many activities the course has.
      *
      * @param int $courseid the course id
-     * @return array map of cmid => model (file name or URL)
+     * @return array map of cmid => row (model plus scale/offset/rotation)
      */
-    protected function preload_building_models(int $courseid): array {
+    protected function preload_building_rows(int $courseid): array {
         global $DB;
-        $sql = "SELECT b.cmid, b.model
+        $sql = "SELECT b.cmid, b.model, b.scale, b.offsetx, b.offsety, b.offsetz, b.rotation
                   FROM {format_mnemo_building} b
                   JOIN {course_modules} cm ON cm.id = b.cmid
                  WHERE cm.course = :course";
         $rows = $DB->get_records_sql($sql, ['course' => $courseid]);
         $map = [];
         foreach ($rows as $row) {
-            $map[(int)$row->cmid] = $row->model;
+            $map[(int)$row->cmid] = $row;
         }
         return $map;
+    }
+
+    /**
+     * The model file name/URL for a building row, or null when it holds only a
+     * transform (empty model).
+     *
+     * @param stdClass|null $row A preload_building_rows() row, or null.
+     * @return string|null
+     */
+    protected function row_model(?stdClass $row): ?string {
+        if ($row === null || trim((string)$row->model) === '') {
+            return null;
+        }
+        return $row->model;
+    }
+
+    /**
+     * The in-view transform for a building row as a compact array, or null when
+     * it is the default (so the scene payload stays small).
+     *
+     * @param stdClass|null $row A preload_building_rows() row, or null.
+     * @return array{scale: float, x: float, y: float, z: float, rot: float}|null
+     */
+    protected function row_transform(?stdClass $row): ?array {
+        if ($row === null) {
+            return null;
+        }
+        $scale = (float)$row->scale;
+        $x = (float)$row->offsetx;
+        $y = (float)$row->offsety;
+        $z = (float)$row->offsetz;
+        $rot = (float)$row->rotation;
+        if ($scale == 1.0 && $x == 0.0 && $y == 0.0 && $z == 0.0 && $rot == 0.0) {
+            return null;
+        }
+        return ['scale' => $scale, 'x' => $x, 'y' => $y, 'z' => $z, 'rot' => $rot];
     }
 
     /**
@@ -340,6 +379,12 @@ class scene implements renderable, templatable {
         return [
             'courseid' => (int)$course->id,
             'rootid' => $this->rootid(),
+            // Whether the viewer may edit activities (and so use the in-view
+            // object editor to move/scale/rotate buildings and screens).
+            'canedit' => has_capability(
+                'moodle/course:manageactivities',
+                context_course::instance((int)$course->id)
+            ),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -386,6 +431,17 @@ class scene implements renderable, templatable {
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
                 'fullscreen' => get_string('fullscreen', 'format_mnemo'),
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
+                'edit' => get_string('editlayout', 'format_mnemo'),
+                'editdone' => get_string('editdone', 'format_mnemo'),
+                'editscale' => get_string('editscale', 'format_mnemo'),
+                'editmove' => get_string('editmove', 'format_mnemo'),
+                'editrotate' => get_string('editrotate', 'format_mnemo'),
+                'editsave' => get_string('editsave', 'format_mnemo'),
+                'editreset' => get_string('editreset', 'format_mnemo'),
+                'editclose' => get_string('editclose', 'format_mnemo'),
+                'editsaving' => get_string('editsaving', 'format_mnemo'),
+                'editsaved' => get_string('editsaved', 'format_mnemo'),
+                'editsaveerror' => get_string('editsaveerror', 'format_mnemo'),
             ],
             'sections' => $nodes['sections'],
         ];
