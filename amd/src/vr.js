@@ -2585,7 +2585,7 @@ define('format_mnemo/vr', [], function() {
         });
         if (this.roadTexture) {
             var rdiv = this.roadScale * this.roadTexMult;
-            mat.map = this.tiledClone(this.roadTexture, w / rdiv, d / rdiv);
+            this.showSurfaceTexture(mat, this.tiledClone(this.roadTexture, w / rdiv, d / rdiv));
         }
         var road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
         road.rotation.x = -Math.PI / 2;
@@ -2629,7 +2629,7 @@ define('format_mnemo/vr', [], function() {
         });
         if (this.sidewalkTexture) {
             var div = this.sidewalkScale * this.sidewalkTexMult;
-            topmat.map = this.tiledClone(this.sidewalkTexture, w / div, d / div);
+            this.showSurfaceTexture(topmat, this.tiledClone(this.sidewalkTexture, w / div, d / div));
         }
         var top = new THREE.Mesh(new THREE.PlaneGeometry(w, d), topmat);
         top.rotation.x = -Math.PI / 2;
@@ -2663,6 +2663,29 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Apply an uploaded surface texture to a material so it reads in every
+     * environment and time of day. A road/ground/sidewalk texture that an admin
+     * takes the trouble to upload should be visible whether the scene is the
+     * neon city at night, the bright grid, or the dark void - so the albedo is
+     * shown (low metalness, which otherwise trades the texture colour for a
+     * reflection of the near-black surroundings) and a gentle self-lit floor
+     * from the same map keeps it from sinking to black when the lighting is dim.
+     * The untextured surfaces (which keep their wet-asphalt look) never call
+     * this, so the default appearance is unchanged.
+     *
+     * @param {Object} mat The Three.MeshStandardMaterial for the surface.
+     * @param {Object} map The tiled texture to show (from tiledClone).
+     */
+    Cyberspace.prototype.showSurfaceTexture = function(mat, map) {
+        mat.map = map;
+        mat.metalness = Math.min(mat.metalness, 0.15);
+        mat.emissive = new this.THREE.Color(0xffffff);
+        mat.emissiveMap = map;
+        mat.emissiveIntensity = 0.3;
+        mat.needsUpdate = true;
+    };
+
+    /**
      * Lay a textured ground patch of a fixed size, centred on (cx, cz), when a
      * site-wide ground texture is configured. Used to give each building a
      * grounded plaza that reads against the dark floor. No-op without a texture
@@ -2678,10 +2701,8 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         var size = this.groundPatch;
         var gdiv = this.groundScale * this.groundTexMult;
-        var mat = new THREE.MeshStandardMaterial({
-            map: this.tiledClone(this.groundTexture, size / gdiv, size / gdiv),
-            roughness: 0.8, metalness: 0.2
-        });
+        var mat = new THREE.MeshStandardMaterial({roughness: 0.8, metalness: 0.2});
+        this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, size / gdiv, size / gdiv));
         var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
         patch.rotation.x = -Math.PI / 2;
         // Just above the road strips (y+0.02) so the plaza reads over them.
@@ -2801,7 +2822,14 @@ define('format_mnemo/vr', [], function() {
             if (rec.mesh.material.map) {
                 rec.mesh.material.map.dispose();
             }
-            rec.mesh.material.map = this.tiledClone(tex, rec.w / div, rec.d / div);
+            var clone = this.tiledClone(tex, rec.w / div, rec.d / div);
+            rec.mesh.material.map = clone;
+            // The self-lit floor shares the albedo map (see showSurfaceTexture),
+            // so keep it on the same freshly tiled clone rather than the one
+            // just disposed.
+            if (rec.mesh.material.emissiveMap) {
+                rec.mesh.material.emissiveMap = clone;
+            }
             rec.mesh.material.needsUpdate = true;
         }
     };
