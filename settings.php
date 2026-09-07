@@ -136,7 +136,7 @@ if ($ADMIN->fulltree) {
         get_string('setting_signtexture_desc', 'format_mnemo'),
         'signtexture',
         0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['image']]
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
     // Default drag-to-look direction for newly created courses. Teachers can
