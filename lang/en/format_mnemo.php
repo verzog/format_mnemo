@@ -32,6 +32,7 @@ $string['deletesection'] = 'Delete node';
 $string['editbrightness'] = 'Brightness';
 $string['editclose'] = 'Close';
 $string['editdone'] = 'Done editing';
+$string['editediting'] = 'Editing';
 $string['editgroundsurface'] = 'Ground surface';
 $string['editlayout'] = 'Edit layout';
 $string['editmove'] = 'Move';

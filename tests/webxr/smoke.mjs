@@ -899,6 +899,58 @@ const scenarios = [
                 a.group === null && Math.abs(a.transform.scale - 2) < 1e-6;
             return {pass, detail: `same=${a === b} name=${a.name} mult=${a.transform.scale}`};
         }
+    },
+    {
+        name: 'editor: showSelectionLabel anchors a name label above the object',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(4, 6, 4), new THREE.MeshBasicMaterial());
+            mesh.position.y = 3; // Box spans y 0..6.
+            g.add(mesh);
+            const added = [];
+            const self = {
+                THREE, scene: {add: (o) => added.push(o), remove: () => {}},
+                selLabel: null, palette: {primary: 0x00e5ff},
+                // Stub makeLabel so the test needs no font/canvas.
+                makeLabel: (t, c, s) => {
+                    const sp = new THREE.Sprite(new THREE.SpriteMaterial());
+                    sp.userData.text = t;
+                    sp.scale.set(4 * s, 1 * s, 1);
+                    return sp;
+                },
+                showSelectionLabel: CS.prototype.showSelectionLabel,
+                positionSelLabel: CS.prototype.positionSelLabel
+            };
+            self.showSelectionLabel({group: g, name: 'Assignment 1'});
+            const lbl = self.selLabel;
+            const pass = !!lbl && lbl.userData.text === 'Assignment 1' &&
+                lbl.position.y > 6 && lbl.material.depthTest === false &&
+                lbl.renderOrder === 999 && added.indexOf(lbl) !== -1;
+            return {pass, detail: `label=${!!lbl} y=${lbl && lbl.position.y.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'editor: showSelectionLabel clears and skips surfaces (no group)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const removed = [];
+            const stale = new THREE.Sprite(new THREE.SpriteMaterial());
+            const self = {
+                THREE, scene: {add: () => {}, remove: (o) => removed.push(o)},
+                selLabel: stale, palette: {primary: 0x00e5ff},
+                makeLabel: () => new THREE.Sprite(new THREE.SpriteMaterial()),
+                showSelectionLabel: CS.prototype.showSelectionLabel,
+                positionSelLabel: CS.prototype.positionSelLabel
+            };
+            // A surface editable (group null) clears the stale label, adds none.
+            self.showSelectionLabel({group: null, name: 'Road surface'});
+            const pass = self.selLabel === null && removed[0] === stale;
+            return {pass, detail: `cleared=${self.selLabel === null} removed=${removed.length}`};
+        }
     }
 ];
 

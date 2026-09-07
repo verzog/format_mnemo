@@ -136,6 +136,8 @@ define('format_mnemo/vr', [], function() {
         // and whether edit mode is on.
         this.editables = [];
         this.selected = null;
+        this.selBox = null; // BoxHelper around the current selection.
+        this.selLabel = null; // Floating name label over the current selection.
         this.editMode = false;
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
@@ -3755,6 +3757,7 @@ define('format_mnemo/vr', [], function() {
         panel.className = 'format-mnemo__editor';
         panel.hidden = true;
         panel.innerHTML =
+            '<div class="format-mnemo__editor-caption">' + (s.editediting || 'Editing') + '</div>' +
             '<div class="format-mnemo__editor-title" data-mnemo-ed-name></div>' +
             field('scale', s.editscale || 'Scale', 0.3, 4, 0.05) +
             field('x', (s.editmove || 'Move') + ' X', -20, 20, 0.5) +
@@ -3849,6 +3852,10 @@ define('format_mnemo/vr', [], function() {
             this.selBox = new this.THREE.BoxHelper(editable.group, this.palette.primary);
             this.scene.add(this.selBox);
         }
+        // Float the object's name above it in the scene so it is unmistakable
+        // which item is being edited (skipped for surfaces, which have no
+        // anchor; their name still shows in the panel header).
+        this.showSelectionLabel(editable);
         if (this.editorPanel) {
             this.editorPanel.hidden = false;
             this.fillEditor(editable);
@@ -3864,9 +3871,74 @@ define('format_mnemo/vr', [], function() {
             this.scene.remove(this.selBox);
             this.selBox = null;
         }
+        this.showSelectionLabel({}); // Clear the floating name label.
         if (this.editorPanel) {
             this.editorPanel.hidden = true;
         }
+    };
+
+    /**
+     * Show a floating neon label with the selected object's name, anchored just
+     * above it and always drawn on top, so the teacher can see exactly which
+     * item they are editing. Passing an editable with no group (or {}) just
+     * clears any existing label; surfaces are edited without one.
+     *
+     * @param {Object} editable The selected editable (or {} to clear).
+     */
+    Cyberspace.prototype.showSelectionLabel = function(editable) {
+        var THREE = this.THREE;
+        if (this.selLabel) {
+            this.scene.remove(this.selLabel);
+            if (this.selLabel.material) {
+                if (this.selLabel.material.map) {
+                    this.selLabel.material.map.dispose();
+                }
+                this.selLabel.material.dispose();
+            }
+            this.selLabel = null;
+        }
+        if (!editable || !editable.group) {
+            return;
+        }
+        var box = new THREE.Box3().setFromObject(editable.group);
+        if (box.isEmpty()) {
+            return;
+        }
+        var size = new THREE.Vector3();
+        box.getSize(size);
+        // Scale the label with the object so it stays legible over big towers
+        // without dwarfing small props.
+        var scale = Math.min(6, Math.max(2, size.x * 0.6));
+        var label = this.makeLabel(editable.name || '', this.palette.primary, scale);
+        label.renderOrder = 999;
+        if (label.material) {
+            label.material.depthTest = false; // Never hidden behind geometry.
+        }
+        this.scene.add(label);
+        this.selLabel = label;
+        this.positionSelLabel(editable.group);
+    };
+
+    /**
+     * Reposition the floating selection label just above an object's current
+     * bounding box, so it tracks live move/scale edits. No-op without a label.
+     *
+     * @param {Object} group The selected object's group.
+     */
+    Cyberspace.prototype.positionSelLabel = function(group) {
+        if (!this.selLabel) {
+            return;
+        }
+        var THREE = this.THREE;
+        var box = new THREE.Box3().setFromObject(group);
+        if (box.isEmpty()) {
+            return;
+        }
+        var size = new THREE.Vector3();
+        box.getSize(size);
+        var center = new THREE.Vector3();
+        box.getCenter(center);
+        this.selLabel.position.set(center.x, box.max.y + Math.max(1, size.y * 0.12), center.z);
     };
 
     /**
@@ -4150,6 +4222,10 @@ define('format_mnemo/vr', [], function() {
         g.scale.setScalar(t.scale);
         if (this.selBox) {
             this.selBox.update();
+        }
+        // Keep the floating name label above the object as it moves/scales.
+        if (this.selLabel && this.selected && this.selected.group === g) {
+            this.positionSelLabel(g);
         }
         if (this.renderer && this.renderer.shadowMap) {
             this.renderer.shadowMap.needsUpdate = true;
