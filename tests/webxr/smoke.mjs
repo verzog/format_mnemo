@@ -741,14 +741,24 @@ const scenarios = [
         }
     },
     {
-        name: 'scene-obj: slotKey gives stable per-type keys',
+        name: 'scene-obj: applyBrightness clones shared materials so props are independent',
         fn: () => {
+            const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const self = {slotCounters: {}};
-            const a = CS.prototype.slotKey.call(self, 'lamp');
-            const b = CS.prototype.slotKey.call(self, 'lamp');
-            const c = CS.prototype.slotKey.call(self, 'kiosk');
-            return {pass: a === 'lamp:0' && b === 'lamp:1' && c === 'kiosk:0', detail: `${a},${b},${c}`};
+            // Two props that (like tpl.clone()) share one material instance.
+            const shared = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 1, 1)});
+            shared.emissiveIntensity = 1;
+            const a = new THREE.Group();
+            a.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
+            const b = new THREE.Group();
+            b.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
+            CS.prototype.applyBrightness.call({}, {group: a, transform: {brightness: 3}});
+            // b must be untouched (its own material was not mutated).
+            const bmat = b.children[0].material;
+            const amat = a.children[0].material;
+            const pass = Math.abs(amat.emissiveIntensity - 3) < 1e-6 &&
+                Math.abs(bmat.emissiveIntensity - 1) < 1e-6 && amat !== bmat;
+            return {pass, detail: `a=${amat.emissiveIntensity} b=${bmat.emissiveIntensity}`};
         }
     },
     {
@@ -762,12 +772,14 @@ const scenarios = [
             g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
             const ed = {group: g, transform: {brightness: 2}};
             CS.prototype.applyBrightness.call({}, ed);
-            const up = Math.abs(emat.emissiveIntensity - 1.0) < 1e-6;
+            // The mesh gets its own material clone; read that, not the original.
+            const mat = () => g.children[0].material;
+            const up = Math.abs(mat().emissiveIntensity - 1.0) < 1e-6;
             // Re-apply relative to the same captured base (0.5), not the last value.
             ed.transform.brightness = 0.5;
             CS.prototype.applyBrightness.call({}, ed);
-            const down = Math.abs(emat.emissiveIntensity - 0.25) < 1e-6;
-            return {pass: up && down, detail: `emis=${emat.emissiveIntensity}`};
+            const down = Math.abs(mat().emissiveIntensity - 0.25) < 1e-6;
+            return {pass: up && down, detail: `emis=${mat().emissiveIntensity}`};
         }
     },
     {
@@ -789,11 +801,12 @@ const scenarios = [
             };
             self.registerSceneEditable('lamp:0', 'Street lamp', g, 5, 0, 5, true);
             const ed = self.editables[0];
+            const mat = g.children[0].material;
             const pass = ed.objkey === 'lamp:0' && ed.cmid === null &&
                 Math.abs(g.position.x - 6) < 1e-6 && Math.abs(g.scale.x - 2) < 1e-6 &&
-                Math.abs(emat.emissiveIntensity - 3) < 1e-6 &&
+                Math.abs(mat.emissiveIntensity - 3) < 1e-6 &&
                 g.userData.mnemoEditable === ed;
-            return {pass, detail: `objkey=${ed.objkey} posx=${g.position.x} emis=${emat.emissiveIntensity}`};
+            return {pass, detail: `objkey=${ed.objkey} posx=${g.position.x} emis=${mat.emissiveIntensity}`};
         }
     }
 ];

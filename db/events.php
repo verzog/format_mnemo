@@ -33,4 +33,8 @@ $observers = [
         'eventname' => '\core\event\course_module_deleted',
         'callback' => '\format_mnemo\observer::course_module_deleted',
     ],
+    [
+        'eventname' => '\core\event\course_deleted',
+        'callback' => '\format_mnemo\observer::course_deleted',
+    ],
 ];

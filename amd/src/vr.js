@@ -137,10 +137,9 @@ define('format_mnemo/vr', [], function() {
         this.editables = [];
         this.selected = null;
         this.editMode = false;
-        // Stored per-course transforms for non-activity scene objects, and
-        // per-type counters that give each such object a stable slot key.
+        // Stored per-course transforms for non-activity scene objects, keyed by
+        // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
-        this.slotCounters = {};
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2129,8 +2128,17 @@ define('format_mnemo/vr', [], function() {
         }
         var step = kind === 'lamp' ? 24 : 16;
         var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
+        var label = kind === 'lamp' ? 'Street lamp' : 'Barrier';
+        // A physical slot index, advanced for every candidate position along the
+        // avenue (from a fixed start, by a fixed step) whether or not the prop is
+        // actually placed. This keeps each prop's key tied to its physical spot
+        // and stable across viewers, even though footprint skipping (which
+        // depends on per-viewer activities) changes which slots are filled.
+        var slot = 0;
         for (var z = road.zMax - 6; z > road.zMin + 6; z -= step) {
             for (var s = -1; s <= 1; s += 2) {
+                var objkey = kind + ':' + slot;
+                slot++;
                 // Skip a prop that would drop on a building footprint.
                 if (!this.footprintClear(s * edge, z, 0.8)) {
                     continue;
@@ -2142,9 +2150,7 @@ define('format_mnemo/vr', [], function() {
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
-                this.registerSceneEditable(
-                    this.slotKey(kind), kind === 'lamp' ? 'Street lamp' : 'Barrier',
-                    m, s * edge, 0, z, true);
+                this.registerSceneEditable(objkey, label, m, s * edge, 0, z, true);
             }
         }
     };
@@ -2179,7 +2185,9 @@ define('format_mnemo/vr', [], function() {
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
-            this.registerSceneEditable(this.slotKey('kiosk'), 'Kiosk', m, kx, 0, kz, true);
+            // Key by the side street's section number (course-stable across
+            // viewers), not a filtered ordinal.
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, true);
         }
     };
 
@@ -2312,7 +2320,8 @@ define('format_mnemo/vr', [], function() {
         var xb = mouthX + side * streetLen;
         this.roads.push({
             xMin: Math.min(xa, xb), xMax: Math.max(xa, xb),
-            zMin: z - streetHalf, zMax: z + streetHalf
+            zMin: z - streetHalf, zMax: z + streetHalf,
+            section: section.number
         });
 
         // Side-street road surface + neon kerb lines.
@@ -2323,8 +2332,9 @@ define('format_mnemo/vr', [], function() {
 
         // Topic gate spanning the mouth, plus a tall vertical pylon at the corner.
         var wayColour = section.current ? 0xffffff : this.palette.primary;
-        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour);
-        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour);
+        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour, 'gate:' + section.number);
+        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour,
+            'pylon:' + section.number);
 
         // Activities line both sides of the street, receding down it.
         activities.forEach(function(act, k) {
@@ -2527,8 +2537,9 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} side Avenue side (-1/+1).
      * @param {Number} streetHalf Half-width of the street.
      * @param {Number} colour Wayfinding colour.
+     * @param {String} objkey The editor slot key for this gate.
      */
-    Cyberspace.prototype.buildGate = function(section, x, z, side, streetHalf, colour) {
+    Cyberspace.prototype.buildGate = function(section, x, z, side, streetHalf, colour, objkey) {
         var THREE = this.THREE;
         var group = new THREE.Group();
         var postMat = new THREE.MeshBasicMaterial({
@@ -2564,7 +2575,7 @@ define('format_mnemo/vr', [], function() {
         // Orient the gate to face back up the avenue (toward +Z at the mouth).
         group.lookAt(x, 0, z + side * 0.0001 + 10);
         this.scene.add(group);
-        this.registerSceneEditable(this.slotKey('gate'), section.name + ' gate', group, x, 0, z, true);
+        this.registerSceneEditable(objkey, section.name + ' gate', group, x, 0, z, true);
     };
 
     /**
@@ -2574,8 +2585,9 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} x Pylon x.
      * @param {Number} z Pylon z.
      * @param {Number} colour Neon colour.
+     * @param {String} objkey The editor slot key for this pylon.
      */
-    Cyberspace.prototype.buildPylon = function(name, x, z, colour) {
+    Cyberspace.prototype.buildPylon = function(name, x, z, colour, objkey) {
         var THREE = this.THREE;
         var group = new THREE.Group();
         var h = 16;
@@ -2605,7 +2617,7 @@ define('format_mnemo/vr', [], function() {
 
         group.position.set(x, 0, z);
         this.scene.add(group);
-        this.registerSceneEditable(this.slotKey('pylon'), name + ' pylon', group, x, 0, z, true);
+        this.registerSceneEditable(objkey, name + ' pylon', group, x, 0, z, true);
     };
 
     /**
@@ -4018,21 +4030,6 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * A stable per-course slot key for a non-activity scene object, e.g.
-     * "lamp:3". Counters are per type and advanced in the (deterministic)
-     * creation order, so the same object keeps the same key across reloads.
-     *
-     * @param {String} type The object type (lamp, barrier, kiosk, gate, pylon).
-     * @return {String} The slot key.
-     */
-    Cyberspace.prototype.slotKey = function(type) {
-        if (!this.slotCounters[type]) {
-            this.slotCounters[type] = 0;
-        }
-        return type + ':' + (this.slotCounters[type]++);
-    };
-
-    /**
      * Register a non-activity scene object (a prop, gate or pylon) as editable,
      * keyed per course by a stable slot key, applying any stored transform and
      * brightness for every viewer. Only wired into the editor when the viewer
@@ -4059,7 +4056,9 @@ define('format_mnemo/vr', [], function() {
             transform: {
                 scale: o.scale > 0 ? o.scale : 1,
                 x: o.x || 0, y: o.y || 0, z: o.z || 0, rot: o.rot || 0,
-                brightness: o.brightness > 0 ? o.brightness : 1
+                // Brightness may legitimately be 0 (off), so keep any finite
+                // stored value rather than treating 0 as "unset".
+                brightness: typeof o.brightness === 'number' ? o.brightness : 1
             }
         };
         // Apply any stored override so it renders that way for every viewer.
@@ -4095,6 +4094,16 @@ define('format_mnemo/vr', [], function() {
             }
             if (!o.material) {
                 return;
+            }
+            // Props are placed as tpl.clone(), which shares material instances
+            // across every clone. Give this mesh its own material(s) once, so
+            // changing one prop's brightness does not bleed into its siblings.
+            if (!o.userData.mnemoOwnMaterial) {
+                o.material = Array.isArray(o.material) ?
+                    o.material.map(function(m) {
+                        return m.clone();
+                    }) : o.material.clone();
+                o.userData.mnemoOwnMaterial = true;
             }
             var mats = Array.isArray(o.material) ? o.material : [o.material];
             for (var i = 0; i < mats.length; i++) {
