@@ -142,6 +142,13 @@ class format_mnemo extends core_courseformat\base {
                     'default' => get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0,
                     'type' => PARAM_INT,
                 ],
+                'mnemolighting' => [
+                    // The value "inherit" resolves to the site default at render
+                    // time (see scene.php), so an admin's site-wide change
+                    // reaches every course that has not set its own value.
+                    'default' => 'inherit',
+                    'type' => PARAM_ALPHA,
+                ],
             ];
         }
         if ($foreditform && !isset($courseformatoptions['coursedisplay']['label'])) {
@@ -207,6 +214,21 @@ class format_mnemo extends core_courseformat\base {
                         ],
                     ],
                     'help' => 'invertlook',
+                    'help_component' => 'format_mnemo',
+                ],
+                'mnemolighting' => [
+                    'label' => new lang_string('lighting', 'format_mnemo'),
+                    'element_type' => 'select',
+                    'element_attributes' => [
+                        [
+                            'inherit' => new lang_string('lighting_inherit', 'format_mnemo'),
+                            'off' => new lang_string('lighting_off', 'format_mnemo'),
+                            'sparse' => new lang_string('lighting_sparse', 'format_mnemo'),
+                            'normal' => new lang_string('lighting_normal', 'format_mnemo'),
+                            'dense' => new lang_string('lighting_dense', 'format_mnemo'),
+                        ],
+                    ],
+                    'help' => 'lighting',
                     'help_component' => 'format_mnemo',
                 ],
             ];
@@ -459,7 +481,8 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
     // ground and sidewalk textures ('roadtexture', 'groundtexture',
     // 'sidewalktexture'). These are all decorative, served like the plugin's
     // bundled static files (which are already public).
-    $siteareas = ['assetpack', 'signfont', 'signtexture', 'roadtexture', 'groundtexture', 'sidewalktexture'];
+    $siteareas = ['assetpack', 'signfont', 'signtexture', 'roadtexture', 'groundtexture',
+        'sidewalktexture', 'spacetexture', 'planettextures'];
     if (in_array($filearea, $siteareas, true)) {
         if ($context->contextlevel != CONTEXT_SYSTEM) {
             return false;

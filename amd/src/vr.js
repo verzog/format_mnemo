@@ -59,6 +59,22 @@ define('format_mnemo/vr', [], function() {
     // under them, and so surface-snapping rests objects on the right level.
     var SIDEWALK_HEIGHT = 0.18;
 
+    // Fixed positions for the Void's planets, spread across the far sky so they
+    // do not overlap. The first three match the original hand-placed trio (so
+    // the default look is unchanged); the rest extend it to a maximum of nine,
+    // used when that many planet textures are uploaded. `ring` adds a ring.
+    var PLANET_SLOTS = [
+        {r: 72, x: -195, y: 110, z: -340, ring: true, band: [0xc9975f, 0x7d5a37]},
+        {r: 54, x: 205, y: 150, z: -430, ring: false, band: [0x5680bb, 0x223b63]},
+        {r: 24, x: 150, y: 66, z: -270, ring: false, band: [0x9aa0a8, 0x4b5058]},
+        {r: 40, x: -260, y: 60, z: -300, ring: false, band: [0xb06a4a, 0x5c2f22]},
+        {r: 90, x: 60, y: 190, z: -540, ring: true, band: [0x6fae8c, 0x2f5a49]},
+        {r: 30, x: 300, y: 44, z: -360, ring: false, band: [0x8f8fb8, 0x3d3d63]},
+        {r: 48, x: -120, y: 205, z: -470, ring: false, band: [0xc0b070, 0x615636]},
+        {r: 20, x: -40, y: 92, z: -235, ring: false, band: [0x9a9aa2, 0x4b4b52]},
+        {r: 64, x: 250, y: 120, z: -510, ring: true, band: [0xb5734f, 0x5a3626]}
+    ];
+
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
@@ -136,6 +152,15 @@ define('format_mnemo/vr', [], function() {
         this.editMode = false;
         // The grid the generated layout snaps to and the editor/placer use.
         this.gridStep = config.gridsize > 0 ? config.gridsize : 2;
+        // Street lighting: the resolved spacing (world units between street
+        // lamps, 0 = no auto lamps) and whether to add a lamp at each side-street
+        // corner. Resolved server-side from the site default and the per-course
+        // override (see scene.php). Drives the uniform lamp layout.
+        this.lampSpacing = config.lightingspacing > 0 ? config.lightingspacing : 0;
+        this.lampCorners = !!config.lightingcorners;
+        // World positions computed for the street lamps (avenue + side streets +
+        // corners); filled in buildCity and instantiated when the lamp model loads.
+        this.lampSlots = [];
         // Snap-to-grid for the editor: when on, absolute positions snap to the
         // grid, rotations to 15 degrees and scale to 0.25 steps, so objects
         // align consistently. Remembered per viewer (best-effort).
@@ -233,6 +258,12 @@ define('format_mnemo/vr', [], function() {
         this.roadTexture = assets.roadTexture || null;
         this.groundTexture = assets.groundTexture || null;
         this.sidewalkTexture = assets.sidewalkTexture || null;
+        // Void backdrop: an optional equirectangular sky/starfield that replaces
+        // the procedural stars, and up to nine planet-surface maps applied to
+        // the planets (each an equirectangular lat-long image). Only loaded for
+        // the void environment. Empty/absent keeps the procedural look.
+        this.spaceTexture = assets.spaceTexture || null;
+        this.planetTextures = assets.planetTextures || [];
         // Tiling scales (world units per tile) and the size of the ground patch
         // laid around each building. Admin-configurable.
         this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
@@ -577,7 +608,6 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSpace = function() {
         var THREE = this.THREE;
-        this.scene.background = new THREE.Color(0x03040a);
 
         // A cold key light from the distant star, plus a dim fill so the far
         // side of buildings and planets is not pure black.
@@ -586,6 +616,30 @@ define('format_mnemo/vr', [], function() {
         key.position.copy(starDir).multiplyScalar(300);
         this.scene.add(key);
         this.scene.add(new THREE.HemisphereLight(0x223046, 0x05060c, 0.35));
+
+        // An uploaded equirectangular sky replaces the procedural starfield,
+        // nebulae and star sprite; otherwise the bundled procedural backdrop is
+        // built. Planets are drawn either way.
+        if (this.spaceTexture) {
+            this.spaceTexture.mapping = THREE.EquirectangularReflectionMapping;
+            this.scene.background = this.spaceTexture;
+        } else {
+            this.buildStarfield(starDir);
+        }
+
+        this.buildPlanets();
+    };
+
+    /**
+     * Build the procedural Void backdrop used when no sky image is uploaded: a
+     * near-black sky, a dense starfield on a far shell, palette-tinted nebulae
+     * and a bright star halo.
+     *
+     * @param {Object} starDir The unit direction to the star.
+     */
+    Cyberspace.prototype.buildStarfield = function(starDir) {
+        var THREE = this.THREE;
+        this.scene.background = new THREE.Color(0x03040a);
 
         // Dense starfield on a fixed far shell.
         var count = 2600;
@@ -630,12 +684,21 @@ define('format_mnemo/vr', [], function() {
         star.scale.set(70, 70, 1);
         star.position.copy(starDir).multiplyScalar(520);
         this.scene.add(star);
+    };
 
-        // A handful of planets, spread out, lit by the star and gently
-        // self-illuminated so they read as distant worlds rather than holes.
-        this.makePlanet(72, {x: -195, y: 110, z: -340}, [0xc9975f, 0x7d5a37], true);
-        this.makePlanet(54, {x: 205, y: 150, z: -430}, [0x5680bb, 0x223b63], false);
-        this.makePlanet(24, {x: 150, y: 66, z: -270}, [0x9aa0a8, 0x4b5058], false);
+    /**
+     * Place the Void's planets. With planet textures uploaded, one planet per
+     * texture (up to nine) takes its surface from the matching map; otherwise
+     * the original three procedurally-banded planets are drawn. All are lit by
+     * the star and gently self-illuminated so they read as distant worlds.
+     */
+    Cyberspace.prototype.buildPlanets = function() {
+        var texs = this.planetTextures || [];
+        var count = texs.length > 0 ? Math.min(texs.length, PLANET_SLOTS.length) : 3;
+        for (var i = 0; i < count; i++) {
+            var s = PLANET_SLOTS[i];
+            this.makePlanet(s.r, {x: s.x, y: s.y, z: s.z}, s.band, s.ring, texs[i] || null);
+        }
     };
 
     /**
@@ -667,25 +730,31 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Number} radius Planet radius.
      * @param {Object} at Position {x, y, z}.
-     * @param {Array} colours [band A, band B] hex ints.
+     * @param {Array} colours [band A, band B] hex ints (procedural fallback).
      * @param {Boolean} ringed Whether to add a ring.
+     * @param {Object} texture Optional equirectangular surface map; when given
+     *     it is used instead of the procedural banded texture.
      */
-    Cyberspace.prototype.makePlanet = function(radius, at, colours, ringed) {
+    Cyberspace.prototype.makePlanet = function(radius, at, colours, ringed, texture) {
         var THREE = this.THREE;
-        var ctx = this.newCanvasCtx(256);
-        var a = new THREE.Color(colours[0]);
-        var b = new THREE.Color(colours[1]);
-        ctx.fillStyle = '#' + a.getHexString();
-        ctx.fillRect(0, 0, 256, 256);
-        // Horizontal bands with a little turbulence.
-        for (var y = 0; y < 256; y += 4) {
-            var t = 0.5 + 0.5 * Math.sin(y * 0.05 + Math.random() * 0.4);
-            ctx.fillStyle = '#' + a.clone().lerp(b, t).getHexString();
-            ctx.fillRect(0, y, 256, 4 + Math.random() * 3);
-        }
-        var tex = new THREE.CanvasTexture(ctx.canvas);
-        if (tex.colorSpace !== undefined) {
-            tex.colorSpace = THREE.SRGBColorSpace;
+        var tex = texture;
+        if (!tex) {
+            // No uploaded map: paint a procedural banded surface.
+            var ctx = this.newCanvasCtx(256);
+            var a = new THREE.Color(colours[0]);
+            var b = new THREE.Color(colours[1]);
+            ctx.fillStyle = '#' + a.getHexString();
+            ctx.fillRect(0, 0, 256, 256);
+            // Horizontal bands with a little turbulence.
+            for (var y = 0; y < 256; y += 4) {
+                var t = 0.5 + 0.5 * Math.sin(y * 0.05 + Math.random() * 0.4);
+                ctx.fillStyle = '#' + a.clone().lerp(b, t).getHexString();
+                ctx.fillRect(0, y, 256, 4 + Math.random() * 3);
+            }
+            tex = new THREE.CanvasTexture(ctx.canvas);
+            if (tex.colorSpace !== undefined) {
+                tex.colorSpace = THREE.SRGBColorSpace;
+            }
         }
         var planet = new THREE.Mesh(
             new THREE.SphereGeometry(radius, 32, 24),
@@ -2158,7 +2227,7 @@ define('format_mnemo/vr', [], function() {
         };
 
         load('lamp', function(tpl) {
-            self.scatterStreetProps(tpl, 'lamp');
+            self.placeLampSlots(tpl);
         });
         load('barrier', function(tpl) {
             self.scatterStreetProps(tpl, 'barrier');
@@ -2320,6 +2389,120 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Work out where the street lamps stand: evenly spaced down both kerbs of
+     * the avenue and of every side street, plus a lamp at each side-street
+     * corner (when corners are enabled). Positions are grid-snapped and stored
+     * as slots; placeLampSlots() instantiates them once the lamp model loads.
+     * A spacing of 0 (lighting off) clears the slots. Derived from this.roads,
+     * so it must run after every street has been built.
+     */
+    Cyberspace.prototype.computeLampSlots = function() {
+        this.lampSlots = [];
+        var spacing = this.lampSpacing;
+        if (!(spacing > 0) || !this.roads.length) {
+            return;
+        }
+        var roadHalf = this.roadHalf || 5.5;
+        var avenue = this.roads[0];
+
+        // The lamps' actual point lights are capped for performance, so the
+        // avenue and side streets are collected as separate streams and then
+        // interleaved: this spreads the first (lit) lamps across the whole
+        // layout instead of spending the whole budget on the avenue.
+        var avenueStream = [];
+        // Avenue: a lamp on each kerb, stepping down z. Left kerb (-x) turns to
+        // face the road; the right kerb keeps the model's default facing.
+        for (var z = avenue.zMax - 4; z >= avenue.zMin + 4; z -= spacing) {
+            var az = this.snapCoord(z);
+            avenueStream.push({x: -(roadHalf + 0.6), z: az, rotY: Math.PI});
+            avenueStream.push({x: roadHalf + 0.6, z: az, rotY: 0});
+        }
+        var streams = [avenueStream];
+
+        // Each side street: a lamp on each kerb stepping along x, plus the two
+        // mouth corners when enabled. r.zMin/zMax bound the street width; the
+        // mouth is the kerb-side end (nearest x=0), the far end is the other.
+        // The near (lower-z) kerb faces +Z toward the street centre and the far
+        // kerb faces -Z (the model's arm points -X, so +/-PI/2 aim it inward).
+        for (var i = 1; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            var zc = (r.zMin + r.zMax) / 2;
+            var streetHalf = (r.zMax - r.zMin) / 2;
+            var mouthX = Math.abs(r.xMin) < Math.abs(r.xMax) ? r.xMin : r.xMax;
+            var endX = mouthX === r.xMin ? r.xMax : r.xMin;
+            var side = endX >= mouthX ? 1 : -1;
+            var zNear = this.snapCoord(zc - streetHalf - 0.6);
+            var zFar = this.snapCoord(zc + streetHalf + 0.6);
+            var stream = [];
+            if (this.lampCorners) {
+                // Offset from the mouth so the corner lamp does not land on the
+                // topic pylon (which stands at mouthX + side*0.6).
+                var cornerX = this.snapCoord(mouthX + side * 1.8);
+                stream.push({x: cornerX, z: zNear, rotY: Math.PI / 2});
+                stream.push({x: cornerX, z: zFar, rotY: -Math.PI / 2});
+            }
+            for (var x = mouthX + side * spacing;
+                side > 0 ? x <= endX : x >= endX; x += side * spacing) {
+                var sx = this.snapCoord(x);
+                stream.push({x: sx, z: zNear, rotY: Math.PI / 2});
+                stream.push({x: sx, z: zFar, rotY: -Math.PI / 2});
+            }
+            streams.push(stream);
+        }
+
+        // Round-robin merge the streams so lit lamps are distributed.
+        var longest = 0;
+        streams.forEach(function(s) {
+            longest = Math.max(longest, s.length);
+        });
+        for (var k = 0; k < longest; k++) {
+            for (var si = 0; si < streams.length; si++) {
+                if (streams[si][k]) {
+                    this.lampSlots.push(streams[si][k]);
+                }
+            }
+        }
+    };
+
+    /**
+     * Instantiate the street lamps from the slots computed by computeLampSlots:
+     * clone the model at each slot (skipping any that would drop on a building),
+     * attach its light, and register it as an editable keyed lamp:&lt;slot&gt;.
+     * The slot index is stable across viewers for a given layout and lighting
+     * setting; changing the lighting spacing renumbers the slots (documented).
+     *
+     * @param {Object} tpl The lamp model template group.
+     */
+    Cyberspace.prototype.placeLampSlots = function(tpl) {
+        var label = (this.config.strings && this.config.strings.placelamp) || 'Street lamp';
+        for (var i = 0; i < this.lampSlots.length; i++) {
+            var slot = this.lampSlots[i];
+            var objkey = 'lamp:' + i;
+            var stored = this.sceneObjects[objkey];
+            var px = this.snapBase(slot.x, stored);
+            var pz = this.snapBase(slot.z, stored);
+            // Skip a lamp that would stand on a building footprint. A stored row
+            // only exempts it when it carries a positional move (a
+            // brightness/scale/rotation-only edit still respects the footprint).
+            var moved = stored && (stored.x || stored.y || stored.z);
+            if (!moved && !this.footprintClear(px, pz, 0.8)) {
+                continue;
+            }
+            // Rest the lamp on the surface beneath it so an avenue lamp on the
+            // raised sidewalk stands on the slab rather than sinking into it.
+            var py = this.surfaceHeightAt(px, pz);
+            var m = tpl.clone();
+            m.position.set(px, py, pz);
+            m.rotation.y = slot.rotY;
+            this.addLampLight(m);
+            this.setShadow(m, true);
+            this.scene.add(m);
+            this.addPickProxy(m);
+            this.registerSceneEditable(objkey, label, m, px, py, pz, true);
+        }
+    };
+
+    /**
      * Drop a kiosk near the mouth of each side street.
      *
      * @param {Object} tpl The kiosk template group.
@@ -2436,9 +2619,20 @@ define('format_mnemo/vr', [], function() {
         this.player.position.set(0, 0, 12);
 
         var roadHalf = 5.5;
+        this.roadHalf = roadHalf;
         var spacing = 26; // Distance between side-street mouths down the avenue.
         var startZ = -20;
         var endZ = startZ - Math.max(1, sections.length) * spacing - 10;
+
+        // Every side street is built to one uniform length (sized to the topic
+        // with the most activities) so the city reads as a regular grid rather
+        // than a ragged mix of long and short branches.
+        var slotStep = 7.5; // X-spacing between building slots (see buildSideStreet).
+        var maxSlots = 1;
+        sections.forEach(function(section) {
+            maxSlots = Math.max(maxSlots, Math.ceil((section.activities || []).length / 2));
+        });
+        var uniformStreetLen = 5.5 + maxSlots * slotStep + 3;
 
         // Road corridors for movement: the avenue, plus each side street (filled
         // in by buildSideStreet). On foot the player is kept within these; only
@@ -2490,8 +2684,13 @@ define('format_mnemo/vr', [], function() {
         sections.forEach(function(section, i) {
             var z = startZ - i * spacing;
             var side = (i % 2 === 0) ? -1 : 1;
-            self.buildSideStreet(section, z, side, roadHalf);
+            self.buildSideStreet(section, z, side, roadHalf, uniformStreetLen);
         });
+
+        // With the streets and their footprints known, work out where the street
+        // lamps go (even spacing along the avenue and each side street, plus the
+        // corners). The lamps themselves are instantiated when the model loads.
+        this.computeLampSlots();
     };
 
     /**
@@ -2501,15 +2700,19 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} z The avenue z at which this street branches.
      * @param {Number} side -1 for the left of the avenue, +1 for the right.
      * @param {Number} roadHalf Half-width of the main avenue.
+     * @param {Number} streetLen Uniform side-street length (shared by every
+     *     street so the layout is regular); falls back to a per-street fit.
      */
-    Cyberspace.prototype.buildSideStreet = function(section, z, side, roadHalf) {
+    Cyberspace.prototype.buildSideStreet = function(section, z, side, roadHalf, streetLen) {
         var self = this;
         var activities = section.activities || [];
         var streetHalf = 4.5; // Half-width of the side street (along z).
         var first = 5.5; // X-offset (past the mouth) of the first building.
         var step = 7.5; // X-spacing between building slots down the street.
         var slots = Math.ceil(activities.length / 2);
-        var streetLen = first + Math.max(1, slots) * step + 3;
+        if (!(streetLen > 0)) {
+            streetLen = first + Math.max(1, slots) * step + 3;
+        }
         var mouthX = side * roadHalf;
         var midX = mouthX + side * streetLen / 2;
 
@@ -6575,7 +6778,8 @@ define('format_mnemo/vr', [], function() {
     function loadSceneAssets(config, THREE) {
         var assets = {
             signFontFamily: null, signTexture: null,
-            roadTexture: null, groundTexture: null, sidewalkTexture: null
+            roadTexture: null, groundTexture: null, sidewalkTexture: null,
+            spaceTexture: null, planetTextures: []
         };
         var jobs = [];
 
@@ -6620,6 +6824,24 @@ define('format_mnemo/vr', [], function() {
             jobs.push(loadBoundedTexture(config.sidewalktextureurl, THREE, true, function(tex) {
                 assets.sidewalkTexture = tex;
             }));
+        }
+
+        // The Void's optional sky and planet maps (equirectangular). Only loaded
+        // for the void environment, since nothing else uses them. Planet maps
+        // keep their upload order so a given slot stays on the same planet.
+        if (config.environment === 'void') {
+            if (config.spacetextureurl) {
+                jobs.push(loadBoundedTexture(config.spacetextureurl, THREE, false, function(tex) {
+                    assets.spaceTexture = tex;
+                }));
+            }
+            var planeturls = config.planettextureurls || [];
+            planeturls.forEach(function(url, index) {
+                assets.planetTextures[index] = null;
+                jobs.push(loadBoundedTexture(url, THREE, false, function(tex) {
+                    assets.planetTextures[index] = tex;
+                }));
+            });
         }
 
         // Never block scene construction on a hung asset request: an external

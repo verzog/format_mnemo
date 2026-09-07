@@ -1405,6 +1405,142 @@ const scenarios = [
                 hit;
             return {pass, detail: `proxy=${!!proxy} h=${proxy && proxy.geometry.parameters.height} hit=${hit}`};
         }
+    },
+    {
+        name: 'lighting: computeLampSlots spaces lamps on avenue, streets and corners',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const base = {
+                roadHalf: 5.5, gridStep: 2,
+                snapCoord: CS.prototype.snapCoord,
+                computeLampSlots: CS.prototype.computeLampSlots
+            };
+            // Avenue (roads[0]) plus one side street branching right at z=-40.
+            const roads = [
+                {xMin: -7.9, xMax: 7.9, zMin: -60, zMax: 12},
+                {xMin: 5.5, xMax: 25.5, zMin: -44.5, zMax: -35.5, section: 0}
+            ];
+            const on = Object.assign({}, base, {lampSpacing: 20, lampCorners: true, roads});
+            on.computeLampSlots();
+            const hasAvenue = on.lampSlots.some((s) => Math.abs(s.x + 6.1) < 1e-6) &&
+                on.lampSlots.some((s) => Math.abs(s.x - 6.1) < 1e-6);
+            const hasStreet = on.lampSlots.some((s) => s.x > 6 && Math.abs(s.rotY) === Math.PI / 2);
+            // Two corner lamps at the mouth, offset from the pylon (x ≈ 5.5+1.8→8).
+            const corners = on.lampSlots.filter((s) => Math.abs(s.x - 8) < 1.0 &&
+                (Math.abs(s.z + 34) < 4 || Math.abs(s.z + 46) < 4));
+            // Interleaved: a side-street lamp appears among the first few slots
+            // rather than after every avenue lamp (so the light cap is shared).
+            const earlyStreet = on.lampSlots.slice(0, 8).some((s) => s.x > 7);
+            // Off clears the slots.
+            const off = Object.assign({}, base, {lampSpacing: 0, lampCorners: true, roads});
+            off.computeLampSlots();
+            const pass = hasAvenue && hasStreet && corners.length >= 2 && earlyStreet &&
+                off.lampSlots.length === 0;
+            return {pass, detail: `n=${on.lampSlots.length} avenue=${hasAvenue} street=${hasStreet} corners=${corners.length} early=${earlyStreet} off=${off.lampSlots.length}`};
+        }
+    },
+    {
+        name: 'lighting: placeLampSlots builds, lights and registers lamps, skipping footprints',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshStandardMaterial()));
+            const added = [];
+            const self = {
+                THREE, config: {canedit: true, strings: {placelamp: 'Street lamp'}},
+                sceneObjects: {}, editables: [], lampLights: 0, palette: {primary: 0x00e5ff},
+                scene: {add: (o) => added.push(o)},
+                lampSlots: [
+                    {x: 6, z: 4, rotY: 0},
+                    {x: 6, z: -6, rotY: Math.PI}, // This one sits on a footprint.
+                    {x: -6, z: 4, rotY: Math.PI}
+                ],
+                footprints: [{xMin: 4, xMax: 8, zMin: -8, zMax: -4}],
+                surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt,
+                snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord,
+                gridStep: 2, footprintClear: CS.prototype.footprintClear,
+                addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
+                addPickProxy: CS.prototype.addPickProxy,
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform,
+                applyBrightness: CS.prototype.applyBrightness,
+                placeLampSlots: CS.prototype.placeLampSlots
+            };
+            self.placeLampSlots(tpl);
+            const keys = self.editables.map((e) => e.objkey);
+            // The middle slot (on the footprint) is skipped; the other two build.
+            const pass = self.editables.length === 2 &&
+                keys.indexOf('lamp:0') !== -1 && keys.indexOf('lamp:2') !== -1 &&
+                keys.indexOf('lamp:1') === -1 && self.lampLights === 2;
+            return {pass, detail: `keys=${keys.join(',')} lights=${self.lampLights}`};
+        }
+    },
+    {
+        name: 'space: makePlanet uses an uploaded map, else a procedural surface',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const added = [];
+            const self = {THREE, scene: {add: (o) => added.push(o)},
+                newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet};
+            const tex = new THREE.Texture();
+            self.makePlanet(20, {x: 0, y: 0, z: -100}, [0x888888, 0x333333], false, tex);
+            self.makePlanet(20, {x: 40, y: 0, z: -100}, [0x888888, 0x333333], false);
+            const withTex = added[0];
+            const proc = added[1];
+            const pass = withTex.material.map === tex &&
+                withTex.material.emissiveMap === tex &&
+                proc.material.map && proc.material.map !== tex;
+            return {pass, detail: `mapIsTex=${withTex.material.map === tex} procHasOwn=${!!proc.material.map}`};
+        }
+    },
+    {
+        name: 'space: buildPlanets draws one planet per texture (capped), else three',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const countSpheres = (arr) => arr.filter((o) =>
+                o.geometry && o.geometry.type === 'SphereGeometry').length;
+            const mk = (textures) => {
+                const added = [];
+                const self = {THREE, scene: {add: (o) => added.push(o)}, planetTextures: textures,
+                    newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
+                    buildPlanets: CS.prototype.buildPlanets};
+                self.buildPlanets();
+                return countSpheres(added);
+            };
+            const none = mk([]);
+            const two = mk([new THREE.Texture(), new THREE.Texture()]);
+            const many = mk(Array.from({length: 12}, () => new THREE.Texture()));
+            const pass = none === 3 && two === 2 && many === 9; // Capped at nine.
+            return {pass, detail: `none=${none} two=${two} many=${many}`};
+        }
+    },
+    {
+        name: 'space: buildSpace uses an uploaded sky, else the procedural starfield',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (spaceTexture) => {
+                let starfield = 0;
+                const self = {
+                    THREE, scene: {background: null, add: () => {}},
+                    spaceTexture,
+                    buildStarfield: () => { starfield++; },
+                    buildPlanets: () => {},
+                    buildSpace: CS.prototype.buildSpace
+                };
+                self.buildSpace();
+                return {bg: self.scene.background, starfield};
+            };
+            const tex = new THREE.Texture();
+            const withSky = mk(tex);
+            const without = mk(null);
+            const pass = withSky.bg === tex && withSky.starfield === 0 &&
+                without.starfield === 1;
+            return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
     }
 ];
 
