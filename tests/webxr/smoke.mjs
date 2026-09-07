@@ -651,6 +651,63 @@ const scenarios = [
                 !!added[0].material.map && added[0].material.map.repeat.x === 2;
             return {pass, detail: `count=${added.length} repeat=${added[0].material.map.repeat.x}`};
         }
+    },
+    {
+        name: 'editor: applyTransform moves, rotates and scales relative to base',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const self = {THREE, selBox: null, renderer: null};
+            const ed = {
+                group: g, baseX: 5, baseY: 0, baseZ: -3, baseRotY: 0,
+                transform: {scale: 2, x: 1, y: 0.5, z: -2, rot: 90}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            const pass = Math.abs(g.position.x - 6) < 1e-6 &&
+                Math.abs(g.position.y - 0.5) < 1e-6 &&
+                Math.abs(g.position.z + 5) < 1e-6 &&
+                Math.abs(g.rotation.y - Math.PI / 2) < 1e-6 &&
+                Math.abs(g.scale.x - 2) < 1e-6;
+            return {pass, detail: `pos=${g.position.x},${g.position.y},${g.position.z} rotY=${g.rotation.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'editor: editableFor walks up to the registered group',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const ed = {cmid: 42};
+            g.userData.mnemoEditable = ed;
+            const child = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial());
+            g.add(child);
+            const found = CS.prototype.editableFor.call({}, child);
+            const none = CS.prototype.editableFor.call({}, new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+            const pass = found === ed && none === null;
+            return {pass, detail: `found=${found && found.cmid} none=${none}`};
+        }
+    },
+    {
+        name: 'editor: registerEditable records base and applies a stored transform',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            g.rotation.y = 0.5;
+            const self = {
+                THREE, editables: [], selBox: null, renderer: null,
+                registerEditable: CS.prototype.registerEditable,
+                applyTransform: CS.prototype.applyTransform
+            };
+            self.registerEditable(
+                {id: 7, name: 'X', transform: {scale: 3, x: 2, y: 0, z: 0, rot: 0}}, g, 10, 0, 10);
+            const ed = self.editables[0];
+            const pass = ed.cmid === 7 && Math.abs(ed.baseRotY - 0.5) < 1e-6 &&
+                Math.abs(g.position.x - 12) < 1e-6 && Math.abs(g.scale.x - 3) < 1e-6 &&
+                g.userData.mnemoEditable === ed;
+            return {pass, detail: `cmid=${ed.cmid} posx=${g.position.x} s=${g.scale.x}`};
+        }
     }
 ];
 

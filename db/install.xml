@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="course/format/mnemo/db" VERSION="20260906" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
+<XMLDB PATH="course/format/mnemo/db" VERSION="20260907" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
 >
@@ -8,7 +8,12 @@
       <FIELDS>
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="cmid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course module the building model is attached to."/>
-        <FIELD NAME="model" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false" COMMENT="A .glb model file name (resolved against the asset pack) or a full URL."/>
+        <FIELD NAME="model" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false" COMMENT="A .glb model file name (resolved against the asset pack) or a full URL. May be empty when only an in-view transform is set."/>
+        <FIELD NAME="scale" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view uniform scale multiplier for the activity's object."/>
+        <FIELD NAME="offsetx" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-x offset from the object's default position."/>
+        <FIELD NAME="offsety" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-y offset from the object's default position."/>
+        <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the object's default position."/>
+        <FIELD NAME="rotation" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view extra rotation about the vertical axis, in degrees."/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the override was last set."/>
       </FIELDS>
       <KEYS>

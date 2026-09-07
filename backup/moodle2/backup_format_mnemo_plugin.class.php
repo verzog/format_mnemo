@@ -55,4 +55,28 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
 
         return $plugin;
     }
+
+    /**
+     * Back up the per-activity building-model override and in-view transform so
+     * a saved layout survives backup, restore, duplicate and import.
+     *
+     * @return backup_plugin_element the plugin element attached to the module
+     */
+    protected function define_module_plugin_structure() {
+        $plugin = $this->get_plugin_element(null, $this->get_format_condition(), 'mnemo');
+
+        $pluginwrapper = new backup_nested_element($this->get_recommended_name());
+        $plugin->add_child($pluginwrapper);
+
+        // One row per course module (the table has a unique cmid index), sourced
+        // for the module being backed up.
+        $building = new backup_nested_element('building', ['id'], [
+            'model', 'scale', 'offsetx', 'offsety', 'offsetz', 'rotation', 'timemodified',
+        ]);
+        $pluginwrapper->add_child($building);
+
+        $building->set_source_table('format_mnemo_building', ['cmid' => backup::VAR_MODID]);
+
+        return $plugin;
+    }
 }

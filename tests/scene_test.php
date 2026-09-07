@@ -466,4 +466,74 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame(6, $config['groundtexturescale']);
         $this->assertSame(20, $config['groundpatchsize']);
     }
+
+    /**
+     * canedit is true for a user who can edit activities (editing teacher) and
+     * false for a student, gating the in-view editor.
+     */
+    public function test_scene_config_canedit(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $PAGE->set_context(context_course::instance($course->id));
+
+        $this->setUser($student);
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $this->assertFalse($scene->get_scene_config($PAGE->get_renderer('format_mnemo'))['canedit']);
+
+        $this->setUser($teacher);
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $this->assertTrue($scene->get_scene_config($PAGE->get_renderer('format_mnemo'))['canedit']);
+    }
+
+    /**
+     * A per-activity in-view transform is exposed for that activity, with the
+     * building left null when only a transform (empty model) is stored.
+     */
+    public function test_scene_config_activity_transform(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Moved',
+        ]);
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $page->cmid, 'model' => '', 'scale' => 2.0,
+            'offsetx' => 1.0, 'offsety' => 0.0, 'offsetz' => -2.0,
+            'rotation' => 90.0, 'timemodified' => time(),
+        ]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $transform = null;
+        $building = 'unset';
+        foreach ($config['sections'] as $section) {
+            foreach ($section['activities'] as $act) {
+                if ((int)$act['id'] === (int)$page->cmid) {
+                    $transform = $act['transform'];
+                    $building = $act['building'];
+                }
+            }
+        }
+
+        $this->assertNull($building);
+        $this->assertIsArray($transform);
+        $this->assertEqualsWithDelta(2.0, $transform['scale'], 1e-6);
+        $this->assertEqualsWithDelta(1.0, $transform['x'], 1e-6);
+        $this->assertEqualsWithDelta(-2.0, $transform['z'], 1e-6);
+        $this->assertEqualsWithDelta(90.0, $transform['rot'], 1e-6);
+    }
 }

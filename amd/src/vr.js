@@ -131,6 +131,12 @@ define('format_mnemo/vr', [], function() {
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
+        // In-view object editor state (only wired up when config.canedit): the
+        // editable objects (buildings and video screens), the current selection,
+        // and whether edit mode is on.
+        this.editables = [];
+        this.selected = null;
+        this.editMode = false;
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -245,6 +251,9 @@ define('format_mnemo/vr', [], function() {
         this.gestures = new GestureManager(this);
         this.buildVrButton();
         this.buildFullscreenButton();
+        if (this.config.canedit) {
+            this.buildEditor();
+        }
         this.bindDesktopControls();
         this.bindMediaPause();
         // Cinematic post pipeline (bloom) for the on-screen view.
@@ -2282,8 +2291,8 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         var activities = section.activities || [];
         var streetHalf = 4.5; // Half-width of the side street (along z).
-        var first = 5; // X-offset (past the mouth) of the first building.
-        var step = 6.5; // X-spacing between building slots down the street.
+        var first = 5.5; // X-offset (past the mouth) of the first building.
+        var step = 7.5; // X-spacing between building slots down the street.
         var slots = Math.ceil(activities.length / 2);
         var streetLen = first + Math.max(1, slots) * step + 3;
         var mouthX = side * roadHalf;
@@ -2323,6 +2332,7 @@ define('format_mnemo/vr', [], function() {
                 vscreen.group.position.set(bx, 3.2, bz);
                 vscreen.group.lookAt(bx, 3.2, z);
                 self.scene.add(vscreen.group);
+                self.registerEditable(act, vscreen.group, bx, 3.2, bz);
                 return;
             }
             var built = self.makeStructure(act, style);
@@ -2333,9 +2343,15 @@ define('format_mnemo/vr', [], function() {
             // A textured ground patch (plaza) under the building, then record
             // its footprint so props avoid it.
             self.groundPatchAt(bx, bz);
-            self.recordFootprint(bx, bz, built.w, built.d);
+            // Record the footprint at the building's final placement (a stored
+            // transform may move/scale it), so the later-scattered props avoid
+            // where it actually stands rather than its default slot.
+            var tf = act.transform || {};
+            var ts = tf.scale > 0 ? tf.scale : 1;
+            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0), built.w * ts, built.d * ts);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
+            self.registerEditable(act, built.group, bx, 0, bz);
         });
     };
 
@@ -3547,6 +3563,191 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build the in-view object editor: a toggle button and a controls panel for
+     * scaling, moving and rotating the selected building or video screen. Only
+     * called for users who can edit the course (config.canedit).
+     */
+    Cyberspace.prototype.buildEditor = function() {
+        var self = this;
+        var s = this.config.strings || {};
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__edit-btn';
+        btn.textContent = s.edit || 'Edit layout';
+        this.root.appendChild(btn);
+        this.editButton = btn;
+
+        var field = function(key, label, min, max, step) {
+            return '<label class="format-mnemo__editor-row">' +
+                '<span>' + label + '</span>' +
+                '<input type="range" data-mnemo-ed="' + key + '" min="' + min +
+                '" max="' + max + '" step="' + step + '">' +
+                '<output data-mnemo-out="' + key + '"></output>' +
+                '</label>';
+        };
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__editor';
+        panel.hidden = true;
+        panel.innerHTML =
+            '<div class="format-mnemo__editor-title" data-mnemo-ed-name></div>' +
+            field('scale', s.editscale || 'Scale', 0.3, 4, 0.05) +
+            field('x', (s.editmove || 'Move') + ' X', -20, 20, 0.5) +
+            field('y', (s.editmove || 'Move') + ' Y', -10, 30, 0.5) +
+            field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5) +
+            field('rot', s.editrotate || 'Rotate', 0, 360, 1) +
+            '<div class="format-mnemo__editor-actions">' +
+            '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
+            '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
+            '<button type="button" data-mnemo-ed-act="close">' + (s.editclose || 'Close') + '</button>' +
+            '</div>' +
+            '<div class="format-mnemo__editor-status" data-mnemo-ed-status></div>';
+        this.root.appendChild(panel);
+        this.editorPanel = panel;
+
+        // Live-apply slider changes to the selected object.
+        var keys = ['scale', 'x', 'y', 'z', 'rot'];
+        keys.forEach(function(key) {
+            var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
+            input.addEventListener('input', function() {
+                if (!self.selected) {
+                    return;
+                }
+                self.selected.transform[key] = parseFloat(input.value);
+                self.applyTransform(self.selected);
+                self.syncEditorOutputs();
+            });
+        });
+
+        panel.querySelector('[data-mnemo-ed-act="save"]').addEventListener('click', function() {
+            self.saveTransform();
+        });
+        panel.querySelector('[data-mnemo-ed-act="reset"]').addEventListener('click', function() {
+            if (!self.selected) {
+                return;
+            }
+            self.selected.transform = {scale: 1, x: 0, y: 0, z: 0, rot: 0};
+            self.applyTransform(self.selected);
+            self.fillEditor(self.selected);
+        });
+        panel.querySelector('[data-mnemo-ed-act="close"]').addEventListener('click', function() {
+            self.deselectEditable();
+        });
+
+        btn.addEventListener('click', function() {
+            self.editMode = !self.editMode;
+            btn.classList.toggle('format-mnemo__edit-btn--on', self.editMode);
+            btn.textContent = self.editMode ? (s.editdone || 'Done editing') : (s.edit || 'Edit layout');
+            if (!self.editMode) {
+                self.deselectEditable();
+            }
+        });
+    };
+
+    /**
+     * Select an editable object: show the panel populated with its transform and
+     * draw a selection box around it.
+     *
+     * @param {Object} editable The editable record.
+     */
+    Cyberspace.prototype.selectEditable = function(editable) {
+        this.selected = editable;
+        if (this.selBox) {
+            this.scene.remove(this.selBox);
+        }
+        this.selBox = new this.THREE.BoxHelper(editable.group, this.palette.primary);
+        this.scene.add(this.selBox);
+        if (this.editorPanel) {
+            this.editorPanel.hidden = false;
+            this.fillEditor(editable);
+        }
+    };
+
+    /**
+     * Clear the current selection and hide the editor panel.
+     */
+    Cyberspace.prototype.deselectEditable = function() {
+        this.selected = null;
+        if (this.selBox) {
+            this.scene.remove(this.selBox);
+            this.selBox = null;
+        }
+        if (this.editorPanel) {
+            this.editorPanel.hidden = true;
+        }
+    };
+
+    /**
+     * Populate the editor sliders and title from an editable's transform.
+     *
+     * @param {Object} editable The editable record.
+     */
+    Cyberspace.prototype.fillEditor = function(editable) {
+        var panel = this.editorPanel;
+        panel.querySelector('[data-mnemo-ed-name]').textContent = editable.name || '';
+        var t = editable.transform;
+        var map = {scale: t.scale, x: t.x, y: t.y, z: t.z, rot: t.rot};
+        Object.keys(map).forEach(function(key) {
+            panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
+        });
+        panel.querySelector('[data-mnemo-ed-status]').textContent = '';
+        this.syncEditorOutputs();
+    };
+
+    /**
+     * Refresh the numeric readouts beside each slider from the sliders.
+     */
+    Cyberspace.prototype.syncEditorOutputs = function() {
+        var panel = this.editorPanel;
+        ['scale', 'x', 'y', 'z', 'rot'].forEach(function(key) {
+            var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
+            var out = panel.querySelector('[data-mnemo-out="' + key + '"]');
+            out.textContent = key === 'scale' ? parseFloat(input.value).toFixed(2) :
+                Math.round(parseFloat(input.value));
+        });
+    };
+
+    /**
+     * Persist the selected object's transform through the Moodle web service.
+     * Uses the AMD ajax module lazily so the render bundle keeps no hard
+     * dependency on it (and headless tests never touch the network).
+     */
+    Cyberspace.prototype.saveTransform = function() {
+        var editable = this.selected;
+        if (!editable || !window.require) {
+            return;
+        }
+        var s = this.config.strings || {};
+        var status = this.editorPanel.querySelector('[data-mnemo-ed-status]');
+        var saveBtn = this.editorPanel.querySelector('[data-mnemo-ed-act="save"]');
+        // Guard against a double-clicked Save firing two concurrent requests.
+        if (saveBtn.disabled) {
+            return;
+        }
+        saveBtn.disabled = true;
+        status.textContent = s.editsaving || 'Saving…';
+        var t = editable.transform;
+        var savedText = s.editsaved || 'Saved';
+        var errorText = s.editsaveerror || 'Could not save';
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([{
+                methodname: 'format_mnemo_set_transform',
+                args: {
+                    cmid: editable.cmid, scale: t.scale,
+                    offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
+                }
+            }])[0].then(function() {
+                status.textContent = savedText;
+                saveBtn.disabled = false;
+                return null;
+            }).catch(function() {
+                status.textContent = errorText;
+                saveBtn.disabled = false;
+            });
+        });
+    };
+
+    /**
      * Build the "Enter VR" button and wire up session lifecycle.
      */
     Cyberspace.prototype.buildVrButton = function() {
@@ -3666,10 +3867,113 @@ define('format_mnemo/vr', [], function() {
      * Handle a desktop click: open whatever node is under the pointer.
      */
     Cyberspace.prototype.clickOpen = function() {
+        // In edit mode a click selects an object to transform, rather than
+        // opening the activity.
+        if (this.editMode) {
+            this.pickEditable();
+            return;
+        }
         this.raycaster.setFromCamera(this.pointerNdc, this.camera);
         var hits = this.raycaster.intersectObjects(this.interactive, false);
         if (hits.length) {
             this.activate(hits[0].object);
+        }
+    };
+
+    /**
+     * Register an activity's object (a building or a video screen) as editable
+     * in the in-view editor, remembering its default placement so the stored
+     * transform is applied relative to it. The transform is applied immediately
+     * for every viewer; the editor UI (which mutates it) is built only for users
+     * who can edit the course.
+     *
+     * @param {Object} act The activity node (id is the course module id).
+     * @param {Object} group The Three.Group placed for the activity.
+     * @param {Number} baseX Default world x.
+     * @param {Number} baseY Default world y.
+     * @param {Number} baseZ Default world z.
+     */
+    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ) {
+        var t = act.transform || {};
+        var editable = {
+            cmid: act.id,
+            name: act.name,
+            group: group,
+            baseX: baseX, baseY: baseY, baseZ: baseZ,
+            baseRotY: group.rotation.y,
+            transform: {
+                scale: t.scale > 0 ? t.scale : 1,
+                x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
+            }
+        };
+        // Apply any stored transform so it renders from the first frame, for
+        // every viewer.
+        if (act.transform) {
+            this.applyTransform(editable);
+        }
+        // Only objects the viewer may edit at their own module context become
+        // selectable, matching the web service's permission check (a course-
+        // level grant that is prohibited on one activity must not offer it).
+        if (act.editable !== false) {
+            group.userData.mnemoEditable = editable;
+            this.editables.push(editable);
+        }
+    };
+
+    /**
+     * Apply an editable's transform (scale, position offset, rotation) to its
+     * group, relative to the default placement recorded at registration.
+     *
+     * @param {Object} editable The editable record.
+     */
+    Cyberspace.prototype.applyTransform = function(editable) {
+        var t = editable.transform;
+        var g = editable.group;
+        g.position.set(editable.baseX + t.x, editable.baseY + t.y, editable.baseZ + t.z);
+        g.rotation.y = editable.baseRotY + t.rot * Math.PI / 180;
+        g.scale.setScalar(t.scale);
+        if (this.selBox) {
+            this.selBox.update();
+        }
+        if (this.renderer && this.renderer.shadowMap) {
+            this.renderer.shadowMap.needsUpdate = true;
+        }
+    };
+
+    /**
+     * Find the editable record an intersected object belongs to, by walking up
+     * its ancestors to the registered group.
+     *
+     * @param {Object} obj The raycast-hit object.
+     * @return {Object|null} The editable record, or null.
+     */
+    Cyberspace.prototype.editableFor = function(obj) {
+        var node = obj;
+        while (node) {
+            if (node.userData && node.userData.mnemoEditable) {
+                return node.userData.mnemoEditable;
+            }
+            node = node.parent;
+        }
+        return null;
+    };
+
+    /**
+     * Raycast from the pointer and select the editable object under it.
+     */
+    Cyberspace.prototype.pickEditable = function() {
+        this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+        var groups = [];
+        for (var i = 0; i < this.editables.length; i++) {
+            groups.push(this.editables[i].group);
+        }
+        var hits = this.raycaster.intersectObjects(groups, true);
+        if (!hits.length) {
+            return;
+        }
+        var editable = this.editableFor(hits[0].object);
+        if (editable) {
+            this.selectEditable(editable);
         }
     };
 
