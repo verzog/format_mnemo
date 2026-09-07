@@ -139,16 +139,24 @@ define('format_mnemo/vr', [], function() {
         this.selBox = null; // BoxHelper around the current selection.
         this.selLabel = null; // Floating name label over the current selection.
         this.editMode = false;
-        // Snap-to-grid for the editor: when on, absolute positions snap to a
-        // 1-unit grid, rotations to 15 degrees and scale to 0.25 steps, so
-        // objects align consistently. Remembered per viewer (best-effort).
-        this.gridStep = 1;
+        // The grid the generated layout snaps to and the editor/placer use.
+        this.gridStep = config.gridsize > 0 ? config.gridsize : 2;
+        // Snap-to-grid for the editor: when on, absolute positions snap to the
+        // grid, rotations to 15 degrees and scale to 0.25 steps, so objects
+        // align consistently. Remembered per viewer (best-effort).
         this.snap = false;
         try {
             this.snap = window.localStorage.getItem('format_mnemo_snap') === '1';
         } catch (e) {
             this.snap = false;
         }
+        // In-view object placer: teacher-placed props, the loaded model
+        // templates to clone when placing, and the current placement state.
+        this.placedObjects = config.placedobjects || [];
+        this.propTemplates = {};
+        this.placeMode = false;
+        this.placeType = 'lamp';
+        this.groundGrid = null;
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
@@ -2098,7 +2106,11 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         var load = function(name, onReady) {
             self.loadProp(name).then(function(tpl) {
+                // Cache the template so the in-view placer can clone it, and
+                // build any teacher-placed props of this type.
+                self.propTemplates[name] = tpl;
                 onReady(tpl);
+                self.buildPlacedObjectsOfType(name, tpl);
                 return null;
             }).catch(function(e) {
                 if (window.console) {
@@ -2119,6 +2131,59 @@ define('format_mnemo/vr', [], function() {
         load('av', function(tpl) {
             self.spawnTraffic(tpl);
         });
+    };
+
+    /**
+     * The default resting height for a placed prop of a given type: props sit
+     * on the ground, but a placed vehicle hovers above its grid square like the
+     * flying traffic.
+     *
+     * @param {String} type The prop model name (lamp, barrier, kiosk, av).
+     * @return {Number} The world-y to place it at.
+     */
+    Cyberspace.prototype.placedBaseY = function(type) {
+        return type === 'av' ? 6 : 0;
+    };
+
+    /**
+     * A human label for a placed prop type, from the localised placer strings.
+     *
+     * @param {String} type The prop model name.
+     * @return {String} The label.
+     */
+    Cyberspace.prototype.propLabel = function(type) {
+        var s = this.config.strings || {};
+        var labels = {
+            lamp: s.placelamp || 'Street lamp',
+            barrier: s.placebarrier || 'Barrier',
+            kiosk: s.placekiosk || 'Kiosk',
+            av: s.placevehicle || 'Vehicle'
+        };
+        return labels[type] || type;
+    };
+
+    /**
+     * Build every teacher-placed prop of a given type from its template,
+     * registering each as an editable keyed placed:&lt;id&gt; so its transform
+     * and brightness persist and it can be selected, moved and deleted.
+     *
+     * @param {String} type The prop model name.
+     * @param {Object} tpl The loaded template group.
+     */
+    Cyberspace.prototype.buildPlacedObjectsOfType = function(type, tpl) {
+        var y = this.placedBaseY(type);
+        for (var i = 0; i < this.placedObjects.length; i++) {
+            var p = this.placedObjects[i];
+            if (p.type !== type) {
+                continue;
+            }
+            var m = tpl.clone();
+            m.position.set(p.x, y, p.z);
+            this.setShadow(m, true);
+            this.scene.add(m);
+            this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
+                m, p.x, y, p.z, type === 'lamp' || type === 'av');
+        }
     };
 
     /**
@@ -2166,18 +2231,20 @@ define('format_mnemo/vr', [], function() {
             for (var s = -1; s <= 1; s += 2) {
                 var objkey = kind + ':' + slot;
                 slot++;
+                var px = this.snapCoord(s * edge);
+                var pz = this.snapCoord(z);
                 // Skip a prop that would drop on a building footprint.
-                if (!this.footprintClear(s * edge, z, 0.8)) {
+                if (!this.footprintClear(px, pz, 0.8)) {
                     continue;
                 }
                 var m = tpl.clone();
-                m.position.set(s * edge, 0, z);
+                m.position.set(px, 0, pz);
                 if (s < 0 && kind === 'lamp') {
                     m.rotation.y = Math.PI; // Arm faces the road on both sides.
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
-                this.registerSceneEditable(objkey, label, m, s * edge, 0, z, true);
+                this.registerSceneEditable(objkey, label, m, px, 0, pz, true);
             }
         }
     };
@@ -2207,6 +2274,8 @@ define('format_mnemo/vr', [], function() {
             if (!placed) {
                 continue; // No clear spot near this mouth; skip the kiosk.
             }
+            kx = this.snapCoord(kx);
+            kz = this.snapCoord(kz);
             var m = tpl.clone();
             m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
@@ -2359,18 +2428,21 @@ define('format_mnemo/vr', [], function() {
 
         // Topic gate spanning the mouth, plus a tall vertical pylon at the corner.
         var wayColour = section.current ? 0xffffff : this.palette.primary;
-        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour, 'gate:' + section.number);
-        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour,
-            'pylon:' + section.number);
+        this.buildGate(section, this.snapCoord(mouthX + side * 1.2), this.snapCoord(z), side,
+            streetHalf, wayColour, 'gate:' + section.number);
+        this.buildPylon(section.name, this.snapCoord(mouthX + side * 0.6),
+            this.snapCoord(z - streetHalf - 0.8), wayColour, 'pylon:' + section.number);
 
         // Activities line both sides of the street, receding down it.
         activities.forEach(function(act, k) {
             var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
             var along = Math.floor(k / 2);
-            var bx = mouthX + side * (first + along * step);
             var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
             var depth = style.footprint[1];
-            var bz = z + zside * (streetHalf + depth / 2 + 0.4);
+            // Snap the default placement to the layout grid so buildings line
+            // up from the start (the editor and placer share this grid).
+            var bx = self.snapCoord(mouthX + side * (first + along * step));
+            var bz = self.snapCoord(z + zside * (streetHalf + depth / 2 + 0.4));
             // A video activity is a large screen instead of a building.
             if (act.video) {
                 var vscreen = self.makeVideoScreen(act);
@@ -3787,6 +3859,8 @@ define('format_mnemo/vr', [], function() {
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
             '<button type="button" data-mnemo-ed-act="close">' + (s.editclose || 'Close') + '</button>' +
             '</div>' +
+            '<button type="button" class="format-mnemo__editor-delete" data-mnemo-ed-act="delete">' +
+            (s.editdelete || 'Delete') + '</button>' +
             '<div class="format-mnemo__editor-status" data-mnemo-ed-status></div>';
         this.root.appendChild(panel);
         this.editorPanel = panel;
@@ -3854,15 +3928,138 @@ define('format_mnemo/vr', [], function() {
         panel.querySelector('[data-mnemo-ed-act="close"]').addEventListener('click', function() {
             self.deselectEditable();
         });
+        panel.querySelector('[data-mnemo-ed-act="delete"]').addEventListener('click', function() {
+            self.deletePlaced();
+        });
 
         btn.addEventListener('click', function() {
             self.editMode = !self.editMode;
             btn.classList.toggle('format-mnemo__edit-btn--on', self.editMode);
             btn.textContent = self.editMode ? (s.editdone || 'Done editing') : (s.edit || 'Edit layout');
-            if (!self.editMode) {
+            if (self.editMode) {
+                self.setPlaceMode(false); // Edit and place modes are exclusive.
+            } else {
                 self.deselectEditable();
             }
         });
+
+        this.buildPlacer();
+    };
+
+    /**
+     * Build the in-view object placer: a "Place objects" button, a palette of
+     * prop types, and the ground grid shown while placing. Clicking a grid
+     * square in place mode drops the selected prop there.
+     */
+    Cyberspace.prototype.buildPlacer = function() {
+        var self = this;
+        var s = this.config.strings || {};
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__place-btn';
+        btn.textContent = s.place || 'Place objects';
+        this.root.appendChild(btn);
+        this.placeButton = btn;
+
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__placer';
+        panel.hidden = true;
+        var types = [
+            {key: 'lamp', label: s.placelamp || 'Street lamp'},
+            {key: 'barrier', label: s.placebarrier || 'Barrier'},
+            {key: 'kiosk', label: s.placekiosk || 'Kiosk'},
+            {key: 'av', label: s.placevehicle || 'Vehicle'}
+        ];
+        var html = '<div class="format-mnemo__placer-types">';
+        types.forEach(function(t) {
+            html += '<button type="button" class="format-mnemo__placer-type" data-mnemo-place="' +
+                t.key + '">' + t.label + '</button>';
+        });
+        html += '</div><div class="format-mnemo__placer-hint">' +
+            (s.placehint || 'Pick an object, then click a grid square to place it.') +
+            '</div><div class="format-mnemo__editor-status" data-mnemo-place-status></div>';
+        panel.innerHTML = html;
+        this.root.appendChild(panel);
+        this.placerPanel = panel;
+
+        var typeButtons = panel.querySelectorAll('[data-mnemo-place]');
+        var markActive = function() {
+            for (var i = 0; i < typeButtons.length; i++) {
+                typeButtons[i].classList.toggle(
+                    'format-mnemo__placer-type--on',
+                    typeButtons[i].getAttribute('data-mnemo-place') === self.placeType
+                );
+            }
+        };
+        for (var i = 0; i < typeButtons.length; i++) {
+            typeButtons[i].addEventListener('click', function() {
+                self.placeType = this.getAttribute('data-mnemo-place');
+                markActive();
+            });
+        }
+        markActive();
+
+        btn.addEventListener('click', function() {
+            self.setPlaceMode(!self.placeMode);
+        });
+    };
+
+    /**
+     * Turn placement mode on or off, toggling the palette, the ground grid and
+     * the button label. Entering placement leaves edit mode (they are
+     * mutually exclusive and share the click handler).
+     *
+     * @param {Boolean} on Whether placement mode should be on.
+     */
+    Cyberspace.prototype.setPlaceMode = function(on) {
+        var s = this.config.strings || {};
+        this.placeMode = !!on;
+        if (this.placeButton) {
+            this.placeButton.classList.toggle('format-mnemo__place-btn--on', this.placeMode);
+            this.placeButton.textContent = this.placeMode ?
+                (s.placedone || 'Done placing') : (s.place || 'Place objects');
+        }
+        if (this.placerPanel) {
+            this.placerPanel.hidden = !this.placeMode;
+        }
+        this.showGroundGrid(this.placeMode);
+        if (this.placeMode && this.editMode) {
+            // Leave edit mode without recursing back into this method.
+            this.editMode = false;
+            if (this.editButton) {
+                this.editButton.classList.remove('format-mnemo__edit-btn--on');
+                this.editButton.textContent = s.edit || 'Edit layout';
+            }
+            this.deselectEditable();
+        }
+    };
+
+    /**
+     * Show or hide a grid overlay on the ground, so a teacher can see the cells
+     * placement snaps to. Built once, lazily.
+     *
+     * @param {Boolean} on Whether the grid should be visible.
+     */
+    Cyberspace.prototype.showGroundGrid = function(on) {
+        var THREE = this.THREE;
+        if (!this.groundGrid && on) {
+            var g = this.gridStep > 0 ? this.gridStep : 2;
+            var span = 240; // Covers the walkable city with room to spare.
+            var divisions = Math.round(span / g);
+            var grid = new THREE.GridHelper(span, divisions, this.palette.primary, this.palette.primary);
+            grid.position.y = 0.06; // Just above the road/plaza surfaces.
+            if (grid.material) {
+                grid.material.transparent = true;
+                grid.material.opacity = 0.35;
+                grid.material.depthWrite = false;
+            }
+            this.scene.add(grid);
+            this.groundGrid = grid;
+        }
+        if (this.groundGrid) {
+            this.groundGrid.visible = !!on;
+        }
     };
 
     /**
@@ -3997,6 +4194,9 @@ define('format_mnemo/vr', [], function() {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
         });
+        // Only teacher-placed props can be deleted from the editor.
+        var placed = !!(editable.objkey && /^placed:/.test(editable.objkey));
+        panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !placed;
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.syncEditorOutputs();
     };
@@ -4062,6 +4262,142 @@ define('format_mnemo/vr', [], function() {
                 saveBtn.disabled = false;
             });
         });
+    };
+
+    /**
+     * Place the currently-selected prop type at the grid square under the
+     * pointer: raycast the ground plane, snap to the grid, persist through the
+     * web service, then build the prop so it appears immediately.
+     */
+    Cyberspace.prototype.placeAtPointer = function() {
+        var self = this;
+        var THREE = this.THREE;
+        var s = this.config.strings || {};
+        var type = this.placeType;
+        var status = this.placerPanel ?
+            this.placerPanel.querySelector('[data-mnemo-place-status]') : null;
+        if (!this.propTemplates[type] || !window.require) {
+            // The model has not loaded yet (or no ajax available); nothing to
+            // place. Leave a hint rather than failing silently.
+            if (status) {
+                status.textContent = s.placehint || '';
+            }
+            return;
+        }
+        // Find where the pointer ray meets the ground (y = 0).
+        this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+        var point = new THREE.Vector3();
+        if (!this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), point)) {
+            return;
+        }
+        var x = this.snapCoord(point.x);
+        var z = this.snapCoord(point.z);
+        if (status) {
+            status.textContent = s.editsaving || 'Saving…';
+        }
+        var request = {
+            methodname: 'format_mnemo_add_placed_object',
+            args: {courseid: this.config.courseid, type: type, x: x, z: z}
+        };
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([request])[0].then(function(res) {
+                self.placeProp(res.type, res.id, res.x, res.z);
+                if (status) {
+                    status.textContent = '';
+                }
+                return null;
+            }).catch(function() {
+                if (status) {
+                    status.textContent = s.editsaveerror || 'Could not save';
+                }
+            });
+        });
+    };
+
+    /**
+     * Build one placed prop from its template and register it as an editable
+     * keyed placed:&lt;id&gt;, so it can immediately be selected, moved and
+     * deleted, and persists for every viewer.
+     *
+     * @param {String} type The prop model name.
+     * @param {Number} id The placed-object id from the web service.
+     * @param {Number} x Grid-snapped world-x.
+     * @param {Number} z Grid-snapped world-z.
+     */
+    Cyberspace.prototype.placeProp = function(type, id, x, z) {
+        var tpl = this.propTemplates[type];
+        if (!tpl) {
+            return;
+        }
+        var y = this.placedBaseY(type);
+        var m = tpl.clone();
+        m.position.set(x, y, z);
+        this.setShadow(m, true);
+        this.scene.add(m);
+        this.placedObjects.push({id: id, type: type, x: x, z: z});
+        this.registerSceneEditable('placed:' + id, this.propLabel(type),
+            m, x, y, z, type === 'lamp' || type === 'av');
+    };
+
+    /**
+     * Delete the selected teacher-placed prop: remove it through the web
+     * service, then take it out of the scene. A no-op for anything that is not
+     * a placed prop (its key does not match placed:&lt;id&gt;).
+     */
+    Cyberspace.prototype.deletePlaced = function() {
+        var self = this;
+        var editable = this.selected;
+        if (!editable || !editable.objkey) {
+            return;
+        }
+        var match = /^placed:([0-9]+)$/.exec(editable.objkey);
+        if (!match) {
+            return;
+        }
+        var id = parseInt(match[1], 10);
+        if (!window.require) {
+            this.removePlacedFromScene(editable, id);
+            return;
+        }
+        var s = this.config.strings || {};
+        var status = this.editorPanel.querySelector('[data-mnemo-ed-status]');
+        status.textContent = s.editsaving || 'Saving…';
+        var request = {
+            methodname: 'format_mnemo_remove_placed_object',
+            args: {courseid: this.config.courseid, id: id}
+        };
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([request])[0].then(function() {
+                self.removePlacedFromScene(editable, id);
+                return null;
+            }).catch(function() {
+                status.textContent = s.editsaveerror || 'Could not save';
+            });
+        });
+    };
+
+    /**
+     * Remove a placed prop from the scene, the editables list and the local
+     * placed-object list, and clear the selection.
+     *
+     * @param {Object} editable The placed prop's editable record.
+     * @param {Number} id The placed-object id.
+     */
+    Cyberspace.prototype.removePlacedFromScene = function(editable, id) {
+        if (editable.group) {
+            this.scene.remove(editable.group);
+        }
+        var idx = this.editables.indexOf(editable);
+        if (idx >= 0) {
+            this.editables.splice(idx, 1);
+        }
+        for (var i = 0; i < this.placedObjects.length; i++) {
+            if (this.placedObjects[i].id === id) {
+                this.placedObjects.splice(i, 1);
+                break;
+            }
+        }
+        this.deselectEditable();
     };
 
     /**
@@ -4184,6 +4520,11 @@ define('format_mnemo/vr', [], function() {
      * Handle a desktop click: open whatever node is under the pointer.
      */
     Cyberspace.prototype.clickOpen = function() {
+        // In place mode a click drops the selected prop on the grid.
+        if (this.placeMode) {
+            this.placeAtPointer();
+            return;
+        }
         // In edit mode a click selects an object to transform, rather than
         // opening the activity.
         if (this.editMode) {
@@ -4284,6 +4625,18 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} editable The selected editable (for its base placement).
      * @return {Number} The snapped value.
      */
+    /**
+     * Snap a single world coordinate to the layout grid. Used to place the
+     * generated city (buildings, props, gates, pylons) on a consistent lattice.
+     *
+     * @param {Number} v A world coordinate.
+     * @return {Number} The nearest grid multiple.
+     */
+    Cyberspace.prototype.snapCoord = function(v) {
+        var g = this.gridStep > 0 ? this.gridStep : 2;
+        return Math.round(v / g) * g;
+    };
+
     Cyberspace.prototype.snapValue = function(key, raw, editable) {
         if (!this.snap || isNaN(raw)) {
             return raw;

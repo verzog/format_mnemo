@@ -234,6 +234,28 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The teacher-placed decorative props for a course, as a compact list the
+     * client rebuilds and (for editors) makes selectable/removable.
+     *
+     * @param int $courseid The course id.
+     * @return array<int, array{id: int, type: string, x: float, z: float}>
+     */
+    protected function placed_objects(int $courseid): array {
+        global $DB;
+        $rows = $DB->get_records('format_mnemo_placedobj', ['courseid' => $courseid], 'id ASC');
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'id' => (int)$row->id,
+                'type' => $row->type,
+                'x' => (float)$row->basex,
+                'z' => (float)$row->basez,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -424,6 +446,11 @@ class scene implements renderable, templatable {
             // Per-course in-view transforms for non-activity scene objects
             // (props, gates, pylons), keyed by their stable slot key.
             'sceneobjects' => $this->scene_objects((int)$course->id),
+            // Teacher-placed decorative props (in-view object placer), rebuilt
+            // for every viewer and made selectable/removable for editors.
+            'placedobjects' => $this->placed_objects((int)$course->id),
+            // The grid the generated layout snaps to and the placer/editor use.
+            'gridsize' => 2,
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -476,6 +503,14 @@ class scene implements renderable, templatable {
                 'editediting' => get_string('editediting', 'format_mnemo'),
                 'edittexsize' => get_string('edittexsize', 'format_mnemo'),
                 'editsnap' => get_string('editsnap', 'format_mnemo'),
+                'editdelete' => get_string('editdelete', 'format_mnemo'),
+                'place' => get_string('place', 'format_mnemo'),
+                'placedone' => get_string('placedone', 'format_mnemo'),
+                'placehint' => get_string('placehint', 'format_mnemo'),
+                'placelamp' => get_string('placelamp', 'format_mnemo'),
+                'placebarrier' => get_string('placebarrier', 'format_mnemo'),
+                'placekiosk' => get_string('placekiosk', 'format_mnemo'),
+                'placevehicle' => get_string('placevehicle', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editscale' => get_string('editscale', 'format_mnemo'),

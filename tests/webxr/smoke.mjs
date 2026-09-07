@@ -994,6 +994,100 @@ const scenarios = [
                 Math.abs(bright - 1.37) < 1e-6;
             return {pass, detail: `absX=${absX} rot=${rot} scale=${scale} off=${passthru}`};
         }
+    },
+    {
+        name: 'placer: snapCoord rounds a coordinate to the layout grid',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {gridStep: 2, snapCoord: CS.prototype.snapCoord};
+            const a = self.snapCoord(3.2);   // -> 4
+            const b = self.snapCoord(7);     // 3.5 -> 4 -> 8
+            const c = self.snapCoord(-3.2);  // -1.6 -> -2 -> -4
+            const pass = a === 4 && b === 8 && c === -4;
+            return {pass, detail: `a=${a} b=${b} c=${c}`};
+        }
+    },
+    {
+        name: 'placer: placeProp builds, registers and records a placed prop',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
+            const added = [];
+            const self = {
+                THREE, scene: {add: (o) => added.push(o), remove: () => {}},
+                editables: [], sceneObjects: {}, placedObjects: [],
+                config: {canedit: true, strings: {}}, propTemplates: {lamp: tpl},
+                selBox: null, renderer: null,
+                placedBaseY: CS.prototype.placedBaseY,
+                propLabel: CS.prototype.propLabel,
+                setShadow: CS.prototype.setShadow,
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform,
+                applyBrightness: CS.prototype.applyBrightness,
+                placeProp: CS.prototype.placeProp
+            };
+            self.placeProp('lamp', 7, 4, -6);
+            const ed = self.editables[0];
+            const g = ed && ed.group;
+            const pass = self.placedObjects.length === 1 && self.placedObjects[0].id === 7 &&
+                ed && ed.objkey === 'placed:7' && ed.emits === true &&
+                added.indexOf(g) !== -1 &&
+                Math.abs(g.position.x - 4) < 1e-6 && Math.abs(g.position.z + 6) < 1e-6;
+            return {pass, detail: `objkey=${ed && ed.objkey} placed=${self.placedObjects.length}`};
+        }
+    },
+    {
+        name: 'placer: buildPlacedObjectsOfType builds only the matching type',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
+            const self = {
+                THREE, scene: {add: () => {}, remove: () => {}},
+                editables: [], sceneObjects: {}, config: {canedit: true, strings: {}},
+                placedObjects: [
+                    {id: 3, type: 'kiosk', x: 2, z: 2},
+                    {id: 4, type: 'lamp', x: 0, z: 0}
+                ],
+                placedBaseY: CS.prototype.placedBaseY,
+                propLabel: CS.prototype.propLabel,
+                setShadow: CS.prototype.setShadow,
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform,
+                applyBrightness: CS.prototype.applyBrightness,
+                buildPlacedObjectsOfType: CS.prototype.buildPlacedObjectsOfType
+            };
+            self.buildPlacedObjectsOfType('kiosk', tpl);
+            const pass = self.editables.length === 1 && self.editables[0].objkey === 'placed:3' &&
+                self.editables[0].emits === false; // kiosk does not emit light
+            return {pass, detail: `count=${self.editables.length} key=${self.editables[0] && self.editables[0].objkey}`};
+        }
+    },
+    {
+        name: 'placer: removePlacedFromScene detaches, delists and clears selection',
+        fn: () => {
+            const THREE = window.__mnemoModule._Cyberspace ? window.__mnemoTest.THREE : null;
+            const CS = window.__mnemoModule._Cyberspace;
+            const group = new THREE.Group();
+            const ed = {objkey: 'placed:9', group: group};
+            const removed = [];
+            const self = {
+                scene: {add: () => {}, remove: (o) => removed.push(o)},
+                editables: [ed], placedObjects: [{id: 9, type: 'barrier', x: 0, z: 0}],
+                selected: ed, selBox: null, selLabel: null, editorPanel: null,
+                THREE,
+                deselectEditable: CS.prototype.deselectEditable,
+                showSelectionLabel: CS.prototype.showSelectionLabel,
+                removePlacedFromScene: CS.prototype.removePlacedFromScene
+            };
+            self.removePlacedFromScene(ed, 9);
+            const pass = removed[0] === group && self.editables.length === 0 &&
+                self.placedObjects.length === 0 && self.selected === null;
+            return {pass, detail: `removed=${removed.length} eds=${self.editables.length} sel=${self.selected}`};
+        }
     }
 ];
 

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="course/format/mnemo/db" VERSION="20260908" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
+<XMLDB PATH="course/format/mnemo/db" VERSION="20260909" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
 >
@@ -41,6 +41,22 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="courseid-objkey" UNIQUE="true" FIELDS="courseid, objkey"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="format_mnemo_placedobj" COMMENT="Teacher-placed decorative props for the Mnemo cyberspace scene, per course.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course the placed prop belongs to."/>
+        <FIELD NAME="type" TYPE="char" LENGTH="32" NOTNULL="true" SEQUENCE="false" COMMENT="The prop model name: lamp, barrier, kiosk or av."/>
+        <FIELD NAME="basex" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Grid-snapped world-x where the prop was placed."/>
+        <FIELD NAME="basez" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Grid-snapped world-z where the prop was placed."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the prop was placed."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="courseid" UNIQUE="false" FIELDS="courseid"/>
       </INDEXES>
     </TABLE>
   </TABLES>
