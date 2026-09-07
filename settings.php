@@ -64,6 +64,21 @@ if ($ADMIN->fulltree) {
         ]
     ));
 
+    // Default street-lighting density for courses that inherit it (each course
+    // can override this in its settings).
+    $settings->add(new admin_setting_configselect(
+        'format_mnemo/defaultlighting',
+        get_string('setting_defaultlighting', 'format_mnemo'),
+        get_string('setting_defaultlighting_desc', 'format_mnemo'),
+        'normal',
+        [
+            'off' => get_string('lighting_off', 'format_mnemo'),
+            'sparse' => get_string('lighting_sparse', 'format_mnemo'),
+            'normal' => get_string('lighting_normal', 'format_mnemo'),
+            'dense' => get_string('lighting_dense', 'format_mnemo'),
+        ]
+    ));
+
     // Base URL of an external glTF (.glb) prop asset pack. Left blank, the
     // plugin loads the original props it bundles (models/). Point this at a
     // directory of .glb files (av, lamp, kiosk, barrier, ...) to swap in your

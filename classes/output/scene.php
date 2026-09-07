@@ -471,6 +471,12 @@ class scene implements renderable, templatable {
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),
+            // Street-lamp layout: the resolved spacing (world units between
+            // lamps, 0 = no auto lamps) and whether to light the side-street
+            // corners. Resolved from the per-course option, falling back to the
+            // site-wide default when the course inherits.
+            'lightingspacing' => $this->lighting_spacing($options['mnemolighting'] ?? 'inherit'),
+            'lightingcorners' => $this->lighting_spacing($options['mnemolighting'] ?? 'inherit') > 0,
             // Hour of day (0-24 float) in the site's timezone, so the client can
             // run a day/night cycle that matches the Moodle site's clock.
             'hour' => $this->site_hour(),
@@ -558,6 +564,22 @@ class scene implements renderable, templatable {
         $tz = \core_date::get_server_timezone_object();
         $now = new \DateTime('now', $tz);
         return (int)$now->format('G') + ((int)$now->format('i')) / 60.0;
+    }
+
+    /**
+     * Resolve a street-lighting preset to the world-unit spacing between street
+     * lamps (0 means no automatic lamps). 'inherit' (the per-course default)
+     * falls back to the site-wide default, itself defaulting to 'normal'.
+     *
+     * @param string $value The per-course lighting option.
+     * @return int Spacing in world units, or 0 for off.
+     */
+    protected function lighting_spacing(string $value): int {
+        if ($value === 'inherit' || $value === '') {
+            $value = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
+        }
+        $presets = ['off' => 0, 'sparse' => 32, 'normal' => 20, 'dense' => 12];
+        return $presets[$value] ?? $presets['normal'];
     }
 
     /**

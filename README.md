@@ -111,8 +111,9 @@ off).
   slider. **Save** persists the change so it renders that way for every learner.
   Activity buildings and video screens save per-activity; decorative props
   (kiosks, lamps, barriers) and the topic gates and pylons save per-course by a
-  layout slot (so adding or removing activities later can shift which item a
-  saved edit lands on). Clicking a **road, ground or sidewalk surface** selects
+  layout slot (so adding or removing activities later — or, for street lamps,
+  changing the street-lighting density — can shift which item a saved edit lands
+  on). Clicking a **road, ground or sidewalk surface** selects
   it and offers a **texture size** control that retiles every strip or plaza of
   that type together, saved per course. A **Snap to grid** toggle aligns edits
   to the grid the city is laid out on, and the alignment grid is shown over the
@@ -190,8 +191,8 @@ Alternatively install the ZIP via
 
 1. In a course, open **Settings → Course format** and choose
    **Mnemo (VR cyberspace)**.
-2. Pick the **Environment** and **Neon palette**. Optionally add a **topic
-   image** in each section's settings.
+2. Pick the **Environment**, **Neon palette** and **Street lighting**.
+   Optionally add a **topic image** in each section's settings.
 3. With editing **on**, add sections and activities as usual (standard 2D UI).
 4. Turn editing **off** to fly through the course. Click **Enter VR** to jack in
    with a headset.
@@ -212,6 +213,11 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
   Three.js from a shared or newer hosted copy.
 - **Default environment** / **Default neon palette** — the defaults applied to
   newly created courses (teachers can override per course).
+- **Default street lighting** — the density of the automatic street lamps that
+  line the avenue and side streets at even spacing (with a lamp at each
+  side-street corner): Off, Sparse, Normal or Dense. Each course can override it
+  (or keep **Site default**), so changing this reaches every course that has not
+  set its own. Turning it off leaves teachers free to place their own lamps.
 - **Prop asset pack URL** — a URL of a directory of glTF (`.glb`) prop models to
   use instead of the bundled props. **Leave blank** to use the uploaded pack (if
   any) or the plugin's own models. If set, it takes precedence over an upload.

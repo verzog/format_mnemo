@@ -136,6 +136,15 @@ define('format_mnemo/vr', [], function() {
         this.editMode = false;
         // The grid the generated layout snaps to and the editor/placer use.
         this.gridStep = config.gridsize > 0 ? config.gridsize : 2;
+        // Street lighting: the resolved spacing (world units between street
+        // lamps, 0 = no auto lamps) and whether to add a lamp at each side-street
+        // corner. Resolved server-side from the site default and the per-course
+        // override (see scene.php). Drives the uniform lamp layout.
+        this.lampSpacing = config.lightingspacing > 0 ? config.lightingspacing : 0;
+        this.lampCorners = !!config.lightingcorners;
+        // World positions computed for the street lamps (avenue + side streets +
+        // corners); filled in buildCity and instantiated when the lamp model loads.
+        this.lampSlots = [];
         // Snap-to-grid for the editor: when on, absolute positions snap to the
         // grid, rotations to 15 degrees and scale to 0.25 steps, so objects
         // align consistently. Remembered per viewer (best-effort).
@@ -2158,7 +2167,7 @@ define('format_mnemo/vr', [], function() {
         };
 
         load('lamp', function(tpl) {
-            self.scatterStreetProps(tpl, 'lamp');
+            self.placeLampSlots(tpl);
         });
         load('barrier', function(tpl) {
             self.scatterStreetProps(tpl, 'barrier');
@@ -2320,6 +2329,88 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Work out where the street lamps stand: evenly spaced down both kerbs of
+     * the avenue and of every side street, plus a lamp at each side-street
+     * corner (when corners are enabled). Positions are grid-snapped and stored
+     * as slots; placeLampSlots() instantiates them once the lamp model loads.
+     * A spacing of 0 (lighting off) clears the slots. Derived from this.roads,
+     * so it must run after every street has been built.
+     */
+    Cyberspace.prototype.computeLampSlots = function() {
+        this.lampSlots = [];
+        var spacing = this.lampSpacing;
+        if (!(spacing > 0) || !this.roads.length) {
+            return;
+        }
+        var roadHalf = this.roadHalf || 5.5;
+        var avenue = this.roads[0];
+        // Avenue: a lamp on each kerb, stepping down z. Left kerb (-x) turns to
+        // face the road; the right kerb keeps the model's default facing.
+        for (var z = avenue.zMax - 4; z >= avenue.zMin + 4; z -= spacing) {
+            var az = this.snapCoord(z);
+            this.lampSlots.push({x: -(roadHalf + 0.6), z: az, rotY: Math.PI});
+            this.lampSlots.push({x: roadHalf + 0.6, z: az, rotY: 0});
+        }
+        // Each side street: a lamp on each kerb stepping along x, plus the two
+        // mouth corners when enabled. r.zMin/zMax bound the street width; the
+        // mouth is the kerb-side end (nearest x=0), the far end is the other.
+        for (var i = 1; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            var zc = (r.zMin + r.zMax) / 2;
+            var streetHalf = (r.zMax - r.zMin) / 2;
+            var mouthX = Math.abs(r.xMin) < Math.abs(r.xMax) ? r.xMin : r.xMax;
+            var endX = mouthX === r.xMin ? r.xMax : r.xMin;
+            var side = endX >= mouthX ? 1 : -1;
+            var zNear = this.snapCoord(zc - streetHalf - 0.6);
+            var zFar = this.snapCoord(zc + streetHalf + 0.6);
+            if (this.lampCorners) {
+                var cornerX = this.snapCoord(mouthX + side * 0.6);
+                this.lampSlots.push({x: cornerX, z: zNear, rotY: -Math.PI / 2});
+                this.lampSlots.push({x: cornerX, z: zFar, rotY: Math.PI / 2});
+            }
+            for (var x = mouthX + side * spacing;
+                side > 0 ? x <= endX : x >= endX; x += side * spacing) {
+                var sx = this.snapCoord(x);
+                this.lampSlots.push({x: sx, z: zNear, rotY: -Math.PI / 2});
+                this.lampSlots.push({x: sx, z: zFar, rotY: Math.PI / 2});
+            }
+        }
+    };
+
+    /**
+     * Instantiate the street lamps from the slots computed by computeLampSlots:
+     * clone the model at each slot (skipping any that would drop on a building),
+     * attach its light, and register it as an editable keyed lamp:&lt;slot&gt;.
+     * The slot index is stable across viewers for a given layout and lighting
+     * setting; changing the lighting spacing renumbers the slots (documented).
+     *
+     * @param {Object} tpl The lamp model template group.
+     */
+    Cyberspace.prototype.placeLampSlots = function(tpl) {
+        var label = (this.config.strings && this.config.strings.placelamp) || 'Street lamp';
+        for (var i = 0; i < this.lampSlots.length; i++) {
+            var slot = this.lampSlots[i];
+            var objkey = 'lamp:' + i;
+            var stored = this.sceneObjects[objkey];
+            var px = this.snapBase(slot.x, stored);
+            var pz = this.snapBase(slot.z, stored);
+            // Skip a lamp that would stand on a building footprint (only when it
+            // has no stored transform, so a teacher-moved lamp is never dropped).
+            if (!stored && !this.footprintClear(px, pz, 0.8)) {
+                continue;
+            }
+            var m = tpl.clone();
+            m.position.set(px, 0, pz);
+            m.rotation.y = slot.rotY;
+            this.addLampLight(m);
+            this.setShadow(m, true);
+            this.scene.add(m);
+            this.addPickProxy(m);
+            this.registerSceneEditable(objkey, label, m, px, 0, pz, true);
+        }
+    };
+
+    /**
      * Drop a kiosk near the mouth of each side street.
      *
      * @param {Object} tpl The kiosk template group.
@@ -2436,9 +2527,20 @@ define('format_mnemo/vr', [], function() {
         this.player.position.set(0, 0, 12);
 
         var roadHalf = 5.5;
+        this.roadHalf = roadHalf;
         var spacing = 26; // Distance between side-street mouths down the avenue.
         var startZ = -20;
         var endZ = startZ - Math.max(1, sections.length) * spacing - 10;
+
+        // Every side street is built to one uniform length (sized to the topic
+        // with the most activities) so the city reads as a regular grid rather
+        // than a ragged mix of long and short branches.
+        var slotStep = 7.5; // X-spacing between building slots (see buildSideStreet).
+        var maxSlots = 1;
+        sections.forEach(function(section) {
+            maxSlots = Math.max(maxSlots, Math.ceil((section.activities || []).length / 2));
+        });
+        var uniformStreetLen = 5.5 + maxSlots * slotStep + 3;
 
         // Road corridors for movement: the avenue, plus each side street (filled
         // in by buildSideStreet). On foot the player is kept within these; only
@@ -2490,8 +2592,13 @@ define('format_mnemo/vr', [], function() {
         sections.forEach(function(section, i) {
             var z = startZ - i * spacing;
             var side = (i % 2 === 0) ? -1 : 1;
-            self.buildSideStreet(section, z, side, roadHalf);
+            self.buildSideStreet(section, z, side, roadHalf, uniformStreetLen);
         });
+
+        // With the streets and their footprints known, work out where the street
+        // lamps go (even spacing along the avenue and each side street, plus the
+        // corners). The lamps themselves are instantiated when the model loads.
+        this.computeLampSlots();
     };
 
     /**
@@ -2501,15 +2608,19 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} z The avenue z at which this street branches.
      * @param {Number} side -1 for the left of the avenue, +1 for the right.
      * @param {Number} roadHalf Half-width of the main avenue.
+     * @param {Number} streetLen Uniform side-street length (shared by every
+     *     street so the layout is regular); falls back to a per-street fit.
      */
-    Cyberspace.prototype.buildSideStreet = function(section, z, side, roadHalf) {
+    Cyberspace.prototype.buildSideStreet = function(section, z, side, roadHalf, streetLen) {
         var self = this;
         var activities = section.activities || [];
         var streetHalf = 4.5; // Half-width of the side street (along z).
         var first = 5.5; // X-offset (past the mouth) of the first building.
         var step = 7.5; // X-spacing between building slots down the street.
         var slots = Math.ceil(activities.length / 2);
-        var streetLen = first + Math.max(1, slots) * step + 3;
+        if (!(streetLen > 0)) {
+            streetLen = first + Math.max(1, slots) * step + 3;
+        }
         var mouthX = side * roadHalf;
         var midX = mouthX + side * streetLen / 2;
 

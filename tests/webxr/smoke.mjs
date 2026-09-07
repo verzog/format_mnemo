@@ -1405,6 +1405,71 @@ const scenarios = [
                 hit;
             return {pass, detail: `proxy=${!!proxy} h=${proxy && proxy.geometry.parameters.height} hit=${hit}`};
         }
+    },
+    {
+        name: 'lighting: computeLampSlots spaces lamps on avenue, streets and corners',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const base = {
+                roadHalf: 5.5, gridStep: 2,
+                snapCoord: CS.prototype.snapCoord,
+                computeLampSlots: CS.prototype.computeLampSlots
+            };
+            // Avenue (roads[0]) plus one side street branching right at z=-40.
+            const roads = [
+                {xMin: -7.9, xMax: 7.9, zMin: -60, zMax: 12},
+                {xMin: 5.5, xMax: 25.5, zMin: -44.5, zMax: -35.5, section: 0}
+            ];
+            const on = Object.assign({}, base, {lampSpacing: 20, lampCorners: true, roads});
+            on.computeLampSlots();
+            const hasAvenue = on.lampSlots.some((s) => Math.abs(s.x + 6.1) < 1e-6) &&
+                on.lampSlots.some((s) => Math.abs(s.x - 6.1) < 1e-6);
+            const hasStreet = on.lampSlots.some((s) => s.x > 6 && Math.abs(s.rotY) === Math.PI / 2);
+            // Two corner lamps at the mouth (x snapped near 5.5+0.6).
+            const corners = on.lampSlots.filter((s) => Math.abs(s.x - 6) < 1.0 &&
+                (Math.abs(s.z + 34) < 4 || Math.abs(s.z + 46) < 4));
+            // Off clears the slots.
+            const off = Object.assign({}, base, {lampSpacing: 0, lampCorners: true, roads});
+            off.computeLampSlots();
+            const pass = hasAvenue && hasStreet && corners.length >= 2 && off.lampSlots.length === 0;
+            return {pass, detail: `n=${on.lampSlots.length} avenue=${hasAvenue} street=${hasStreet} corners=${corners.length} off=${off.lampSlots.length}`};
+        }
+    },
+    {
+        name: 'lighting: placeLampSlots builds, lights and registers lamps, skipping footprints',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshStandardMaterial()));
+            const added = [];
+            const self = {
+                THREE, config: {canedit: true, strings: {placelamp: 'Street lamp'}},
+                sceneObjects: {}, editables: [], lampLights: 0, palette: {primary: 0x00e5ff},
+                scene: {add: (o) => added.push(o)},
+                lampSlots: [
+                    {x: 6, z: 4, rotY: 0},
+                    {x: 6, z: -6, rotY: Math.PI}, // This one sits on a footprint.
+                    {x: -6, z: 4, rotY: Math.PI}
+                ],
+                footprints: [{xMin: 4, xMax: 8, zMin: -8, zMax: -4}],
+                snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord,
+                gridStep: 2, footprintClear: CS.prototype.footprintClear,
+                addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
+                addPickProxy: CS.prototype.addPickProxy,
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform,
+                applyBrightness: CS.prototype.applyBrightness,
+                placeLampSlots: CS.prototype.placeLampSlots
+            };
+            self.placeLampSlots(tpl);
+            const keys = self.editables.map((e) => e.objkey);
+            // The middle slot (on the footprint) is skipped; the other two build.
+            const pass = self.editables.length === 2 &&
+                keys.indexOf('lamp:0') !== -1 && keys.indexOf('lamp:2') !== -1 &&
+                keys.indexOf('lamp:1') === -1 && self.lampLights === 2;
+            return {pass, detail: `keys=${keys.join(',')} lights=${self.lampLights}`};
+        }
     }
 ];
 
