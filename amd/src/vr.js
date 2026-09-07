@@ -5063,8 +5063,8 @@ define('format_mnemo/vr', [], function() {
         this.surfaceOrigin.set(x, 60, z);
         this.surfaceCaster.set(this.surfaceOrigin, this.surfaceDown);
         var hits = this.surfaceCaster.intersectObjects(this.surfaces, false);
-        // intersectObjects sorts nearest-first; from above, that is the topmost
-        // surface at this point.
+        // Hits come back sorted nearest-first, so from above the first is the
+        // topmost surface at this point.
         return hits.length ? hits[0].point.y : 0;
     };
 
