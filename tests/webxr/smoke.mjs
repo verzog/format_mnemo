@@ -390,7 +390,9 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const obj = {open: function(u) {
                 this.opened = u;
-            }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate};
+            }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate,
+                openActivity: CS.prototype.openActivity,
+                renderer: {xr: {isPresenting: true}}};
             obj.activate({userData: {url: 'openme'}});
             return {pass: obj.opened === 'openme', detail: `opened=${obj.opened}`};
         }
@@ -602,7 +604,7 @@ const scenarios = [
             const added = [];
             const self = {
                 THREE, roadTexture: tex, roadScale: 8, roadTexMult: 1,
-                config: {canedit: false}, roadMeshes: [],
+                config: {canedit: false}, roadMeshes: [], surfaces: [],
                 tiledClone: CS.prototype.tiledClone,
                 showSurfaceTexture: CS.prototype.showSurfaceTexture,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
@@ -625,7 +627,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const added = [];
             const self = {
-                THREE, roadTexture: null, roadScale: 8,
+                THREE, roadTexture: null, roadScale: 8, surfaces: [],
                 tiledClone: CS.prototype.tiledClone,
                 scene: {add: (o) => added.push(o)},
                 paveStrip: CS.prototype.paveStrip
@@ -644,7 +646,7 @@ const scenarios = [
             const added = [];
             const mk = (groundTexture, groundPatch) => ({
                 THREE, groundTexture, groundPatch, groundScale: 7, groundTexMult: 1,
-                config: {canedit: false}, groundMeshes: [],
+                config: {canedit: false}, groundMeshes: [], surfaces: [],
                 tiledClone: CS.prototype.tiledClone,
                 showSurfaceTexture: CS.prototype.showSurfaceTexture,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
@@ -1048,10 +1050,12 @@ const scenarios = [
                 editables: [], sceneObjects: {}, placedObjects: [],
                 config: {canedit: true, strings: {}}, propTemplates: {lamp: tpl},
                 selBox: null, renderer: null, lampLights: 0, palette: {primary: 0x00e5ff},
+                snapSurface: false,
                 placedBaseY: CS.prototype.placedBaseY,
                 propLabel: CS.prototype.propLabel,
                 setShadow: CS.prototype.setShadow,
                 addLampLight: CS.prototype.addLampLight,
+                addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
@@ -1084,6 +1088,7 @@ const scenarios = [
                 placedBaseY: CS.prototype.placedBaseY,
                 propLabel: CS.prototype.propLabel,
                 setShadow: CS.prototype.setShadow,
+                addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
@@ -1214,6 +1219,191 @@ const scenarios = [
             self.addLampLight(g2);
             const capped = g2.children.length === 0 && self.lampLights === 24;
             return {pass: added && capped, detail: `added=${added} capped=${capped}`};
+        }
+    },
+    {
+        name: 'activity: openActivity shows an in-scene panel when not presenting',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const url = 'https://moodle.example/mod/quiz/view.php?id=5';
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {activityclose: 'Close', activityopen: 'Open'}},
+                root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            document.body.appendChild(self.root);
+            self.openActivity(url, 'My Quiz');
+            const o = self.activityOverlay;
+            const pass = !!o && o.el.hidden === false &&
+                o.frame.getAttribute('src') === url && o.full.getAttribute('href') === url &&
+                o.title.textContent === 'My Quiz' && self.root.contains(o.el);
+            document.body.removeChild(self.root);
+            return {pass, detail: `built=${!!o} src=${o && o.frame.getAttribute('src')}`};
+        }
+    },
+    {
+        name: 'activity: openActivity navigates (no panel) inside an immersive session',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            let opened = null;
+            const self = {
+                renderer: {xr: {isPresenting: true}},
+                config: {strings: {}}, root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                pauseVideos: CS.prototype.pauseVideos,
+                open: (u) => { opened = u; }
+            };
+            self.openActivity('https://moodle.example/mod/assign/view.php?id=9', 'Essay');
+            const pass = opened === 'https://moodle.example/mod/assign/view.php?id=9' &&
+                self.activityOverlay === null;
+            return {pass, detail: `opened=${opened} overlay=${self.activityOverlay}`};
+        }
+    },
+    {
+        name: 'activity: closeActivityOverlay hides the panel and stops the framed page',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {}}, root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            document.body.appendChild(self.root);
+            self.openActivity('https://moodle.example/mod/page/view.php?id=3', 'Notes');
+            self.closeActivityOverlay();
+            const o = self.activityOverlay;
+            const pass = o.el.hidden === true && /about:blank$/.test(o.frame.getAttribute('src'));
+            document.body.removeChild(self.root);
+            return {pass, detail: `hidden=${o.el.hidden} src=${o.frame.getAttribute('src')}`};
+        }
+    },
+    {
+        name: 'activity: overlay makes the background inert and reverts on close',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const container = document.createElement('div');
+            container.className = 'format-mnemo';
+            const bar = document.createElement('div'); // A sibling of the stage.
+            const root = document.createElement('div'); // The stage.
+            const canvas = document.createElement('canvas'); // A stage child.
+            root.appendChild(canvas);
+            container.appendChild(bar);
+            container.appendChild(root);
+            document.body.appendChild(container);
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {}}, root: root, videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            self.openActivity('https://moodle.example/x', 'X');
+            const openInert = canvas.inert === true && bar.inert === true &&
+                self.activityOverlay.el.inert !== true;
+            self.closeActivityOverlay();
+            const reverted = canvas.inert === false && bar.inert === false;
+            document.body.removeChild(container);
+            return {pass: openInert && reverted, detail: `open=${openInert} reverted=${reverted}`};
+        }
+    },
+    {
+        name: 'surface: surfaceHeightAt returns the topmost surface at a point',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (y) => {
+                const m = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshBasicMaterial());
+                m.rotation.x = -Math.PI / 2;
+                m.position.y = y;
+                m.updateMatrixWorld(true);
+                return m;
+            };
+            const self = {THREE, surfaces: [mk(0.02), mk(0.19)],
+                surfaceHeightAt: CS.prototype.surfaceHeightAt};
+            const over = self.surfaceHeightAt(1, 1); // Both planes cover (1,1).
+            const off = ({THREE, surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt})
+                .surfaceHeightAt(1, 1); // No surfaces -> ground datum.
+            const pass = Math.abs(over - 0.19) < 1e-6 && off === 0;
+            return {pass, detail: `over=${over.toFixed(3)} off=${off}`};
+        }
+    },
+    {
+        name: 'surface: dropToSurface rests a prop on the surface, but not a vehicle',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const top = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshBasicMaterial());
+            top.rotation.x = -Math.PI / 2;
+            top.position.y = 0.19;
+            top.updateMatrixWorld(true);
+            const self = {THREE, surfaces: [top], placedObjects: [],
+                surfaceHeightAt: CS.prototype.surfaceHeightAt,
+                propType: CS.prototype.propType,
+                dropToSurface: CS.prototype.dropToSurface};
+            // A lamp at ground base gets a y-offset lifting it onto the kerb.
+            const lamp = {objkey: 'lamp:0', baseX: 4, baseY: 0, baseZ: 4,
+                transform: {x: 0, y: 0, z: 0}};
+            self.dropToSurface(lamp);
+            // A vehicle hovers: dropToSurface leaves it alone.
+            self.placedObjects = [{id: 5, type: 'av', x: 0, z: 0}];
+            const av = {objkey: 'placed:5', baseX: 0, baseY: 6, baseZ: 0,
+                transform: {x: 0, y: 0, z: 0}};
+            self.dropToSurface(av);
+            const pass = Math.abs(lamp.transform.y - 0.19) < 1e-6 && av.transform.y === 0;
+            return {pass, detail: `lampY=${lamp.transform.y.toFixed(3)} avY=${av.transform.y}`};
+        }
+    },
+    {
+        name: 'surface: propType reads scattered and placed prop types',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {propType: CS.prototype.propType,
+                placedObjects: [{id: 7, type: 'barrier', x: 0, z: 0}]};
+            const pass = self.propType({objkey: 'lamp:3'}) === 'lamp' &&
+                self.propType({objkey: 'placed:7'}) === 'barrier' &&
+                self.propType({objkey: 'gate:1'}) === null &&
+                self.propType({cmid: 5}) === null;
+            return {pass, detail: `lamp=${self.propType({objkey: 'lamp:3'})}`};
+        }
+    },
+    {
+        name: 'editor: addPickProxy adds an invisible but raycastable box to a prop',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // A low, thin barrier-like model that is otherwise hard to hit.
+            const group = new THREE.Group();
+            group.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 0.6),
+                new THREE.MeshStandardMaterial()));
+            group.position.set(3, 0, -3);
+            const self = {THREE, addPickProxy: CS.prototype.addPickProxy};
+            self.addPickProxy(group);
+            const proxy = group.children.filter((c) => c.userData && c.userData.mnemoProxy)[0];
+            // A ray from above through the proxy hits it even though it is invisible.
+            const ray = new THREE.Raycaster(new THREE.Vector3(3, 5, -3), new THREE.Vector3(0, -1, 0));
+            group.updateMatrixWorld(true);
+            const hit = ray.intersectObject(group, true).length > 0;
+            const pass = !!proxy && proxy.visible === false && proxy.geometry.parameters.height >= 1.4 &&
+                hit;
+            return {pass, detail: `proxy=${!!proxy} h=${proxy && proxy.geometry.parameters.height} hit=${hit}`};
         }
     }
 ];

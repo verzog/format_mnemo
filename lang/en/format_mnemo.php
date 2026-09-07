@@ -25,6 +25,8 @@
 $string['activitybuilding'] = 'Cyberspace building model';
 $string['activitybuilding_help'] = 'Show this activity as a specific 3D building in the Mnemo cyberspace view. Enter the file name of a <code>.glb</code> model in the site\'s prop asset pack (for example <code>library.glb</code>), or a full URL to a <code>.glb</code> model. Leave this blank to use the building for the activity\'s type (if any), or the procedural building otherwise. It has no effect in the list view or in courses that use another format.';
 $string['activitybuilding_invalid'] = 'Enter a <code>.glb</code> file name (letters, numbers, dots, dashes) or a full http(s):// URL to a <code>.glb</code> model.';
+$string['activityclose'] = 'Close activity';
+$string['activityopen'] = 'Open in new tab';
 $string['addsection'] = 'Add node';
 $string['addsections'] = 'Add node';
 $string['currentsection'] = 'This node';
@@ -51,6 +53,7 @@ $string['editsection'] = 'Edit node';
 $string['editsectionname'] = 'Edit node name';
 $string['editsidewalksurface'] = 'Sidewalk surface';
 $string['editsnap'] = 'Snap to grid';
+$string['editsnapsurface'] = 'Snap to surface';
 $string['edittexsize'] = 'Texture size';
 $string['editwidth'] = 'Width';
 $string['emptynode'] = 'This node has no activities yet.';

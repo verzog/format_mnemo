@@ -54,6 +54,11 @@ define('format_mnemo/vr', [], function() {
         restricted: 0xff3b6b
     };
 
+    // Height of the raised sidewalk kerb (world units). Shared so the alignment
+    // grid can sit clearly above the sidewalk tops rather than being hidden
+    // under them, and so surface-snapping rests objects on the right level.
+    var SIDEWALK_HEIGHT = 0.18;
+
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
@@ -140,6 +145,18 @@ define('format_mnemo/vr', [], function() {
         } catch (e) {
             this.snap = false;
         }
+        // Snap-to-surface: when on, moving (or placing) an object rests it on
+        // the road/sidewalk/ground surface beneath it, so a prop stands on a
+        // raised sidewalk rather than sinking to road level. Remembered per
+        // viewer; the resulting vertical offset is saved so every learner sees
+        // the object at that level. `surfaces` are the raycast targets.
+        this.snapSurface = false;
+        try {
+            this.snapSurface = window.localStorage.getItem('format_mnemo_snapsurface') === '1';
+        } catch (e) {
+            this.snapSurface = false;
+        }
+        this.surfaces = [];
         // In-view object placer: teacher-placed props, the loaded model
         // templates to clone when placing, and the current placement state.
         this.placedObjects = config.placedobjects || [];
@@ -161,6 +178,8 @@ define('format_mnemo/vr', [], function() {
         this.day = null; // Daylight parameters, computed in build().
 
         this.interactive = []; // Meshes that can be gazed/clicked to open.
+        this.activityOverlay = null; // In-scene activity panel (built on demand).
+        this.overlayReturnFocus = null; // Element to refocus when the panel closes.
         this.videos = []; // HTMLVideoElements driving in-world screens.
         this.hovered = null; // Currently highlighted mesh.
         this.controllers = []; // XR controller target-ray spaces.
@@ -2203,6 +2222,7 @@ define('format_mnemo/vr', [], function() {
             }
             this.setShadow(m, true);
             this.scene.add(m);
+            this.addPickProxy(m);
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
                 m, p.x, y, p.z, type === 'lamp' || type === 'av');
         }
@@ -2293,7 +2313,8 @@ define('format_mnemo/vr', [], function() {
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
-                this.registerSceneEditable(objkey, label, m, px, 0, pz, true);
+                this.addPickProxy(m);
+                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp');
             }
         }
     };
@@ -2331,9 +2352,10 @@ define('format_mnemo/vr', [], function() {
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
+            this.addPickProxy(m);
             // Key by the side street's section number (course-stable across
             // viewers), not a filtered ordinal.
-            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, true);
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false);
         }
     };
 
@@ -2592,6 +2614,8 @@ define('format_mnemo/vr', [], function() {
         road.position.set(cx, y + 0.02, cz);
         road.receiveShadow = true;
         this.scene.add(road);
+        // A snap target so objects can rest on the road surface.
+        this.surfaces.push(road);
         if (this.roadTexture) {
             this.registerSurfaceMesh('road', road, w, d);
         }
@@ -2611,7 +2635,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSidewalk = function(cx, cz, w, d) {
         var THREE = this.THREE;
-        var height = 0.18;
+        var height = SIDEWALK_HEIGHT;
         // The kerb body: a low concrete slab that gives the sidewalk a visible
         // raised edge above the road.
         var body = new THREE.Mesh(
@@ -2636,6 +2660,9 @@ define('format_mnemo/vr', [], function() {
         top.position.set(cx, height + 0.01, cz);
         top.receiveShadow = true;
         this.scene.add(top);
+        // The walking surface is a snap target so objects rest on the raised
+        // sidewalk rather than sinking to road level.
+        this.surfaces.push(top);
         // Only a textured sidewalk offers the texture-size control (matching
         // road/ground); a plain concrete top has nothing to retune.
         if (this.sidewalkTexture) {
@@ -2709,6 +2736,7 @@ define('format_mnemo/vr', [], function() {
         patch.position.set(cx, 0.035, cz);
         patch.receiveShadow = true;
         this.scene.add(patch);
+        this.surfaces.push(patch);
         this.registerSurfaceMesh('ground', patch, size, size);
     };
 
@@ -3114,6 +3142,40 @@ define('format_mnemo/vr', [], function() {
         proxy.receiveShadow = false;
         proxy.userData.mnemoProxy = true;
         return proxy;
+    };
+
+    /**
+     * Add an invisible box around a loaded prop model so it is as easy to select
+     * in the editor as a tall building - without one, a low or thin prop (a
+     * barrier, a kerbside kiosk) is hard to hit and reads as uneditable, while a
+     * tall lamp is easy. Sized to the model's bounds with a minimum clickable
+     * volume, and parented to the group so it moves and scales with it. Not
+     * rendered (visible=false) but still raycast, like a building's editProxy.
+     *
+     * @param {Object} group The prop group (a loaded model clone).
+     */
+    Cyberspace.prototype.addPickProxy = function(group) {
+        var THREE = this.THREE;
+        group.updateWorldMatrix(true, true);
+        var box = new THREE.Box3().setFromObject(group);
+        if (box.isEmpty()) {
+            return;
+        }
+        var size = box.getSize(new THREE.Vector3());
+        var center = box.getCenter(new THREE.Vector3());
+        var proxy = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                Math.max(size.x, 1.2), Math.max(size.y, 1.4), Math.max(size.z, 1.2)),
+            new THREE.MeshBasicMaterial()
+        );
+        // Convert the world-space centre into the group's local frame so the box
+        // sits over the model whatever the group's position/rotation.
+        proxy.position.copy(group.worldToLocal(center));
+        proxy.visible = false;
+        proxy.castShadow = false;
+        proxy.receiveShadow = false;
+        proxy.userData.mnemoProxy = true;
+        group.add(proxy);
     };
 
     /**
@@ -3627,7 +3689,7 @@ define('format_mnemo/vr', [], function() {
         } else if (ud.videoSrc) {
             this.startVideo(target);
         } else if (ud.url) {
-            this.open(ud.url);
+            this.openActivity(ud.url, ud.name);
         }
     };
 
@@ -3672,6 +3734,10 @@ define('format_mnemo/vr', [], function() {
                 toggle.addEventListener('click', function() {
                     if (container.classList.contains('format-mnemo--listview')) {
                         self.pauseVideos();
+                        // The activity panel lives inside the stage, which the
+                        // list view hides; close it so its iframe stops running
+                        // (and does not reappear when 3D view is restored).
+                        self.closeActivityOverlay();
                     }
                 });
             }
@@ -4063,6 +4129,10 @@ define('format_mnemo/vr', [], function() {
             '<input type="checkbox" data-mnemo-ed-snap>' +
             '<span>' + (s.editsnap || 'Snap to grid') + '</span>' +
             '</label>' +
+            '<label class="format-mnemo__editor-snap" data-mnemo-ed-snapsurfacerow>' +
+            '<input type="checkbox" data-mnemo-ed-snapsurface>' +
+            '<span>' + (s.editsnapsurface || 'Snap to surface') + '</span>' +
+            '</label>' +
             '<div class="format-mnemo__editor-actions">' +
             '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
@@ -4097,6 +4167,15 @@ define('format_mnemo/vr', [], function() {
                 if (key === 'brightness') {
                     self.applyBrightness(self.selected);
                 } else {
+                    // With snap-to-surface on, moving in the plane re-rests the
+                    // object on whatever surface it is now over (e.g. up onto a
+                    // sidewalk), and the resulting Move-Y is reflected below.
+                    if (self.snapSurface && (key === 'x' || key === 'z') &&
+                            self.propType(self.selected)) {
+                        self.dropToSurface(self.selected);
+                        var yInput = panel.querySelector('[data-mnemo-ed="y"]');
+                        yInput.value = self.selected.transform.y;
+                    }
                     self.applyTransform(self.selected);
                 }
                 self.syncEditorOutputs();
@@ -4113,6 +4192,30 @@ define('format_mnemo/vr', [], function() {
                 window.localStorage.setItem('format_mnemo_snap', self.snap ? '1' : '0');
             } catch (e) {
                 // Ignore storage being unavailable; the toggle still works.
+            }
+        });
+
+        // Snap-to-surface toggle: remembered per viewer. Turning it on drops the
+        // selected object onto the surface beneath it now (and each later move
+        // re-drops it); the Move-Y control is disabled while it is on, since the
+        // vertical position is then driven by the surface.
+        var surfBox = panel.querySelector('[data-mnemo-ed-snapsurface]');
+        surfBox.checked = this.snapSurface;
+        surfBox.addEventListener('change', function() {
+            self.snapSurface = surfBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_snapsurface', self.snapSurface ? '1' : '0');
+            } catch (e) {
+                // Ignore storage being unavailable; the toggle still works.
+            }
+            if (self.snapSurface && self.selected && self.propType(self.selected)) {
+                self.dropToSurface(self.selected);
+                self.applyTransform(self.selected);
+            }
+            if (self.selected) {
+                self.fillEditor(self.selected);
+            } else {
+                self.updateSnapSurfaceUi();
             }
         });
 
@@ -4269,10 +4372,11 @@ define('format_mnemo/vr', [], function() {
             span = Math.ceil(span / g) * g;
             var divisions = Math.round(span / g);
             var grid = new THREE.GridHelper(span, divisions, this.palette.primary, this.palette.primary);
-            // Sit clearly above the road strips and textured plazas so those
-            // opaque surfaces do not wash the lines out, centred on a grid
-            // multiple so the drawn lines land on the lattice placement snaps to.
-            grid.position.set(0, 0.12, this.snapCoord((zmin + zmax) / 2));
+            // Sit clearly above the road strips, textured plazas and the raised
+            // sidewalk tops (which are SIDEWALK_HEIGHT high) so none of those
+            // opaque surfaces hide the lines, centred on a grid multiple so the
+            // drawn lines land on the lattice placement snaps to.
+            grid.position.set(0, SIDEWALK_HEIGHT + 0.06, this.snapCoord((zmin + zmax) / 2));
             if (grid.material) {
                 grid.material.transparent = true;
                 grid.material.opacity = 0.6;
@@ -4428,7 +4532,30 @@ define('format_mnemo/vr', [], function() {
         var placed = !!(editable.objkey && /^placed:/.test(editable.objkey));
         panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !placed;
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
+        this.updateSnapSurfaceUi();
         this.syncEditorOutputs();
+    };
+
+    /**
+     * Reflect the snap-to-surface state in the editor: while it is on and a
+     * snappable prop is selected, the Move-Y control is locked, since the
+     * object's height is driven by the surface beneath it rather than set by
+     * hand.
+     */
+    Cyberspace.prototype.updateSnapSurfaceUi = function() {
+        if (!this.editorPanel) {
+            return;
+        }
+        var yInput = this.editorPanel.querySelector('[data-mnemo-ed="y"]');
+        if (!yInput) {
+            return;
+        }
+        var lock = !!(this.snapSurface && this.selected && this.propType(this.selected));
+        yInput.disabled = lock;
+        var row = yInput.closest('.format-mnemo__editor-row');
+        if (row) {
+            row.classList.toggle('format-mnemo__editor-row--locked', lock);
+        }
     };
 
     /**
@@ -4464,15 +4591,43 @@ define('format_mnemo/vr', [], function() {
         }
         saveBtn.disabled = true;
         status.textContent = s.editsaving || 'Saving…';
+        var savedText = s.editsaved || 'Saved';
+        var errorText = s.editsaveerror || 'Could not save';
+        var promise = this.persistTransform(editable);
+        if (!promise) {
+            saveBtn.disabled = false;
+            return;
+        }
+        promise.then(function() {
+            status.textContent = savedText;
+            saveBtn.disabled = false;
+            return null;
+        }).catch(function() {
+            status.textContent = errorText;
+            saveBtn.disabled = false;
+        });
+    };
+
+    /**
+     * Persist an editable's transform through the Moodle web service, without
+     * touching the editor panel, and return the request promise (or null when
+     * ajax is unavailable). Activities save by course-module id; non-activity
+     * scene objects save by their per-course slot key (with brightness). Both
+     * carry the per-axis width/height/depth multipliers. Used both by Save and
+     * by the placer (to persist a surface-snapped drop for a freshly placed
+     * prop that is not the current selection).
+     *
+     * @param {Object} editable The editable to persist.
+     * @return {Promise|null} The web-service call promise, or null.
+     */
+    Cyberspace.prototype.persistTransform = function(editable) {
+        if (!editable || !window.require) {
+            return null;
+        }
         var t = editable.transform;
         var one = function(v) {
             return typeof v === 'number' ? v : 1;
         };
-        var savedText = s.editsaved || 'Saved';
-        var errorText = s.editsaveerror || 'Could not save';
-        // Activities save by course-module id; non-activity scene objects save
-        // by their per-course slot key (with brightness). Both carry the
-        // per-axis width/height/depth multipliers.
         var request = editable.objkey ? {
             methodname: 'format_mnemo_set_scene_object',
             args: {
@@ -4489,14 +4644,9 @@ define('format_mnemo/vr', [], function() {
                 offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
             }
         };
-        window.require(['core/ajax'], function(ajax) {
-            ajax.call([request])[0].then(function() {
-                status.textContent = savedText;
-                saveBtn.disabled = false;
-                return null;
-            }).catch(function() {
-                status.textContent = errorText;
-                saveBtn.disabled = false;
+        return new Promise(function(resolve, reject) {
+            window.require(['core/ajax'], function(ajax) {
+                ajax.call([request])[0].then(resolve).catch(reject);
             });
         });
     };
@@ -4574,9 +4724,21 @@ define('format_mnemo/vr', [], function() {
         }
         this.setShadow(m, true);
         this.scene.add(m);
+        this.addPickProxy(m);
         this.placedObjects.push({id: id, type: type, x: x, z: z});
         this.registerSceneEditable('placed:' + id, this.propLabel(type),
             m, x, y, z, type === 'lamp' || type === 'av');
+        // With snap-to-surface on, rest the new prop on the surface beneath it
+        // (e.g. a raised sidewalk) and persist that height so every learner sees
+        // it there, not sunk to road level.
+        if (this.snapSurface && type !== 'av') {
+            var editable = this.editables[this.editables.length - 1];
+            if (editable && editable.objkey === 'placed:' + id) {
+                this.dropToSurface(editable);
+                this.applyTransform(editable);
+                this.persistTransform(editable);
+            }
+        }
     };
 
     /**
@@ -4879,6 +5041,79 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The height of the topmost road/sidewalk/ground surface directly beneath a
+     * world (x, z), by casting a ray straight down through the recorded surface
+     * meshes. Used by snap-to-surface so an object rests on a raised sidewalk
+     * rather than at road level. Returns 0 (ground datum) when nothing is hit.
+     *
+     * @param {Number} x World x.
+     * @param {Number} z World z.
+     * @return {Number} The surface height (world y).
+     */
+    Cyberspace.prototype.surfaceHeightAt = function(x, z) {
+        if (!this.surfaces || !this.surfaces.length) {
+            return 0;
+        }
+        var THREE = this.THREE;
+        if (!this.surfaceCaster) {
+            this.surfaceCaster = new THREE.Raycaster();
+            this.surfaceDown = new THREE.Vector3(0, -1, 0);
+            this.surfaceOrigin = new THREE.Vector3();
+        }
+        this.surfaceOrigin.set(x, 60, z);
+        this.surfaceCaster.set(this.surfaceOrigin, this.surfaceDown);
+        var hits = this.surfaceCaster.intersectObjects(this.surfaces, false);
+        // Hits come back sorted nearest-first, so from above the first is the
+        // topmost surface at this point.
+        return hits.length ? hits[0].point.y : 0;
+    };
+
+    /**
+     * Set an editable's vertical offset so it rests on the surface beneath its
+     * current world position (base + offset), for snap-to-surface. Flying props
+     * (vehicles) keep their hover height rather than being dropped to a kerb.
+     *
+     * @param {Object} editable The editable to rest on the surface.
+     */
+    Cyberspace.prototype.dropToSurface = function(editable) {
+        if (this.propType(editable) === 'av') {
+            return;
+        }
+        var t = editable.transform;
+        var y = this.surfaceHeightAt(editable.baseX + t.x, editable.baseZ + t.z);
+        t.y = y - editable.baseY;
+    };
+
+    /**
+     * The placed/scattered prop type of an editable (lamp, barrier, kiosk, av),
+     * from its slot key, or null for anything else (activities, gates, pylons,
+     * surfaces).
+     *
+     * @param {Object} editable The editable record.
+     * @return {String|null} The prop type, or null.
+     */
+    Cyberspace.prototype.propType = function(editable) {
+        var key = editable && editable.objkey;
+        if (!key) {
+            return null;
+        }
+        // A teacher-placed prop keys placed:<id>; its type lives in placedObjects.
+        if (key.indexOf('placed:') === 0) {
+            var id = parseInt(key.slice(7), 10);
+            for (var i = 0; i < this.placedObjects.length; i++) {
+                if (this.placedObjects[i].id === id) {
+                    return this.placedObjects[i].type;
+                }
+            }
+            return null;
+        }
+        // A scattered prop keys <type>:<slot> (lamp/barrier/kiosk/av).
+        var prefix = key.split(':')[0];
+        return (prefix === 'lamp' || prefix === 'barrier' || prefix === 'kiosk' ||
+            prefix === 'av') ? prefix : null;
+    };
+
+    /**
      * Snap an edited slider value to the grid when snap-to-grid is on, so
      * objects align consistently. Positions snap on their absolute world
      * coordinate (base + offset) to a 1-unit lattice — objects with different
@@ -5091,12 +5326,191 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Open a course activity from within the scene. Outside an immersive
+     * headset session (desktop, phone or magic-window) the activity is shown
+     * in a panel layered over the 3D view - its real Moodle page in an iframe -
+     * so the learner does the quiz, assignment or resource without leaving the
+     * world. Inside an immersive session the page DOM is not visible, so this
+     * falls back to navigating to the activity (which ends the session);
+     * presenting activities natively in-scene is a later phase.
+     *
+     * @param {String} url The activity view URL.
+     * @param {String} name The activity name (panel heading).
+     */
+    Cyberspace.prototype.openActivity = function(url, name) {
+        if (!url) {
+            return;
+        }
+        if (this.renderer.xr.isPresenting) {
+            this.open(url);
+            return;
+        }
+        this.showActivityOverlay(url, name);
+    };
+
+    /**
+     * Show (building it once) the in-scene activity overlay for a URL, layered
+     * over the stage with a heading, a close control and an open-in-new-tab
+     * link, and load the activity's Moodle page into its iframe. In-world video
+     * audio is paused while the panel is open so it does not sound behind it.
+     *
+     * @param {String} url The activity view URL to load in the panel.
+     * @param {String} name The activity name shown as the panel heading.
+     */
+    Cyberspace.prototype.showActivityOverlay = function(url, name) {
+        var overlay = this.activityOverlay || this.buildActivityOverlay();
+        this.overlayReturnFocus = document.activeElement;
+        overlay.title.textContent = name || '';
+        overlay.el.setAttribute('aria-label', name || '');
+        overlay.frame.setAttribute('title', name || '');
+        overlay.frame.src = url;
+        overlay.full.href = url;
+        overlay.el.hidden = false;
+        this.setOverlayInert(true);
+        this.pauseVideos();
+        overlay.close.focus();
+    };
+
+    /**
+     * Make the rest of the page inert while the activity panel is open (or
+     * revert it), so keyboard focus and clicks cannot reach the covered stage
+     * controls or the surrounding course page - `aria-modal` alone does not do
+     * this. Every sibling of the panel (inside the stage, and the bar/fallback
+     * outside it) is toggled; the panel itself stays interactive. `inert` is a
+     * no-op in browsers that lack it, which degrades safely.
+     *
+     * @param {Boolean} on Whether the background should be inert.
+     */
+    Cyberspace.prototype.setOverlayInert = function(on) {
+        var overlay = this.activityOverlay;
+        if (!overlay) {
+            return;
+        }
+        var root = this.root;
+        var mark = function(parent, skip) {
+            if (!parent) {
+                return;
+            }
+            for (var i = 0; i < parent.children.length; i++) {
+                if (parent.children[i] !== skip) {
+                    parent.children[i].inert = on;
+                }
+            }
+        };
+        // Inside the stage, everything except the panel; then the stage's
+        // siblings (the toggle bar and the fallback list) in the container.
+        mark(root, overlay.el);
+        mark(root.closest ? root.closest('.format-mnemo') : null, root);
+    };
+
+    /**
+     * Build the activity overlay DOM once, layered over the stage, and wire its
+     * close control and Escape-to-close. Returns the record of its parts;
+     * subsequent opens reuse it.
+     *
+     * @return {Object} {el, title, frame, close, full}.
+     */
+    Cyberspace.prototype.buildActivityOverlay = function() {
+        var self = this;
+        var s = this.config.strings || {};
+
+        var el = document.createElement('div');
+        el.className = 'format-mnemo__overlay';
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-modal', 'true');
+        el.hidden = true;
+
+        var bar = document.createElement('div');
+        bar.className = 'format-mnemo__overlay-bar';
+
+        var title = document.createElement('h3');
+        title.className = 'format-mnemo__overlay-title';
+
+        var full = document.createElement('a');
+        full.className = 'format-mnemo__overlay-full';
+        full.target = '_blank';
+        full.rel = 'noopener';
+        full.textContent = s.activityopen || 'Open in new tab';
+
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn btn-secondary format-mnemo__overlay-close';
+        close.textContent = s.activityclose || 'Close';
+        close.addEventListener('click', function() {
+            self.closeActivityOverlay();
+        });
+
+        var frame = document.createElement('iframe');
+        frame.className = 'format-mnemo__overlay-frame';
+        // Escape should close the panel even when the learner is interacting
+        // with the activity, whose keystrokes go to the nested document and do
+        // not bubble out. The activity is same-origin (a Moodle page on this
+        // site), so hook Escape on the framed document each time it loads; a
+        // cross-origin document (e.g. an external tool) simply throws and is
+        // left to the outer bar's own Escape handler below.
+        frame.addEventListener('load', function() {
+            try {
+                var doc = frame.contentDocument;
+                if (doc) {
+                    doc.addEventListener('keydown', function(e) {
+                        if (e.key === 'Escape') {
+                            self.closeActivityOverlay();
+                        }
+                    });
+                }
+            } catch (e) {
+                // Cross-origin framed document; its keys are not observable.
+            }
+        });
+
+        bar.appendChild(title);
+        bar.appendChild(full);
+        bar.appendChild(close);
+        el.appendChild(bar);
+        el.appendChild(frame);
+
+        el.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                self.closeActivityOverlay();
+            }
+        });
+
+        this.root.appendChild(el);
+        this.activityOverlay = {el: el, title: title, frame: frame, close: close, full: full};
+        return this.activityOverlay;
+    };
+
+    /**
+     * Hide the activity overlay, stop the framed page (and any media it plays)
+     * by clearing its src, and return focus to the element that opened it.
+     */
+    Cyberspace.prototype.closeActivityOverlay = function() {
+        var overlay = this.activityOverlay;
+        if (!overlay || overlay.el.hidden) {
+            return;
+        }
+        overlay.el.hidden = true;
+        overlay.frame.src = 'about:blank';
+        this.setOverlayInert(false);
+        if (this.overlayReturnFocus && this.overlayReturnFocus.focus) {
+            this.overlayReturnFocus.focus();
+        }
+    };
+
+    /**
      * Per-frame update: locomotion, spinning, flicker, highlighting, rendering.
      */
     Cyberspace.prototype.tick = function() {
         var dt = Math.min(0.05, this.clock.getDelta());
         this.time += dt;
         var presenting = this.renderer.xr.isPresenting;
+
+        // While the on-screen activity panel covers the stage, pause the scene:
+        // it is fully hidden, so there is nothing to animate or render. (An
+        // immersive session never shows the panel, so it keeps running.)
+        if (!presenting && this.activityOverlay && !this.activityOverlay.el.hidden) {
+            return;
+        }
 
         // Spin the rooftop holo elements.
         for (var i = 0; i < this.spinners.length; i++) {
