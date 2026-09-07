@@ -409,4 +409,61 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame('https://cdn.example/neon.woff2', $config['signfonturl']);
         $this->assertSame('https://cdn.example/frame.png', $config['signtextureurl']);
     }
+
+    /**
+     * With nothing configured, the road/ground texture URLs are null and the
+     * tiling scales and patch size carry their defaults, so the client keeps its
+     * bundled flat road and neon floor.
+     */
+    public function test_scene_config_ground_defaults(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertNull($config['roadtextureurl']);
+        $this->assertNull($config['groundtextureurl']);
+        $this->assertSame(8, $config['roadtexturescale']);
+        $this->assertSame(8, $config['groundtexturescale']);
+        $this->assertSame(14, $config['groundpatchsize']);
+    }
+
+    /**
+     * Admin-configured road/ground texture URLs and tiling/patch values pass
+     * through to the scene config.
+     */
+    public function test_scene_config_ground_configured(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        set_config('roadtextureurl', 'https://cdn.example/road.png', 'format_mnemo');
+        set_config('groundtextureurl', 'https://cdn.example/ground.png', 'format_mnemo');
+        set_config('roadtexturescale', '12', 'format_mnemo');
+        set_config('groundtexturescale', '6', 'format_mnemo');
+        set_config('groundpatchsize', '20', 'format_mnemo');
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertSame('https://cdn.example/road.png', $config['roadtextureurl']);
+        $this->assertSame('https://cdn.example/ground.png', $config['groundtextureurl']);
+        $this->assertSame(12, $config['roadtexturescale']);
+        $this->assertSame(6, $config['groundtexturescale']);
+        $this->assertSame(20, $config['groundpatchsize']);
+    }
 }

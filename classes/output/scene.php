@@ -362,11 +362,18 @@ class scene implements renderable, templatable {
             // Module types that have a building-<modname>.glb model available, so
             // the client only attempts to load buildings it can expect to find.
             'buildingmodels' => $this->building_models($nodes),
-            // Optional neon sign webfont and sign frame texture. Each resolves to
-            // an admin-set URL, then an uploaded file, then null (the client
-            // keeps its monospace font / flat neon frame). See sign_asset_url().
-            'signfonturl' => $this->sign_asset_url('signfonturl', 'signfont'),
-            'signtextureurl' => $this->sign_asset_url('signtextureurl', 'signtexture'),
+            // Optional site-wide assets, each resolving to an admin-set URL, then
+            // an uploaded file, then null (the client keeps its bundled look).
+            // See resolve_asset_url().
+            'signfonturl' => $this->resolve_asset_url('signfonturl', 'signfont'),
+            'signtextureurl' => $this->resolve_asset_url('signtextureurl', 'signtexture'),
+            'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
+            'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
+            // Texture tiling scale (world units per tile) and the size of the
+            // ground patch laid around each building, with sensible defaults.
+            'roadtexturescale' => $this->int_config('roadtexturescale', 8),
+            'groundtexturescale' => $this->int_config('groundtexturescale', 8),
+            'groundpatchsize' => $this->int_config('groundpatchsize', 14),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -455,21 +462,36 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * Resolve an optional site-wide sign asset (the neon webfont or the sign
-     * frame texture) to a URL, in order of precedence: an admin-configured
+     * Resolve an optional site-wide asset (a sign webfont/texture or a
+     * road/ground texture) to a URL, in order of precedence: an admin-configured
      * external URL, then a file uploaded into the plugin's settings, then null
-     * (the client falls back to its bundled font / flat frame).
+     * (the client falls back to its bundled look).
      *
      * @param string $urlsetting The URL config key (e.g. 'signfonturl').
      * @param string $filearea   The system-context file area (e.g. 'signfont').
      * @return string|null
      */
-    protected function sign_asset_url(string $urlsetting, string $filearea): ?string {
+    protected function resolve_asset_url(string $urlsetting, string $filearea): ?string {
         $url = get_config('format_mnemo', $urlsetting);
         if (!empty($url)) {
             return $url;
         }
         return $this->stored_asset_url($filearea);
+    }
+
+    /**
+     * An integer plugin setting, falling back to a default when unset or blank.
+     *
+     * @param string $name The config key.
+     * @param int $default The value to use when the setting is unset/blank.
+     * @return int
+     */
+    protected function int_config(string $name, int $default): int {
+        $value = get_config('format_mnemo', $name);
+        if ($value === false || $value === '') {
+            return $default;
+        }
+        return (int)$value;
     }
 
     /**
