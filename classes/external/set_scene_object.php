@@ -55,6 +55,12 @@ class set_scene_object extends external_api {
             'offsetz' => new external_value(PARAM_FLOAT, 'World-z offset from the default position'),
             'rotation' => new external_value(PARAM_FLOAT, 'Extra rotation about the vertical axis, in degrees'),
             'brightness' => new external_value(PARAM_FLOAT, 'Brightness multiplier for light-emitting objects'),
+            // Optional so an older cached client (that does not send them) still
+            // works; declared last to match the execute() signature order, which
+            // Moodle invokes positionally.
+            'scalex' => new external_value(PARAM_FLOAT, 'Width (x) multiplier', VALUE_DEFAULT, 1.0),
+            'scaley' => new external_value(PARAM_FLOAT, 'Height (y) multiplier', VALUE_DEFAULT, 1.0),
+            'scalez' => new external_value(PARAM_FLOAT, 'Depth (z) multiplier', VALUE_DEFAULT, 1.0),
         ]);
     }
 
@@ -69,6 +75,9 @@ class set_scene_object extends external_api {
      * @param float $offsetz World-z offset.
      * @param float $rotation Rotation in degrees.
      * @param float $brightness Brightness multiplier.
+     * @param float $scalex Width (x) multiplier.
+     * @param float $scaley Height (y) multiplier.
+     * @param float $scalez Depth (z) multiplier.
      * @return array{status: bool}
      */
     public static function execute(
@@ -79,7 +88,10 @@ class set_scene_object extends external_api {
         float $offsety,
         float $offsetz,
         float $rotation,
-        float $brightness
+        float $brightness,
+        float $scalex = 1.0,
+        float $scaley = 1.0,
+        float $scalez = 1.0
     ): array {
         global $DB;
 
@@ -87,6 +99,9 @@ class set_scene_object extends external_api {
             'courseid' => $courseid,
             'objkey' => $objkey,
             'scale' => $scale,
+            'scalex' => $scalex,
+            'scaley' => $scaley,
+            'scalez' => $scalez,
             'offsetx' => $offsetx,
             'offsety' => $offsety,
             'offsetz' => $offsetz,
@@ -110,6 +125,9 @@ class set_scene_object extends external_api {
         }
         $fields = [
             'scale' => min(10.0, max(0.1, (float)$params['scale'])),
+            'scalex' => min(10.0, max(0.1, (float)$params['scalex'])),
+            'scaley' => min(10.0, max(0.1, (float)$params['scaley'])),
+            'scalez' => min(10.0, max(0.1, (float)$params['scalez'])),
             'offsetx' => min(200.0, max(-200.0, (float)$params['offsetx'])),
             'offsety' => min(200.0, max(-200.0, (float)$params['offsety'])),
             'offsetz' => min(200.0, max(-200.0, (float)$params['offsetz'])),

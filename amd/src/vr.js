@@ -115,19 +115,6 @@ define('format_mnemo/vr', [], function() {
         this.config = config;
         this.loaders = loaders || {};
         assets = assets || {};
-        // Optional site-wide assets, loaded before construction (see
-        // loadSceneAssets): a custom CSS font-family for neon text, a texture
-        // tinted onto every sign frame, and tiled road/ground textures. Any may
-        // be null, in which case the bundled neon look is used.
-        this.signFontFamily = assets.signFontFamily || null;
-        this.signTexture = assets.signTexture || null;
-        this.roadTexture = assets.roadTexture || null;
-        this.groundTexture = assets.groundTexture || null;
-        // Tiling scale (world units per texture tile) and the size of the
-        // textured ground patch laid around each building. Admin-configurable.
-        this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
-        this.groundScale = config.groundtexturescale > 0 ? config.groundtexturescale : 8;
-        this.groundPatch = config.groundpatchsize > 0 ? config.groundpatchsize : 0;
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
@@ -160,21 +147,9 @@ define('format_mnemo/vr', [], function() {
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
-        // Per-course texture-size multipliers for the road and ground surfaces
-        // (a teacher can retune these in-view). Stored in the scene-object store
-        // under the singleton keys road:0 / ground:0, reusing their scale field.
-        // A larger multiplier makes each texture tile bigger (fewer repeats).
-        var roadObj = this.sceneObjects['road:0'];
-        var groundObj = this.sceneObjects['ground:0'];
-        this.roadTexMult = (roadObj && roadObj.scale > 0) ? roadObj.scale : 1;
-        this.groundTexMult = (groundObj && groundObj.scale > 0) ? groundObj.scale : 1;
-        // Textured road strips and ground patches placed in the scene, with the
-        // dimensions needed to re-tile them when the texture size is edited; and
-        // the shared "surface" editables (one per type) they select.
-        this.roadMeshes = [];
-        this.groundMeshes = [];
-        this.surfaceEditables = {};
-        this.surfacePickMeshes = [];
+        // Site-wide textures, tiling scales and the surface-mesh registries
+        // (kept out of the constructor to keep its complexity in check).
+        this.initSurfaces(config, assets);
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -218,6 +193,47 @@ define('format_mnemo/vr', [], function() {
 
         this.build();
     }
+
+    /**
+     * Initialise the site-wide textures, their tiling scales and per-course
+     * size multipliers, and the surface-mesh registries. Any texture may be
+     * null (the bundled neon look is used). Kept out of the constructor so its
+     * cyclomatic complexity stays within lint limits.
+     *
+     * @param {Object} config The scene configuration from PHP.
+     * @param {Object} assets Optional preloaded site-wide assets.
+     */
+    Cyberspace.prototype.initSurfaces = function(config, assets) {
+        // A custom neon font, the sign-frame texture, and the tiled road,
+        // ground and sidewalk textures. Any may be null.
+        this.signFontFamily = assets.signFontFamily || null;
+        this.signTexture = assets.signTexture || null;
+        this.roadTexture = assets.roadTexture || null;
+        this.groundTexture = assets.groundTexture || null;
+        this.sidewalkTexture = assets.sidewalkTexture || null;
+        // Tiling scales (world units per tile) and the size of the ground patch
+        // laid around each building. Admin-configurable.
+        this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
+        this.groundScale = config.groundtexturescale > 0 ? config.groundtexturescale : 8;
+        this.sidewalkScale = config.sidewalktexturescale > 0 ? config.sidewalktexturescale : 4;
+        this.groundPatch = config.groundpatchsize > 0 ? config.groundpatchsize : 0;
+        // Per-course texture-size multipliers, stored in the scene-object store
+        // under the singleton keys road:0 / ground:0 / sidewalk:0 (their scale
+        // field). A larger multiplier makes each texture tile bigger.
+        var mult = function(o) {
+            return (o && o.scale > 0) ? o.scale : 1;
+        };
+        this.roadTexMult = mult(this.sceneObjects['road:0']);
+        this.groundTexMult = mult(this.sceneObjects['ground:0']);
+        this.sidewalkTexMult = mult(this.sceneObjects['sidewalk:0']);
+        // Textured surfaces placed in the scene (with the dimensions needed to
+        // re-tile them) and the shared "surface" editables they select.
+        this.roadMeshes = [];
+        this.groundMeshes = [];
+        this.sidewalkMeshes = [];
+        this.surfaceEditables = {};
+        this.surfacePickMeshes = [];
+    };
 
     Cyberspace.prototype.build = function() {
         var THREE = this.THREE;
@@ -2373,12 +2389,43 @@ define('format_mnemo/vr', [], function() {
         // Road corridors for movement: the avenue, plus each side street (filled
         // in by buildSideStreet). On foot the player is kept within these; only
         // flying lifts the constraint.
-        this.roads = [{xMin: -roadHalf, xMax: roadHalf, zMin: endZ, zMax: 12}];
+        // The walkable avenue corridor includes the raised sidewalks flanking
+        // it, so a learner can step onto them rather than being clamped off.
+        var swWidth = 2.4;
+        this.roads = [{xMin: -(roadHalf + swWidth), xMax: roadHalf + swWidth, zMin: endZ, zMax: 12}];
 
         // Main avenue surface with glowing edge lines.
         this.paveStrip(0, (12 + endZ) / 2, roadHalf * 2, 12 - endZ, 0);
         [-roadHalf, roadHalf].forEach(function(x) {
             self.neonEdge(x, 0.05, 12, x, 0.05, endZ);
+        });
+        // Slightly raised sidewalks flanking the avenue, textured (or plain
+        // concrete when no sidewalk texture is set), built in segments that
+        // leave a gap at each side-street mouth on the matching side so a
+        // sidewalk never runs a kerb across a branch entrance.
+        var swX = roadHalf + swWidth / 2;
+        var swGap = 4.9; // Half-width of the opening at each mouth (streetHalf + margin).
+        [-1, 1].forEach(function(sdir) {
+            var blocks = [];
+            sections.forEach(function(section, i) {
+                if (((i % 2 === 0) ? -1 : 1) === sdir) {
+                    blocks.push(startZ - i * spacing);
+                }
+            });
+            blocks.sort(function(a, b) {
+                return a - b;
+            });
+            var cursor = endZ;
+            for (var b = 0; b < blocks.length; b++) {
+                var gapStart = blocks[b] - swGap;
+                if (gapStart > cursor) {
+                    self.buildSidewalk(sdir * swX, (cursor + gapStart) / 2, swWidth, gapStart - cursor);
+                }
+                cursor = Math.max(cursor, blocks[b] + swGap);
+            }
+            if (cursor < 12) {
+                self.buildSidewalk(sdir * swX, (cursor + 12) / 2, swWidth, 12 - cursor);
+            }
         });
         // A few reflected-light streaks down the wet avenue.
         for (var s = 0; s < 5; s++) {
@@ -2471,12 +2518,17 @@ define('format_mnemo/vr', [], function() {
             // where it actually stands rather than its default slot.
             var tf = act.transform || {};
             var ts = tf.scale > 0 ? tf.scale : 1;
-            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0), built.w * ts, built.d * ts);
+            // Include the per-axis width/depth multipliers so a widened or
+            // deepened building's footprint keeps scattered props clear of it.
+            var tsx = tf.sx > 0 ? tf.sx : 1;
+            var tsz = tf.sz > 0 ? tf.sz : 1;
+            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
+                built.w * ts * tsx, built.d * ts * tsz);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
-            // Pass the signboard so it can be kept facing the street even when
-            // the teacher rotates the building in the editor.
-            self.registerEditable(act, built.group, bx, 0, bz, built.sign);
+            // Pass the signboard (kept street-facing) and the scale node, which
+            // takes the non-uniform width/height/depth so the sign never shears.
+            self.registerEditable(act, built.group, bx, 0, bz, built.sign, built.scalenode);
         });
     };
 
@@ -2510,6 +2562,52 @@ define('format_mnemo/vr', [], function() {
         this.scene.add(road);
         if (this.roadTexture) {
             this.registerSurfaceMesh('road', road, w, d);
+        }
+    };
+
+    /**
+     * Build a slightly raised sidewalk slab centred on (cx, cz): a concrete
+     * kerb body with a walking surface on top. When a site-wide sidewalk
+     * texture is set, the top tiles it (and is texture-size editable); otherwise
+     * a plain concrete top is used. The kerb's height reads as a low step up
+     * from the road.
+     *
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     * @param {Number} w Width along x.
+     * @param {Number} d Depth along z.
+     */
+    Cyberspace.prototype.buildSidewalk = function(cx, cz, w, d) {
+        var THREE = this.THREE;
+        var height = 0.18;
+        // The kerb body: a low concrete slab that gives the sidewalk a visible
+        // raised edge above the road.
+        var body = new THREE.Mesh(
+            new THREE.BoxGeometry(w, height, d),
+            new THREE.MeshStandardMaterial({color: 0x2a2f38, roughness: 0.9, metalness: 0.1})
+        );
+        body.position.set(cx, height / 2, cz);
+        body.castShadow = true;
+        body.receiveShadow = true;
+        this.scene.add(body);
+        // The walking surface on top, textured when a sidewalk texture is set.
+        var topmat = new THREE.MeshStandardMaterial({
+            color: this.sidewalkTexture ? 0xffffff : 0x3a414c,
+            roughness: 0.85, metalness: 0.1
+        });
+        if (this.sidewalkTexture) {
+            var div = this.sidewalkScale * this.sidewalkTexMult;
+            topmat.map = this.tiledClone(this.sidewalkTexture, w / div, d / div);
+        }
+        var top = new THREE.Mesh(new THREE.PlaneGeometry(w, d), topmat);
+        top.rotation.x = -Math.PI / 2;
+        top.position.set(cx, height + 0.01, cz);
+        top.receiveShadow = true;
+        this.scene.add(top);
+        // Only a textured sidewalk offers the texture-size control (matching
+        // road/ground); a plain concrete top has nothing to retune.
+        if (this.sidewalkTexture) {
+            this.registerSurfaceMesh('sidewalk', top, w, d);
         }
     };
 
@@ -2574,8 +2672,7 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} d Plane depth (z), for recomputing the tile repeat.
      */
     Cyberspace.prototype.registerSurfaceMesh = function(type, mesh, w, d) {
-        var list = type === 'road' ? this.roadMeshes : this.groundMeshes;
-        list.push({mesh: mesh, w: w, d: d});
+        this.surfaceMeshList(type).push({mesh: mesh, w: w, d: d});
         if (this.config.canedit) {
             mesh.userData.mnemoEditable = this.surfaceEditable(type);
             this.surfacePickMeshes.push(mesh);
@@ -2583,12 +2680,45 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The recorded mesh list for a surface type (road, ground or sidewalk).
+     *
+     * @param {String} type The surface type.
+     * @return {Array} The list of {mesh, w, d} records.
+     */
+    Cyberspace.prototype.surfaceMeshList = function(type) {
+        if (type === 'ground') {
+            return this.groundMeshes;
+        }
+        if (type === 'sidewalk') {
+            return this.sidewalkMeshes;
+        }
+        return this.roadMeshes;
+    };
+
+    /**
+     * The source texture, base tiling scale and stored size-multiplier for a
+     * surface type, as {tex, base, mult}.
+     *
+     * @param {String} type The surface type.
+     * @return {Object} The surface's texture parameters.
+     */
+    Cyberspace.prototype.surfaceParams = function(type) {
+        if (type === 'ground') {
+            return {tex: this.groundTexture, base: this.groundScale, mult: this.groundTexMult};
+        }
+        if (type === 'sidewalk') {
+            return {tex: this.sidewalkTexture, base: this.sidewalkScale, mult: this.sidewalkTexMult};
+        }
+        return {tex: this.roadTexture, base: this.roadScale, mult: this.roadTexMult};
+    };
+
+    /**
      * Get (creating once) the shared editable for a surface type. Unlike object
      * editables it has no single group; picking any of its meshes selects it and
      * the editor offers only a texture-size control, persisted per course under
-     * the singleton key road:0 / ground:0 (reusing the scale field).
+     * the singleton key road:0 / ground:0 / sidewalk:0 (reusing the scale field).
      *
-     * @param {String} type Either 'road' or 'ground'.
+     * @param {String} type The surface type: road, ground or sidewalk.
      * @return {Object} The shared surface editable record.
      */
     Cyberspace.prototype.surfaceEditable = function(type) {
@@ -2596,7 +2726,12 @@ define('format_mnemo/vr', [], function() {
             return this.surfaceEditables[type];
         }
         var s = this.config.strings || {};
-        var mult = type === 'road' ? this.roadTexMult : this.groundTexMult;
+        var names = {
+            road: s.editroadsurface || 'Road surface',
+            ground: s.editgroundsurface || 'Ground surface',
+            sidewalk: s.editsidewalksurface || 'Sidewalk surface'
+        };
+        var mult = this.surfaceParams(type).mult;
         var editable = {
             cmid: null,
             objkey: type + ':0',
@@ -2604,9 +2739,7 @@ define('format_mnemo/vr', [], function() {
             surfaceType: type,
             group: null,
             emits: false,
-            name: type === 'road' ?
-                (s.editroadsurface || 'Road surface') :
-                (s.editgroundsurface || 'Ground surface'),
+            name: names[type] || type,
             transform: {scale: mult > 0 ? mult : 1, x: 0, y: 0, z: 0, rot: 0, brightness: 1}
         };
         this.surfaceEditables[type] = editable;
@@ -2622,12 +2755,13 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.retileSurface = function(editable) {
         var type = editable.surfaceType;
-        var tex = type === 'road' ? this.roadTexture : this.groundTexture;
+        var params = this.surfaceParams(type);
+        var tex = params.tex;
         if (!tex) {
             return;
         }
-        var list = type === 'road' ? this.roadMeshes : this.groundMeshes;
-        var base = type === 'road' ? this.roadScale : this.groundScale;
+        var list = this.surfaceMeshList(type);
+        var base = params.base;
         var mult = editable.transform.scale > 0 ? editable.transform.scale : 1;
         var div = base * mult;
         for (var i = 0; i < list.length; i++) {
@@ -2823,10 +2957,15 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.makeStructure = function(act, style) {
         var THREE = this.THREE;
         var group = new THREE.Group();
-        // The procedural mass lives in its own sub-group so an attached building
-        // model (buildingModelUrl) can hide it while the sign stays.
+        // A scale node holds everything that stretches with the editor's
+        // width/height/depth (the body and the click-proxy) but NOT the sign,
+        // so an anisotropic scale never shears the sign - it keeps facing the
+        // street. The procedural mass lives in its own sub-group so an attached
+        // building model (buildingModelUrl) can hide it while the sign stays.
+        var scalenode = new THREE.Group();
+        group.add(scalenode);
         var body = new THREE.Group();
-        group.add(body);
+        scalenode.add(body);
         var w = style.footprint[0];
         var d = style.footprint[1];
         var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
@@ -2888,9 +3027,10 @@ define('format_mnemo/vr', [], function() {
         // whatever the model's geometry or scale (e.g. a very small model). It
         // is never rendered (visible=false, casts no shadow), but Three still
         // raycasts it, giving a reliable selection target.
-        group.add(this.editProxy(w, h, d));
+        scalenode.add(this.editProxy(w, h, d));
 
-        return {group: group, panel: sign.panel, body: body, sign: sign.group, w: w, d: d, h: h};
+        return {group: group, scalenode: scalenode, panel: sign.panel, body: body,
+            sign: sign.group, w: w, d: d, h: h};
     };
 
     /**
@@ -3850,6 +3990,9 @@ define('format_mnemo/vr', [], function() {
             '<div class="format-mnemo__editor-caption">' + (s.editediting || 'Editing') + '</div>' +
             '<div class="format-mnemo__editor-title" data-mnemo-ed-name></div>' +
             field('scale', s.editscale || 'Scale', 0.3, 4, 0.05) +
+            field('sx', s.editwidth || 'Width', 0.3, 4, 0.05) +
+            field('sy', s.editheight || 'Height', 0.3, 4, 0.05) +
+            field('sz', s.editdepth || 'Depth', 0.3, 4, 0.05) +
             field('x', (s.editmove || 'Move') + ' X', -20, 20, 0.5) +
             field('y', (s.editmove || 'Move') + ' Y', -10, 30, 0.5) +
             field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5) +
@@ -3872,7 +4015,7 @@ define('format_mnemo/vr', [], function() {
         this.editorPanel = panel;
 
         // Live-apply slider changes to the selected object.
-        var keys = ['scale', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'];
+        var keys = ['scale', 'sx', 'sy', 'sz', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'];
         keys.forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             input.addEventListener('input', function() {
@@ -3920,7 +4063,8 @@ define('format_mnemo/vr', [], function() {
             if (!self.selected) {
                 return;
             }
-            self.selected.transform = {scale: 1, x: 0, y: 0, z: 0, rot: 0, brightness: 1};
+            self.selected.transform = {scale: 1, sx: 1, sy: 1, sz: 1,
+                x: 0, y: 0, z: 0, rot: 0, brightness: 1};
             if (self.selected.kind === 'surface') {
                 self.retileSurface(self.selected);
             } else {
@@ -3947,6 +4091,9 @@ define('format_mnemo/vr', [], function() {
             } else {
                 self.deselectEditable();
             }
+            // The alignment grid is shown throughout the editor (edit or place
+            // mode) so buildings and objects can be lined up against it.
+            self.showGroundGrid(self.editMode || self.placeMode);
         });
 
         this.buildPlacer();
@@ -4029,7 +4176,7 @@ define('format_mnemo/vr', [], function() {
         if (this.placerPanel) {
             this.placerPanel.hidden = !this.placeMode;
         }
-        this.showGroundGrid(this.placeMode);
+        this.showGroundGrid(this.placeMode || this.editMode);
         if (this.placeMode && this.editMode) {
             // Leave edit mode without recursing back into this method.
             this.editMode = false;
@@ -4062,14 +4209,16 @@ define('format_mnemo/vr', [], function() {
             span = Math.ceil(span / g) * g;
             var divisions = Math.round(span / g);
             var grid = new THREE.GridHelper(span, divisions, this.palette.primary, this.palette.primary);
-            // Centre on a grid multiple so the drawn lines land on the same
-            // lattice placement snaps to.
-            grid.position.set(0, 0.06, this.snapCoord((zmin + zmax) / 2));
+            // Sit clearly above the road strips and textured plazas so those
+            // opaque surfaces do not wash the lines out, centred on a grid
+            // multiple so the drawn lines land on the lattice placement snaps to.
+            grid.position.set(0, 0.12, this.snapCoord((zmin + zmax) / 2));
             if (grid.material) {
                 grid.material.transparent = true;
-                grid.material.opacity = 0.35;
+                grid.material.opacity = 0.6;
                 grid.material.depthWrite = false;
             }
+            grid.renderOrder = 3;
             this.scene.add(grid);
             this.groundGrid = grid;
         }
@@ -4194,8 +4343,12 @@ define('format_mnemo/vr', [], function() {
         var panel = this.editorPanel;
         panel.querySelector('[data-mnemo-ed-name]').textContent = editable.name || '';
         var t = editable.transform;
+        var one = function(v) {
+            return typeof v === 'number' ? v : 1;
+        };
         // Texture size reuses the transform's scale field for a surface.
-        var map = {scale: t.scale, x: t.x, y: t.y, z: t.z, rot: t.rot,
+        var map = {scale: t.scale, sx: one(t.sx), sy: one(t.sy), sz: one(t.sz),
+            x: t.x, y: t.y, z: t.z, rot: t.rot,
             brightness: t.brightness !== undefined ? t.brightness : 1, texsize: t.scale};
         Object.keys(map).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
@@ -4204,7 +4357,8 @@ define('format_mnemo/vr', [], function() {
         // object offers the transform sliders (and brightness only when it emits
         // light). Toggle each row to match the selected object's kind.
         var surface = editable.kind === 'surface';
-        var rows = {scale: !surface, x: !surface, y: !surface, z: !surface,
+        var rows = {scale: !surface, sx: !surface, sy: !surface, sz: !surface,
+            x: !surface, y: !surface, z: !surface,
             rot: !surface, brightness: !surface && editable.emits, texsize: surface};
         Object.keys(rows).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
@@ -4222,10 +4376,11 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.syncEditorOutputs = function() {
         var panel = this.editorPanel;
-        ['scale', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'].forEach(function(key) {
+        var twodp = {scale: 1, sx: 1, sy: 1, sz: 1, brightness: 1, texsize: 1};
+        ['scale', 'sx', 'sy', 'sz', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'].forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             var out = panel.querySelector('[data-mnemo-out="' + key + '"]');
-            out.textContent = (key === 'scale' || key === 'brightness' || key === 'texsize') ?
+            out.textContent = twodp[key] ?
                 parseFloat(input.value).toFixed(2) : Math.round(parseFloat(input.value));
         });
     };
@@ -4250,14 +4405,19 @@ define('format_mnemo/vr', [], function() {
         saveBtn.disabled = true;
         status.textContent = s.editsaving || 'Saving…';
         var t = editable.transform;
+        var one = function(v) {
+            return typeof v === 'number' ? v : 1;
+        };
         var savedText = s.editsaved || 'Saved';
         var errorText = s.editsaveerror || 'Could not save';
         // Activities save by course-module id; non-activity scene objects save
-        // by their per-course slot key (with brightness).
+        // by their per-course slot key (with brightness). Both carry the
+        // per-axis width/height/depth multipliers.
         var request = editable.objkey ? {
             methodname: 'format_mnemo_set_scene_object',
             args: {
                 courseid: this.config.courseid, objkey: editable.objkey, scale: t.scale,
+                scalex: one(t.sx), scaley: one(t.sy), scalez: one(t.sz),
                 offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot,
                 brightness: t.brightness !== undefined ? t.brightness : 1
             }
@@ -4265,6 +4425,7 @@ define('format_mnemo/vr', [], function() {
             methodname: 'format_mnemo_set_transform',
             args: {
                 cmid: editable.cmid, scale: t.scale,
+                scalex: one(t.sx), scaley: one(t.sy), scalez: one(t.sz),
                 offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
             }
         };
@@ -4568,8 +4729,11 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} baseZ Default world z.
      * @param {Object} sign Optional signboard group to keep street-facing when
      *     the building is rotated (counter-rotated against the group).
+     * @param {Object} scalenode Optional child group that takes the non-uniform
+     *     width/height/depth so the sign (a sibling) is never sheared; defaults
+     *     to the group itself.
      */
-    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign) {
+    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign, scalenode) {
         var t = act.transform || {};
         var editable = {
             cmid: act.id,
@@ -4577,11 +4741,17 @@ define('format_mnemo/vr', [], function() {
             name: act.name,
             group: group,
             sign: sign || null,
+            // The node that takes the non-uniform width/height/depth (the
+            // building body, kept apart from the sign so the sign never shears);
+            // falls back to the group for objects with no separate scale node.
+            scaleNode: scalenode || group,
+            signBaseZ: sign ? sign.position.z : 0,
             baseX: baseX, baseY: baseY, baseZ: baseZ,
             baseRotY: group.rotation.y,
             emits: false,
             transform: {
                 scale: t.scale > 0 ? t.scale : 1,
+                sx: t.sx > 0 ? t.sx : 1, sy: t.sy > 0 ? t.sy : 1, sz: t.sz > 0 ? t.sz : 1,
                 x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
             }
         };
@@ -4610,12 +4780,28 @@ define('format_mnemo/vr', [], function() {
         var g = editable.group;
         g.position.set(editable.baseX + t.x, editable.baseY + t.y, editable.baseZ + t.z);
         g.rotation.y = editable.baseRotY + t.rot * Math.PI / 180;
-        g.scale.setScalar(t.scale);
+        // Uniform scale times the per-axis width/height/depth multipliers, so a
+        // teacher can stretch an object as well as scale it evenly.
+        var sx = t.sx > 0 ? t.sx : 1;
+        var sy = t.sy > 0 ? t.sy : 1;
+        var sz = t.sz > 0 ? t.sz : 1;
+        var node = editable.scaleNode || g;
+        if (node !== g) {
+            // The group carries only the uniform scale (and rotation), so the
+            // sign under it is never sheared; the scale node takes the
+            // anisotropic stretch of the body.
+            g.scale.setScalar(t.scale);
+            node.scale.set(sx, sy, sz);
+        } else {
+            g.scale.set(t.scale * sx, t.scale * sy, t.scale * sz);
+        }
         // Keep the signboard facing the street: counter-rotate it against the
         // building's editor rotation so its world orientation stays where it was
-        // placed (the street centreline), even as the building turns.
+        // placed (the street centreline), even as the building turns; and track
+        // the (depth-scaled) front face so a deepened building keeps it on-face.
         if (editable.sign) {
             editable.sign.rotation.y = -t.rot * Math.PI / 180;
+            editable.sign.position.z = (editable.signBaseZ || 0) * sz;
         }
         if (this.selBox) {
             this.selBox.update();
@@ -4717,6 +4903,7 @@ define('format_mnemo/vr', [], function() {
             emits: !!emits,
             transform: {
                 scale: o.scale > 0 ? o.scale : 1,
+                sx: o.sx > 0 ? o.sx : 1, sy: o.sy > 0 ? o.sy : 1, sz: o.sz > 0 ? o.sz : 1,
                 x: o.x || 0, y: o.y || 0, z: o.z || 0, rot: o.rot || 0,
                 // Brightness may legitimately be 0 (off), so keep any finite
                 // stored value rather than treating 0 as "unset".
@@ -5911,7 +6098,7 @@ define('format_mnemo/vr', [], function() {
     function loadSceneAssets(config, THREE) {
         var assets = {
             signFontFamily: null, signTexture: null,
-            roadTexture: null, groundTexture: null
+            roadTexture: null, groundTexture: null, sidewalkTexture: null
         };
         var jobs = [];
 
@@ -5950,6 +6137,11 @@ define('format_mnemo/vr', [], function() {
         if (config.groundtextureurl) {
             jobs.push(loadBoundedTexture(config.groundtextureurl, THREE, true, function(tex) {
                 assets.groundTexture = tex;
+            }));
+        }
+        if (config.sidewalktextureurl) {
+            jobs.push(loadBoundedTexture(config.sidewalktextureurl, THREE, true, function(tex) {
+                assets.sidewalkTexture = tex;
             }));
         }
 

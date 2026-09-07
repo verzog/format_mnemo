@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="course/format/mnemo/db" VERSION="20260909" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
+<XMLDB PATH="course/format/mnemo/db" VERSION="20260910" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
 >
@@ -10,6 +10,9 @@
         <FIELD NAME="cmid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course module the building model is attached to."/>
         <FIELD NAME="model" TYPE="char" LENGTH="1333" NOTNULL="true" SEQUENCE="false" COMMENT="A .glb model file name (resolved against the asset pack) or a full URL. May be empty when only an in-view transform is set."/>
         <FIELD NAME="scale" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view uniform scale multiplier for the activity's object."/>
+        <FIELD NAME="scalex" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view width (x) multiplier, applied on top of the uniform scale."/>
+        <FIELD NAME="scaley" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view height (y) multiplier, applied on top of the uniform scale."/>
+        <FIELD NAME="scalez" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view depth (z) multiplier, applied on top of the uniform scale."/>
         <FIELD NAME="offsetx" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-x offset from the object's default position."/>
         <FIELD NAME="offsety" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-y offset from the object's default position."/>
         <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the object's default position."/>
@@ -29,6 +32,9 @@
         <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course the scene object belongs to."/>
         <FIELD NAME="objkey" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="A stable per-course slot key, e.g. lamp:3, kiosk:1, gate:0."/>
         <FIELD NAME="scale" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view uniform scale multiplier."/>
+        <FIELD NAME="scalex" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view width (x) multiplier, applied on top of the uniform scale."/>
+        <FIELD NAME="scaley" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view height (y) multiplier, applied on top of the uniform scale."/>
+        <FIELD NAME="scalez" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view depth (z) multiplier, applied on top of the uniform scale."/>
         <FIELD NAME="offsetx" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-x offset from the default position."/>
         <FIELD NAME="offsety" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-y offset from the default position."/>
         <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the default position."/>

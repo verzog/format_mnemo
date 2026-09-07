@@ -71,7 +71,8 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
         // One row per course module (the table has a unique cmid index), sourced
         // for the module being backed up.
         $building = new backup_nested_element('building', ['id'], [
-            'model', 'scale', 'offsetx', 'offsety', 'offsetz', 'rotation', 'timemodified',
+            'model', 'scale', 'scalex', 'scaley', 'scalez',
+            'offsetx', 'offsety', 'offsetz', 'rotation', 'timemodified',
         ]);
         $pluginwrapper->add_child($building);
 
@@ -112,7 +113,8 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
         $pluginwrapper->add_child($sceneobjs);
 
         $sceneobj = new backup_nested_element('sceneobj', ['id'], [
-            'objkey', 'scale', 'offsetx', 'offsety', 'offsetz', 'rotation', 'brightness', 'timemodified',
+            'objkey', 'scale', 'scalex', 'scaley', 'scalez',
+            'offsetx', 'offsety', 'offsetz', 'rotation', 'brightness', 'timemodified',
         ]);
         $sceneobjs->add_child($sceneobj);
 

@@ -605,6 +605,7 @@ const scenarios = [
                 config: {canedit: false}, roadMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
                 paveStrip: CS.prototype.paveStrip
             };
@@ -644,6 +645,7 @@ const scenarios = [
                 config: {canedit: false}, groundMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
                 groundPatchAt: CS.prototype.groundPatchAt
             });
@@ -825,7 +827,10 @@ const scenarios = [
                 THREE, roadTexture: tex, groundTexture: null,
                 roadScale: 8, groundScale: 8,
                 roadMeshes: [{mesh, w: 80, d: 80}], groundMeshes: [],
+                roadTexMult: 1, groundTexMult: 1,
                 tiledClone: CS.prototype.tiledClone,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
+                surfaceParams: CS.prototype.surfaceParams,
                 retileSurface: CS.prototype.retileSurface
             };
             const ed = {surfaceType: 'road', transform: {scale: 1}};
@@ -850,6 +855,8 @@ const scenarios = [
                 surfaceEditables: {}, surfacePickMeshes: [],
                 roadTexMult: 3, groundTexMult: 1,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
+                surfaceParams: CS.prototype.surfaceParams,
                 surfaceEditable: CS.prototype.surfaceEditable
             };
             self.registerSurfaceMesh('road', mesh, 40, 40);
@@ -874,6 +881,8 @@ const scenarios = [
                 surfaceEditables: {}, surfacePickMeshes: [],
                 roadTexMult: 1, groundTexMult: 1,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
+                surfaceParams: CS.prototype.surfaceParams,
                 surfaceEditable: CS.prototype.surfaceEditable
             };
             self.registerSurfaceMesh('ground', mesh, 5, 5);
@@ -891,6 +900,7 @@ const scenarios = [
             const self = {
                 surfaceEditables: {}, roadTexMult: 1, groundTexMult: 2,
                 config: {strings: {editgroundsurface: 'GS'}},
+                surfaceParams: CS.prototype.surfaceParams,
                 surfaceEditable: CS.prototype.surfaceEditable
             };
             const a = self.surfaceEditable('ground');
@@ -1102,6 +1112,82 @@ const scenarios = [
             const pass = removed[0] === group && self.editables.length === 0 &&
                 self.placedObjects.length === 0 && self.selected === null;
             return {pass, detail: `removed=${removed.length} eds=${self.editables.length} sel=${self.selected}`};
+        }
+    },
+    {
+        name: 'editor: applyTransform applies non-uniform width/height/depth',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const self = {THREE, selBox: null, selLabel: null, selected: null, renderer: null};
+            const ed = {
+                group: g, baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 2, sx: 1.5, sy: 0.5, sz: 1, x: 0, y: 0, z: 0, rot: 0}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // Final scale is the uniform scale times each axis multiplier.
+            const pass = Math.abs(g.scale.x - 3) < 1e-6 &&
+                Math.abs(g.scale.y - 1) < 1e-6 && Math.abs(g.scale.z - 2) < 1e-6;
+            return {pass, detail: `scale=${g.scale.x},${g.scale.y},${g.scale.z}`};
+        }
+    },
+    {
+        name: 'editor: a scale node takes the stretch so the sign is not sheared',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const node = new THREE.Group();
+            const sign = new THREE.Group();
+            g.add(node);
+            g.add(sign);
+            const self = {THREE, selBox: null, selLabel: null, selected: null, renderer: null};
+            const ed = {
+                group: g, scaleNode: node, sign: sign, signBaseZ: 2,
+                baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 2, sx: 1.5, sy: 1, sz: 0.5, x: 0, y: 0, z: 0, rot: 30}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // The group carries only the uniform scale (so the sign, its child,
+            // is never anisotropically scaled); the node carries the stretch.
+            const pass = Math.abs(g.scale.x - 2) < 1e-6 && Math.abs(g.scale.z - 2) < 1e-6 &&
+                Math.abs(node.scale.x - 1.5) < 1e-6 && Math.abs(node.scale.z - 0.5) < 1e-6 &&
+                Math.abs(sign.scale.x - 1) < 1e-6 &&
+                Math.abs(sign.position.z - 1) < 1e-6; // signBaseZ(2) * sz(0.5).
+            return {pass, detail: `g=${g.scale.x} node=${node.scale.x} signz=${sign.position.z}`};
+        }
+    },
+    {
+        name: 'surface: sidewalk registers a singleton editable and retiles',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(10, 80), new THREE.MeshStandardMaterial());
+            const self = {
+                THREE, roadMeshes: [], groundMeshes: [], sidewalkMeshes: [],
+                surfaceEditables: {}, surfacePickMeshes: [],
+                config: {canedit: true, strings: {editsidewalksurface: 'SW'}},
+                roadTexture: null, groundTexture: null, sidewalkTexture: tex,
+                roadScale: 8, groundScale: 8, sidewalkScale: 4,
+                roadTexMult: 1, groundTexMult: 1, sidewalkTexMult: 2,
+                tiledClone: CS.prototype.tiledClone,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
+                surfaceParams: CS.prototype.surfaceParams,
+                surfaceEditable: CS.prototype.surfaceEditable,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                retileSurface: CS.prototype.retileSurface
+            };
+            self.registerSurfaceMesh('sidewalk', mesh, 10, 80);
+            const ed = self.surfaceEditables.sidewalk;
+            self.retileSurface(ed);
+            // div = sidewalkScale * mult = 4 * 2 = 8 -> repeat y = 80 / 8 = 10.
+            const pass = ed.objkey === 'sidewalk:0' && ed.name === 'SW' &&
+                Math.abs(ed.transform.scale - 2) < 1e-6 && self.sidewalkMeshes.length === 1 &&
+                mesh.userData.mnemoEditable === ed && mesh.material.map.repeat.y === 10;
+            return {pass, detail: `key=${ed.objkey} rep=${mesh.material.map.repeat.y}`};
         }
     }
 ];

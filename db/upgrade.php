@@ -127,5 +127,26 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090900, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026091000) {
+        // Per-axis width/height/depth multipliers for the in-view editor, added
+        // to both transform tables so an object can be stretched, not only
+        // scaled uniformly. Default 1 keeps existing rows unchanged.
+        foreach (['format_mnemo_building', 'format_mnemo_sceneobj'] as $tablename) {
+            $table = new xmldb_table($tablename);
+            $fields = [
+                new xmldb_field('scalex', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '1', 'scale'),
+                new xmldb_field('scaley', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '1', 'scalex'),
+                new xmldb_field('scalez', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '1', 'scaley'),
+            ];
+            foreach ($fields as $field) {
+                if (!$dbman->field_exists($table, $field)) {
+                    $dbman->add_field($table, $field);
+                }
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026091000, 'format', 'mnemo');
+    }
+
     return true;
 }

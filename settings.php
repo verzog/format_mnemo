@@ -186,9 +186,32 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
-    // Texture tiling scale (world units per tile) for the road and ground
-    // textures. Larger values stretch the texture over more ground (fewer, more
-    // spread-out tiles); smaller values repeat it more densely.
+    // Sidewalk texture, tiled onto the raised sidewalks flanking the avenue.
+    // Left blank, the sidewalks keep their plain concrete top. Point this at a
+    // hosted tileable image, or upload one below; the URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/sidewalktextureurl',
+        get_string('setting_sidewalktextureurl', 'format_mnemo'),
+        get_string('setting_sidewalktextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a tileable sidewalk texture straight into Moodle instead of hosting
+    // it at a URL. The file lands in the 'sidewalktexture' file area at system
+    // context and is served via pluginfile. The URL setting above, if set, wins.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/sidewalktexture',
+        get_string('setting_sidewalktexture', 'format_mnemo'),
+        get_string('setting_sidewalktexture_desc', 'format_mnemo'),
+        'sidewalktexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Texture tiling scale (world units per tile) for the road, ground and
+    // sidewalk textures. Larger values stretch the texture over more ground
+    // (fewer, more spread-out tiles); smaller values repeat it more densely.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/roadtexturescale',
         get_string('setting_roadtexturescale', 'format_mnemo'),
@@ -201,6 +224,13 @@ if ($ADMIN->fulltree) {
         get_string('setting_groundtexturescale', 'format_mnemo'),
         get_string('setting_groundtexturescale_desc', 'format_mnemo'),
         '8',
+        PARAM_INT
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/sidewalktexturescale',
+        get_string('setting_sidewalktexturescale', 'format_mnemo'),
+        get_string('setting_sidewalktexturescale_desc', 'format_mnemo'),
+        '4',
         PARAM_INT
     ));
 

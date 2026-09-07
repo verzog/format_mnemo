@@ -104,16 +104,18 @@ off).
   from the rest.
 - **In-view object editor** — teachers (anyone who can edit the course) get an
   **Edit layout** button on the 3D view. Turn it on, click an object to select
-  it, then scale, move and rotate it with the panel; light-emitting objects also
-  get a **brightness** slider. **Save** persists the change so it renders that
-  way for every learner. Activity buildings and video screens save per-activity;
-  decorative props (kiosks, lamps, barriers) and the topic gates and pylons save
-  per-course by a layout slot (so adding or removing activities later can shift
-  which item a saved edit lands on). Clicking a **road or ground surface**
-  selects it and offers a **texture size** control that retiles every strip or
-  plaza of that type together, saved per course. A **Snap to grid** toggle
-  aligns edits to the same grid the city is laid out on. Guarded by the
-  activity-editing capability, so learners never see it.
+  it, then scale it evenly, stretch it by **width, height and depth**, move and
+  rotate it with the panel; light-emitting objects also get a **brightness**
+  slider. **Save** persists the change so it renders that way for every learner.
+  Activity buildings and video screens save per-activity; decorative props
+  (kiosks, lamps, barriers) and the topic gates and pylons save per-course by a
+  layout slot (so adding or removing activities later can shift which item a
+  saved edit lands on). Clicking a **road, ground or sidewalk surface** selects
+  it and offers a **texture size** control that retiles every strip or plaza of
+  that type together, saved per course. A **Snap to grid** toggle aligns edits
+  to the grid the city is laid out on, and the alignment grid is shown over the
+  scene while editing so buildings and objects can be lined up against it.
+  Guarded by the activity-editing capability, so learners never see it.
 - **Grid-aligned layout** — the generated city (buildings, streets, props,
   gates and pylons) snaps to a 2-unit grid, so everything lines up consistently
   and edits made with snap-to-grid stay aligned with it.
@@ -122,6 +124,10 @@ off).
   it. Placed props are saved per course, appear for every learner, and can be
   moved, scaled, rotated, dimmed or **deleted** with the object editor. They use
   the same bundled or uploaded asset-pack models as the rest of the scene.
+- **Raised sidewalks** — slightly raised concrete sidewalks flank the avenue.
+  An optional site-wide **sidewalk texture** (URL or upload) dresses their
+  walking surface, and its tiling is texture-size editable like the road and
+  ground.
 - **Bring-your-own asset packs** — swap the bundled props for your own
   CC0/licensed models, either by **uploading `.glb` files straight into Moodle**
   (admin settings) or by pointing the plugin at a **URL** of a hosted pack. Name
@@ -237,10 +243,14 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
   of a set size around each building (see **Ground patch size**). Point the URL
   at a hosted tileable image, or upload one; the URL wins. **Leave both blank**
   to keep the dark neon floor.
-- **Road texture scale** / **Ground texture scale** — how many world units each
-  texture tile covers. Larger values stretch the texture over more ground
-  (fewer, larger tiles); smaller values repeat it more densely. Use these to
-  tune the apparent texture size.
+- **Sidewalk texture URL** / **Upload sidewalk texture** — dress the raised
+  sidewalks flanking the avenue with a tileable image. Point the URL at a hosted
+  image, or upload one; the URL wins. **Leave both blank** to keep the plain
+  concrete sidewalks.
+- **Road texture scale** / **Ground texture scale** / **Sidewalk texture scale**
+  — how many world units each texture tile covers. Larger values stretch the
+  texture over more ground (fewer, larger tiles); smaller values repeat it more
+  densely. Use these to tune the apparent texture size.
 - **Ground patch size** — the size (world units) of the textured patch laid
   around each building. Set to `0` to disable the patches even when a ground
   texture is configured.
