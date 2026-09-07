@@ -1425,14 +1425,18 @@ const scenarios = [
             const hasAvenue = on.lampSlots.some((s) => Math.abs(s.x + 6.1) < 1e-6) &&
                 on.lampSlots.some((s) => Math.abs(s.x - 6.1) < 1e-6);
             const hasStreet = on.lampSlots.some((s) => s.x > 6 && Math.abs(s.rotY) === Math.PI / 2);
-            // Two corner lamps at the mouth (x snapped near 5.5+0.6).
-            const corners = on.lampSlots.filter((s) => Math.abs(s.x - 6) < 1.0 &&
+            // Two corner lamps at the mouth, offset from the pylon (x ≈ 5.5+1.8→8).
+            const corners = on.lampSlots.filter((s) => Math.abs(s.x - 8) < 1.0 &&
                 (Math.abs(s.z + 34) < 4 || Math.abs(s.z + 46) < 4));
+            // Interleaved: a side-street lamp appears among the first few slots
+            // rather than after every avenue lamp (so the light cap is shared).
+            const earlyStreet = on.lampSlots.slice(0, 8).some((s) => s.x > 7);
             // Off clears the slots.
             const off = Object.assign({}, base, {lampSpacing: 0, lampCorners: true, roads});
             off.computeLampSlots();
-            const pass = hasAvenue && hasStreet && corners.length >= 2 && off.lampSlots.length === 0;
-            return {pass, detail: `n=${on.lampSlots.length} avenue=${hasAvenue} street=${hasStreet} corners=${corners.length} off=${off.lampSlots.length}`};
+            const pass = hasAvenue && hasStreet && corners.length >= 2 && earlyStreet &&
+                off.lampSlots.length === 0;
+            return {pass, detail: `n=${on.lampSlots.length} avenue=${hasAvenue} street=${hasStreet} corners=${corners.length} early=${earlyStreet} off=${off.lampSlots.length}`};
         }
     },
     {
@@ -1453,6 +1457,7 @@ const scenarios = [
                     {x: -6, z: 4, rotY: Math.PI}
                 ],
                 footprints: [{xMin: 4, xMax: 8, zMin: -8, zMax: -4}],
+                surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt,
                 snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord,
                 gridStep: 2, footprintClear: CS.prototype.footprintClear,
                 addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,

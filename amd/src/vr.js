@@ -2404,16 +2404,26 @@ define('format_mnemo/vr', [], function() {
         }
         var roadHalf = this.roadHalf || 5.5;
         var avenue = this.roads[0];
+
+        // The lamps' actual point lights are capped for performance, so the
+        // avenue and side streets are collected as separate streams and then
+        // interleaved: this spreads the first (lit) lamps across the whole
+        // layout instead of spending the whole budget on the avenue.
+        var avenueStream = [];
         // Avenue: a lamp on each kerb, stepping down z. Left kerb (-x) turns to
         // face the road; the right kerb keeps the model's default facing.
         for (var z = avenue.zMax - 4; z >= avenue.zMin + 4; z -= spacing) {
             var az = this.snapCoord(z);
-            this.lampSlots.push({x: -(roadHalf + 0.6), z: az, rotY: Math.PI});
-            this.lampSlots.push({x: roadHalf + 0.6, z: az, rotY: 0});
+            avenueStream.push({x: -(roadHalf + 0.6), z: az, rotY: Math.PI});
+            avenueStream.push({x: roadHalf + 0.6, z: az, rotY: 0});
         }
+        var streams = [avenueStream];
+
         // Each side street: a lamp on each kerb stepping along x, plus the two
         // mouth corners when enabled. r.zMin/zMax bound the street width; the
         // mouth is the kerb-side end (nearest x=0), the far end is the other.
+        // The near (lower-z) kerb faces +Z toward the street centre and the far
+        // kerb faces -Z (the model's arm points -X, so +/-PI/2 aim it inward).
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
             var zc = (r.zMin + r.zMax) / 2;
@@ -2423,16 +2433,33 @@ define('format_mnemo/vr', [], function() {
             var side = endX >= mouthX ? 1 : -1;
             var zNear = this.snapCoord(zc - streetHalf - 0.6);
             var zFar = this.snapCoord(zc + streetHalf + 0.6);
+            var stream = [];
             if (this.lampCorners) {
-                var cornerX = this.snapCoord(mouthX + side * 0.6);
-                this.lampSlots.push({x: cornerX, z: zNear, rotY: -Math.PI / 2});
-                this.lampSlots.push({x: cornerX, z: zFar, rotY: Math.PI / 2});
+                // Offset from the mouth so the corner lamp does not land on the
+                // topic pylon (which stands at mouthX + side*0.6).
+                var cornerX = this.snapCoord(mouthX + side * 1.8);
+                stream.push({x: cornerX, z: zNear, rotY: Math.PI / 2});
+                stream.push({x: cornerX, z: zFar, rotY: -Math.PI / 2});
             }
             for (var x = mouthX + side * spacing;
                 side > 0 ? x <= endX : x >= endX; x += side * spacing) {
                 var sx = this.snapCoord(x);
-                this.lampSlots.push({x: sx, z: zNear, rotY: -Math.PI / 2});
-                this.lampSlots.push({x: sx, z: zFar, rotY: Math.PI / 2});
+                stream.push({x: sx, z: zNear, rotY: Math.PI / 2});
+                stream.push({x: sx, z: zFar, rotY: -Math.PI / 2});
+            }
+            streams.push(stream);
+        }
+
+        // Round-robin merge the streams so lit lamps are distributed.
+        var longest = 0;
+        streams.forEach(function(s) {
+            longest = Math.max(longest, s.length);
+        });
+        for (var k = 0; k < longest; k++) {
+            for (var si = 0; si < streams.length; si++) {
+                if (streams[si][k]) {
+                    this.lampSlots.push(streams[si][k]);
+                }
             }
         }
     };
@@ -2454,19 +2481,24 @@ define('format_mnemo/vr', [], function() {
             var stored = this.sceneObjects[objkey];
             var px = this.snapBase(slot.x, stored);
             var pz = this.snapBase(slot.z, stored);
-            // Skip a lamp that would stand on a building footprint (only when it
-            // has no stored transform, so a teacher-moved lamp is never dropped).
-            if (!stored && !this.footprintClear(px, pz, 0.8)) {
+            // Skip a lamp that would stand on a building footprint. A stored row
+            // only exempts it when it carries a positional move (a
+            // brightness/scale/rotation-only edit still respects the footprint).
+            var moved = stored && (stored.x || stored.y || stored.z);
+            if (!moved && !this.footprintClear(px, pz, 0.8)) {
                 continue;
             }
+            // Rest the lamp on the surface beneath it so an avenue lamp on the
+            // raised sidewalk stands on the slab rather than sinking into it.
+            var py = this.surfaceHeightAt(px, pz);
             var m = tpl.clone();
-            m.position.set(px, 0, pz);
+            m.position.set(px, py, pz);
             m.rotation.y = slot.rotY;
             this.addLampLight(m);
             this.setShadow(m, true);
             this.scene.add(m);
             this.addPickProxy(m);
-            this.registerSceneEditable(objkey, label, m, px, 0, pz, true);
+            this.registerSceneEditable(objkey, label, m, px, py, pz, true);
         }
     };
 
