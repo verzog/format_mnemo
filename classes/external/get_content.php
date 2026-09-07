@@ -35,8 +35,8 @@ use context_module;
 use format_mnemo\output\scene;
 
 /**
- * Return a readable activity (page, book chapter, label, or the intro of a quiz
- * or assignment) as a flat list of layout blocks - headings, paragraphs, list
+ * Return a readable activity (page, book chapter, or the intro of a quiz or
+ * assignment) as a flat list of layout blocks - headings, paragraphs, list
  * items and images - with inline links preserved. The client lays these out on
  * a 3D reader panel so a learner can read the activity without leaving an
  * immersive session. Access is checked exactly as viewing the module would be,
@@ -81,6 +81,21 @@ class get_content extends external_api {
         $context = context_module::instance($cm->id);
         self::validate_context($context);
 
+        // Login and $cm->uservisible cover availability and course visibility,
+        // but not the module's own view capability (a custom role may lack it).
+        // Since the body is read from the table directly rather than through the
+        // module's view page, enforce that capability here so no protected
+        // content is exposed to a user who could not view it.
+        $viewcaps = [
+            'page' => 'mod/page:view',
+            'book' => 'mod/book:read',
+            'quiz' => 'mod/quiz:view',
+            'assign' => 'mod/assign:view',
+        ];
+        if (isset($viewcaps[$cm->modname])) {
+            require_capability($viewcaps[$cm->modname], $context);
+        }
+
         $result = [
             'cmid' => (int)$cm->id,
             'modname' => $cm->modname,
@@ -110,8 +125,8 @@ class get_content extends external_api {
 
     /**
      * The readable HTML for a single-body module (page content, or the intro of
-     * a label, quiz or assignment), with pluginfile URLs rewritten to absolute
-     * so the client can fetch inline images.
+     * a quiz or assignment), with pluginfile URLs rewritten to absolute so the
+     * client can fetch inline images.
      *
      * @param \moodle_database $db The database.
      * @param \cm_info $cm The course module.
@@ -124,8 +139,6 @@ class get_content extends external_api {
         $sources = [
             'page' => ['table' => 'page', 'field' => 'content', 'format' => 'contentformat',
                 'component' => 'mod_page', 'filearea' => 'content', 'itemid' => 0],
-            'label' => ['table' => 'label', 'field' => 'intro', 'format' => 'introformat',
-                'component' => 'mod_label', 'filearea' => 'intro', 'itemid' => 0],
             'quiz' => ['table' => 'quiz', 'field' => 'intro', 'format' => 'introformat',
                 'component' => 'mod_quiz', 'filearea' => 'intro', 'itemid' => 0],
             'assign' => ['table' => 'assign', 'field' => 'intro', 'format' => 'introformat',
@@ -137,6 +150,15 @@ class get_content extends external_api {
         $s = $sources[$cm->modname];
         $row = $db->get_record($s['table'], ['id' => $cm->instance], '*', IGNORE_MISSING);
         if (!$row || !isset($row->{$s['field']})) {
+            return '';
+        }
+        // An assignment can withhold its description until submissions open
+        // (alwaysshowdescription off and a future allowsubmissionsfromdate).
+        // Mirror that release rule so the intro is not exposed early.
+        if (
+            $cm->modname === 'assign' && empty($row->alwaysshowdescription) &&
+                !empty($row->allowsubmissionsfromdate) && time() < $row->allowsubmissionsfromdate
+        ) {
             return '';
         }
         return self::format_body(
@@ -353,7 +375,9 @@ class get_content extends external_api {
     }
 
     /**
-     * Emit a list's items as listitem blocks (nested lists are flattened).
+     * Emit a list's items as listitem blocks, flattening a nested list into its
+     * own items after the item that contains it (inline_runs stops at nested
+     * lists, so their text is not folded into the parent).
      *
      * @param \DOMElement $list The ul/ol element.
      * @param bool $ordered Whether it is an ordered list.
@@ -374,6 +398,15 @@ class get_content extends external_api {
                 $blocks[] = ['type' => 'listitem', 'ordered' => $ordered, 'index' => $index, 'runs' => $runs];
             }
             self::emit_images($li, $blocks);
+            // Flatten any list nested inside this item into its own items.
+            foreach ($li->childNodes as $child) {
+                if ($child->nodeType === XML_ELEMENT_NODE) {
+                    $childtag = strtolower($child->nodeName);
+                    if ($childtag === 'ul' || $childtag === 'ol') {
+                        self::emit_list($child, $childtag === 'ol', $blocks);
+                    }
+                }
+            }
         }
     }
 
@@ -446,8 +479,15 @@ class get_content extends external_api {
             if ($text === '') {
                 continue;
             }
-            $total += strlen($text);
-            if ($total > self::MAX_TEXT) {
+            // Count Unicode characters, not bytes, so multibyte text is not
+            // dropped far below the documented character cap; truncate the run
+            // that crosses the cap rather than discarding it.
+            $len = \core_text::strlen($text);
+            if ($total + $len > self::MAX_TEXT) {
+                $text = \core_text::substr($text, 0, max(0, self::MAX_TEXT - $total));
+            }
+            $total += $len;
+            if ($text === '') {
                 break;
             }
             $entry = ['text' => $text];
@@ -482,6 +522,11 @@ class get_content extends external_api {
                 continue;
             }
             if ($tag === 'img' || $tag === 'script' || $tag === 'style') {
+                continue;
+            }
+            if ($tag === 'ul' || $tag === 'ol') {
+                // A nested list is a block boundary, not inline text: leave it
+                // for emit_list to flatten into its own items.
                 continue;
             }
             $childhref = $href;

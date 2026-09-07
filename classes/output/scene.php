@@ -40,10 +40,11 @@ use templatable;
 class scene implements renderable, templatable {
     /**
      * @var string[] Module types whose body the in-headset reader can render
-     * (a page's content, a book's chapters, and the intro text of a label,
-     * quiz or assignment).
+     * (a page's content, a book's chapters, and the intro text of a quiz or
+     * assignment). Labels are excluded: they are not built as clickable objects
+     * in the scene, so the reader is never reachable for them.
      */
-    const READABLE_MODS = ['page', 'book', 'label', 'quiz', 'assign'];
+    const READABLE_MODS = ['page', 'book', 'quiz', 'assign'];
 
     /** @var course_format The course format instance. */
     protected $format;

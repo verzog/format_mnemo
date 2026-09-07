@@ -4304,6 +4304,14 @@ define('format_mnemo/vr', [], function() {
         var hit = this.intersectController(controller);
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
+        // A click on the reader's content plane maps to the link under the ray.
+        if (hit && hit.object.userData && hit.object.userData.readerContent) {
+            if (this.gestures) {
+                this.gestures.pulse(controller.userData.handedness, 0.5, 30);
+            }
+            this.readerHitLink(hit.uv);
+            return;
+        }
         if (target && target.userData &&
                 (target.userData.url || target.userData.videoToggle || target.userData.readerAction)) {
             // A firm confirmation buzz before acting on the node.
@@ -5310,7 +5318,12 @@ define('format_mnemo/vr', [], function() {
         this.raycaster.setFromCamera(this.pointerNdc, this.camera);
         var hits = this.raycaster.intersectObjects(this.interactive, false);
         if (hits.length) {
-            this.activate(hits[0].object);
+            var obj = hits[0].object;
+            if (obj.userData && obj.userData.readerContent) {
+                this.readerHitLink(hits[0].uv);
+            } else {
+                this.activate(obj);
+            }
         }
     };
 
@@ -6076,8 +6089,12 @@ define('format_mnemo/vr', [], function() {
                 self.showReader(res, name, url, cmid);
                 return null;
             }).catch(function() {
-                // Could not fetch the content; navigate to the activity instead.
-                self.open(url);
+                // Could not fetch the content; navigate to the activity instead
+                // - but only if this request is still the current one (the user
+                // may have closed the reader or opened another chapter).
+                if (self.readerSeq === seq) {
+                    self.open(url);
+                }
             });
         });
     };
@@ -6164,14 +6181,17 @@ define('format_mnemo/vr', [], function() {
             new THREE.MeshBasicMaterial({map: tex, transparent: true})
         );
         content.position.set(0, 0, 0.001);
+        // The content plane is a raycast target so a click on a rendered link
+        // can be mapped (via the hit uv) to the link under it.
+        content.userData = {readerContent: true, interactive: true};
         group.add(content);
 
         this.reader = {
-            group: group, board: board,
+            group: group, board: board, content: content,
             canvas: canvas, ctx: canvas.getContext('2d'), tex: tex,
             titleCanvas: titleCanvas, titleCtx: titleCanvas.getContext('2d'), titleTex: titleTex,
             W: W, H: H, margin: 56, worldW: worldW, worldH: worldH,
-            blocks: [], items: [], images: {}, contentHeight: 0, scroll: 0,
+            blocks: [], items: [], images: {}, links: [], contentHeight: 0, scroll: 0,
             chapters: [], chapterid: 0, cmid: null, url: null, name: null,
             buttons: {}, inInteractive: false
         };
@@ -6195,6 +6215,10 @@ define('format_mnemo/vr', [], function() {
         var edge = worldH / 2;
         var defs = [
             {action: 'close', glyph: '✕', x: half + 0.02, y: edge + 0.09},
+            // Open the real activity page (leaves the immersive session): the
+            // only way to start a quiz attempt or make a submission, and a full
+            // fallback for pages and books.
+            {action: 'open', glyph: '↗', x: -half - 0.02, y: edge + 0.09},
             {action: 'scrollup', glyph: '▲', x: half + 0.02, y: 0.24},
             {action: 'scrolldown', glyph: '▼', x: half + 0.02, y: -0.24},
             {action: 'prevchapter', glyph: '❮', x: -0.28, y: -edge - 0.12},
@@ -6349,6 +6373,7 @@ define('format_mnemo/vr', [], function() {
         if (r.inInteractive) {
             return;
         }
+        this.interactive.push(r.content);
         for (var key in r.buttons) {
             if (Object.prototype.hasOwnProperty.call(r.buttons, key)) {
                 this.interactive.push(r.buttons[key]);
@@ -6365,12 +6390,16 @@ define('format_mnemo/vr', [], function() {
         if (!r || !r.inInteractive) {
             return;
         }
+        var remove = function(list, obj) {
+            var idx = list.indexOf(obj);
+            if (idx !== -1) {
+                list.splice(idx, 1);
+            }
+        };
+        remove(this.interactive, r.content);
         for (var key in r.buttons) {
             if (Object.prototype.hasOwnProperty.call(r.buttons, key)) {
-                var idx = this.interactive.indexOf(r.buttons[key]);
-                if (idx !== -1) {
-                    this.interactive.splice(idx, 1);
-                }
+                remove(this.interactive, r.buttons[key]);
             }
         }
         r.inInteractive = false;
@@ -6385,6 +6414,14 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.readerControl = function(action) {
         if (action === 'close') {
             this.closeReader();
+        } else if (action === 'open') {
+            // Leave the reader and navigate to the full activity page.
+            var url = this.reader && this.reader.url;
+            this.readerSeq++;
+            this.readerOpen = false;
+            if (url) {
+                this.open(url);
+            }
         } else if (action === 'scrollup') {
             this.scrollReader(-this.readerPageStep());
         } else if (action === 'scrolldown') {
@@ -6393,6 +6430,32 @@ define('format_mnemo/vr', [], function() {
             this.stepChapter(-1);
         } else if (action === 'nextchapter') {
             this.stepChapter(1);
+        }
+    };
+
+    /**
+     * Map a click on the content plane (by its hit uv) to a rendered link, and
+     * open that link's target (leaving the immersive session, like the open
+     * control). A click that falls on no link does nothing.
+     *
+     * @param {Object} uv The hit's texture coordinate ({x, y} in 0..1), or null.
+     */
+    Cyberspace.prototype.readerHitLink = function(uv) {
+        var r = this.reader;
+        if (!uv || !r) {
+            return;
+        }
+        // The texture's v axis runs bottom-to-top, the canvas y top-to-bottom.
+        var px = uv.x * r.W;
+        var py = (1 - uv.y) * r.H + r.scroll;
+        for (var i = 0; i < r.links.length; i++) {
+            var link = r.links[i];
+            if (px >= link.x && px <= link.x + link.w && py >= link.y && py <= link.y + link.h) {
+                this.readerSeq++;
+                this.readerOpen = false;
+                this.open(link.href);
+                return;
+            }
         }
     };
 
@@ -6453,6 +6516,9 @@ define('format_mnemo/vr', [], function() {
         if (!this.reader) {
             return;
         }
+        // Invalidate any in-flight fetch so a late response cannot reopen the
+        // panel (success) or navigate away (failure) after the user closed it.
+        this.readerSeq++;
         this.reader.group.visible = false;
         this.readerOpen = false;
         this.removeReaderInteractive();
@@ -6470,6 +6536,7 @@ define('format_mnemo/vr', [], function() {
         var maxW = r.W - r.margin * 2;
         var y = r.margin;
         r.items = [];
+        r.links = [];
         for (var i = 0; i < r.blocks.length; i++) {
             y = this.layoutBlock(ctx, r.blocks[i], y, maxW);
         }
@@ -6493,14 +6560,69 @@ define('format_mnemo/vr', [], function() {
         ctx.font = spec.font;
         var indent = block.type === 'listitem' ? 44 : 0;
         var prefix = this.listPrefix(block);
-        var words = this.readerWords(block);
-        var lines = this.wrapReaderWords(ctx, words, maxW - indent);
+        // A preformatted block keeps its own line breaks and spacing; everything
+        // else is wrapped from a whitespace-collapsed word stream.
+        var lines = block.pre ? this.preLines(ctx, block)
+            : this.wrapReaderWords(ctx, this.readerWords(block), maxW - indent);
         var lineH = Math.round(spec.size * 1.34);
+        var itemx = this.reader.margin + indent;
+        var itemy = y + spec.above;
         this.reader.items.push({
             kind: 'text', block: block, spec: spec, prefix: prefix,
-            x: this.reader.margin + indent, y: y + spec.above, lines: lines, lineH: lineH
+            x: itemx, y: itemy, lines: lines, lineH: lineH
         });
+        this.collectReaderLinks(ctx, lines, itemx, itemy, lineH, spec.size);
         return y + spec.above + lines.length * lineH + spec.below;
+    };
+
+    /**
+     * Split a preformatted block into physical lines (preserving spacing), each
+     * a single unwrapped run, so code and other whitespace-sensitive content is
+     * not reflowed.
+     *
+     * @param {Object} ctx The measuring context (font already set).
+     * @param {Object} block The preformatted block.
+     * @return {Array} Lines, each an array with one {text, href, w}.
+     */
+    Cyberspace.prototype.preLines = function(ctx, block) {
+        var runs = block.runs || [];
+        var text = '';
+        for (var i = 0; i < runs.length; i++) {
+            text += runs[i].text;
+        }
+        var raw = text.replace(/\t/g, '    ').split('\n');
+        var lines = [];
+        for (var l = 0; l < raw.length; l++) {
+            lines.push([{text: raw[l], href: null, w: ctx.measureText(raw[l]).width}]);
+        }
+        return lines.length ? lines : [[]];
+    };
+
+    /**
+     * Record the document-space hit rectangle of every linked word in a laid-out
+     * text item, so a click on the content plane can be mapped to a link.
+     *
+     * @param {Object} ctx The measuring context (font already set).
+     * @param {Array} lines The item's wrapped lines.
+     * @param {Number} x0 The item's left x.
+     * @param {Number} y0 The item's top y (document space).
+     * @param {Number} lineH The line height.
+     * @param {Number} size The font size (link box height).
+     */
+    Cyberspace.prototype.collectReaderLinks = function(ctx, lines, x0, y0, lineH, size) {
+        var space = ctx.measureText(' ').width;
+        for (var l = 0; l < lines.length; l++) {
+            var x = x0;
+            var line = lines[l];
+            for (var w = 0; w < line.length; w++) {
+                if (line[w].href) {
+                    this.reader.links.push({
+                        x: x, y: y0 + l * lineH, w: line[w].w, h: size, href: line[w].href
+                    });
+                }
+                x += line[w].w + space;
+            }
+        }
     };
 
     /**
@@ -6627,9 +6749,12 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Load an inline image once (same-origin Moodle pluginfile, so it carries
-     * the session cookie and does not taint the canvas). On load, re-layout and
-     * re-render so it flows in at its true size.
+     * Load an inline image once, then re-layout and re-render so it flows in at
+     * its true size. A same-origin image (a Moodle pluginfile) loads with the
+     * session cookie and does not taint the canvas; a cross-origin image is
+     * requested anonymously (CORS) so drawing it cannot taint the canvas - if
+     * the remote host sends no CORS headers the load simply fails and a
+     * placeholder is shown instead.
      *
      * @param {String} src The image URL.
      */
@@ -6645,10 +6770,18 @@ define('format_mnemo/vr', [], function() {
         }
         var img = new Image();
         entry.img = img;
+        if (this.isCrossOrigin(src)) {
+            img.crossOrigin = 'anonymous';
+        }
         img.onload = function() {
             entry.ready = true;
             if (self.readerOpen) {
                 self.layoutReader();
+                // A loaded image's true height can differ from the reserved
+                // placeholder, so clamp the scroll to the new document bounds
+                // before rendering (avoids a gap past the end).
+                var max = Math.max(0, self.reader.contentHeight - self.reader.H);
+                self.reader.scroll = Math.min(self.reader.scroll, max);
                 self.renderReaderCanvas();
             }
         };
@@ -6656,6 +6789,25 @@ define('format_mnemo/vr', [], function() {
             // Leave a placeholder in the flow if the image cannot be loaded.
         };
         img.src = src;
+    };
+
+    /**
+     * Whether a URL points to a different origin than the page (so it must be
+     * loaded with CORS to avoid tainting the canvas).
+     *
+     * @param {String} src The URL.
+     * @return {Boolean} True when cross-origin.
+     */
+    Cyberspace.prototype.isCrossOrigin = function(src) {
+        if (/^data:/i.test(src)) {
+            return false;
+        }
+        try {
+            return new URL(src, window.location.href).origin !== window.location.origin;
+        } catch (e) {
+            // A URL that will not parse is treated as cross-origin (safer).
+            return true;
+        }
     };
 
     /**
@@ -7086,6 +7238,11 @@ define('format_mnemo/vr', [], function() {
             // An open palm this frame is an explicit stop; hold position.
             return;
         }
+        if (this.readerOpen) {
+            // While the reader is up, a held trigger interacts with the panel;
+            // it must never fly the viewer (the panel body is not interactive).
+            return;
+        }
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {
@@ -7171,14 +7328,18 @@ define('format_mnemo/vr', [], function() {
         if (this.hovered === mesh) {
             return;
         }
-        if (this.hovered) {
+        if (this.hovered && this.hovered.userData.material) {
             this.hovered.scale.setScalar(1);
             this.hovered.userData.material.color.setHex(this.hovered.userData.baseColour);
         }
         this.hovered = mesh;
         if (mesh) {
-            mesh.scale.setScalar(1.12);
-            mesh.userData.material.color.setHex(0xffffff);
+            // The large reader content plane is interactive (for link hits) but
+            // must not be scaled or tinted like a small node/button.
+            if (mesh.userData.material) {
+                mesh.scale.setScalar(1.12);
+                mesh.userData.material.color.setHex(0xffffff);
+            }
             this.renderer.domElement.style.cursor = 'pointer';
             // A light tick when a node first lights up under the pointer/ray.
             if (this.gestures && this.renderer.xr.isPresenting) {

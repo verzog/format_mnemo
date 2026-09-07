@@ -1728,7 +1728,7 @@ const scenarios = [
         }
     },
     {
-        name: 'reader: buildReaderPanel builds a content panel and five controls',
+        name: 'reader: buildReaderPanel builds a content panel and six controls',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
@@ -1741,9 +1741,10 @@ const scenarios = [
             const hasContent = r.group.children.some((c) => c.material && c.material.map === r.tex);
             const keys = Object.keys(r.buttons).sort().join(',');
             const pass = !!r.group && hasContent && r.group.parent === self.scene &&
-                keys === 'close,nextchapter,prevchapter,scrolldown,scrollup' &&
-                r.buttons.close.userData.readerAction === 'close';
-            return {pass, detail: `content=${hasContent} keys=${keys} parent=${r.group.parent === self.scene}`};
+                keys === 'close,nextchapter,open,prevchapter,scrolldown,scrollup' &&
+                r.buttons.close.userData.readerAction === 'close' &&
+                r.content.userData.readerContent === true;
+            return {pass, detail: `content=${hasContent} keys=${keys} readerContent=${r.content.userData.readerContent}`};
         }
     },
     {
@@ -1901,6 +1902,110 @@ const scenarios = [
             const moved = Math.abs(s.x) + Math.abs(s.z);
             const pass = c.cs._scroll < 0 && moved < 1e-6;
             return {pass, detail: `scroll=${c.cs._scroll.toFixed(1)} moved=${moved.toFixed(4)}`};
+        }
+    },
+    {
+        name: 'reader: the open control leaves the reader and navigates',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            self.readerSeq = 0;
+            let navto = null;
+            self.open = function(u) {
+                navto = u;
+            };
+            self.showReader({title: 'X', chapters: [], chapterid: 0,
+                blocks: [{type: 'para', runs: [{text: 'Body'}]}]}, 'X', 'https://u/view', 3);
+            self.readerControl('open');
+            const pass = navto === 'https://u/view' && self.readerOpen === false;
+            return {pass, detail: `navto=${navto} open=${self.readerOpen}`};
+        }
+    },
+    {
+        name: 'reader: clicking a rendered link opens its target',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            self.readerSeq = 0;
+            let navto = null;
+            self.open = function(u) {
+                navto = u;
+            };
+            self.showReader({title: 'X', chapters: [], chapterid: 0, blocks: [
+                {type: 'para', runs: [{text: 'Visit '}, {text: 'here', href: 'https://x/'}]}
+            ]}, 'X', 'https://u/v', 3);
+            const r = self.reader;
+            const link = r.links.find((l) => l.href === 'https://x/');
+            // Aim at the centre of the recorded link rect (scroll is 0).
+            const uv = {x: (link.x + link.w / 2) / r.W, y: 1 - (link.y + link.h / 2) / r.H};
+            self.readerHitLink(uv);
+            // A click that misses every link does nothing.
+            self.open = function(u) {
+                navto = u;
+            };
+            const before = navto;
+            self.readerHitLink({x: 0.999, y: 0.999});
+            const pass = !!link && before === 'https://x/' && navto === 'https://x/';
+            return {pass, detail: `links=${r.links.length} navto=${navto}`};
+        }
+    },
+    {
+        name: 'reader: preformatted blocks keep their line breaks',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = new THREE.Group();
+            self.palette = {primary: 0x39d0ff};
+            self.interactive = [];
+            self.config = {};
+            self.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 100);
+            self.showReader({title: 'Code', chapters: [], chapterid: 0, blocks: [
+                {type: 'para', pre: true, runs: [{text: 'line one\nline two\nline three'}]}
+            ]}, 'Code', 'https://u/v', 3);
+            const item = self.reader.items[0];
+            const pass = item.lines.length === 3 && item.lines[0][0].text === 'line one';
+            return {pass, detail: `lines=${item.lines.length} first=${item.lines[0][0].text}`};
+        }
+    },
+    {
+        name: 'reader: XR trigger locomotion is suppressed while reading',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.brake = false;
+            self.player = new THREE.Group();
+            self.tmp = new THREE.Vector3();
+            self.raycaster = new THREE.Raycaster();
+            self.interactive = [];
+            const ctrl = new THREE.Object3D();
+            ctrl.userData.selecting = true;
+            self.controllers = [ctrl];
+            self.readerOpen = true;
+            self.updateXrLocomotion(0.1);
+            const stayed = self.player.position.length() < 1e-6;
+            // With the reader closed, the same held trigger (aimed at nothing) flies.
+            self.readerOpen = false;
+            self.updateXrLocomotion(0.1);
+            const movesOtherwise = self.player.position.length() > 1e-6;
+            return {pass: stayed && movesOtherwise, detail: `stayed=${stayed} moves=${movesOtherwise}`};
         }
     }
 ];

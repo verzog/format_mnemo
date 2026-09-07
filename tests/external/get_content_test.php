@@ -154,6 +154,60 @@ final class get_content_test extends \advanced_testcase {
     }
 
     /**
+     * A nested list is flattened into separate list items, and the parent item
+     * does not absorb the nested item's text.
+     */
+    public function test_nested_lists_flatten_to_separate_items(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $page = $this->getDataGenerator()->create_module('page', ['course' => $course->id]);
+        $html = '<ul><li>Parent<ul><li>Child</li></ul></li><li>Sibling</li></ul>';
+        $DB->set_field('page', 'content', $html, ['id' => $page->id]);
+        $DB->set_field('page', 'contentformat', FORMAT_HTML, ['id' => $page->id]);
+
+        $this->setUser($student);
+        $result = get_content::execute($page->cmid);
+
+        $items = array_values(array_filter($result['blocks'], function ($b) {
+            return $b['type'] === 'listitem';
+        }));
+        $this->assertCount(3, $items);
+        $this->assertStringContainsString('Parent', $items[0]['runs'][0]['text']);
+        $this->assertStringNotContainsString('Child', $items[0]['runs'][0]['text']);
+    }
+
+    /**
+     * An assignment that withholds its description until submissions open
+     * exposes no body early, but does once always-show is set.
+     */
+    public function test_assign_description_release_is_honored(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $assign = $this->getDataGenerator()->create_module('assign', ['course' => $course->id,
+            'intro' => '<p>Secret prompt.</p>', 'introformat' => FORMAT_HTML]);
+        $DB->set_field('assign', 'alwaysshowdescription', 0, ['id' => $assign->id]);
+        $DB->set_field('assign', 'allowsubmissionsfromdate', time() + DAYSECS, ['id' => $assign->id]);
+
+        $this->setUser($student);
+        $withheld = get_content::execute($assign->cmid);
+        $this->assertTrue($withheld['readable']);
+        $this->assertSame([], $withheld['blocks']);
+
+        // Once the description is always shown, the intro comes through.
+        $DB->set_field('assign', 'alwaysshowdescription', 1, ['id' => $assign->id]);
+        $shown = get_content::execute($assign->cmid);
+        $para = $this->first_of_type($shown['blocks'], 'para');
+        $this->assertNotNull($para);
+        $this->assertStringContainsString('Secret', $para['runs'][0]['text']);
+    }
+
+    /**
      * The first block of a given type, or null.
      *
      * @param array $blocks The blocks.
