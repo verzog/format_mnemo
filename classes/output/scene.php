@@ -196,7 +196,8 @@ class scene implements renderable, templatable {
      */
     protected function preload_building_rows(int $courseid): array {
         global $DB;
-        $sql = "SELECT b.cmid, b.model, b.scale, b.offsetx, b.offsety, b.offsetz, b.rotation
+        $sql = "SELECT b.cmid, b.model, b.scale, b.scalex, b.scaley, b.scalez,
+                       b.offsetx, b.offsety, b.offsetz, b.rotation
                   FROM {format_mnemo_building} b
                   JOIN {course_modules} cm ON cm.id = b.cmid
                  WHERE cm.course = :course";

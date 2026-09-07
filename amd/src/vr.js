@@ -2389,7 +2389,10 @@ define('format_mnemo/vr', [], function() {
         // Road corridors for movement: the avenue, plus each side street (filled
         // in by buildSideStreet). On foot the player is kept within these; only
         // flying lifts the constraint.
-        this.roads = [{xMin: -roadHalf, xMax: roadHalf, zMin: endZ, zMax: 12}];
+        // The walkable avenue corridor includes the raised sidewalks flanking
+        // it, so a learner can step onto them rather than being clamped off.
+        var swWidth = 2.4;
+        this.roads = [{xMin: -(roadHalf + swWidth), xMax: roadHalf + swWidth, zMin: endZ, zMax: 12}];
 
         // Main avenue surface with glowing edge lines.
         this.paveStrip(0, (12 + endZ) / 2, roadHalf * 2, 12 - endZ, 0);
@@ -2397,12 +2400,32 @@ define('format_mnemo/vr', [], function() {
             self.neonEdge(x, 0.05, 12, x, 0.05, endZ);
         });
         // Slightly raised sidewalks flanking the avenue, textured (or plain
-        // concrete when no sidewalk texture is set).
-        var swWidth = 2.4;
-        var swLen = 12 - endZ;
-        var swZ = (12 + endZ) / 2;
+        // concrete when no sidewalk texture is set), built in segments that
+        // leave a gap at each side-street mouth on the matching side so a
+        // sidewalk never runs a kerb across a branch entrance.
+        var swX = roadHalf + swWidth / 2;
+        var swGap = 4.9; // Half-width of the opening at each mouth (streetHalf + margin).
         [-1, 1].forEach(function(sdir) {
-            self.buildSidewalk(sdir * (roadHalf + swWidth / 2), swZ, swWidth, swLen);
+            var blocks = [];
+            sections.forEach(function(section, i) {
+                if (((i % 2 === 0) ? -1 : 1) === sdir) {
+                    blocks.push(startZ - i * spacing);
+                }
+            });
+            blocks.sort(function(a, b) {
+                return a - b;
+            });
+            var cursor = endZ;
+            for (var b = 0; b < blocks.length; b++) {
+                var gapStart = blocks[b] - swGap;
+                if (gapStart > cursor) {
+                    self.buildSidewalk(sdir * swX, (cursor + gapStart) / 2, swWidth, gapStart - cursor);
+                }
+                cursor = Math.max(cursor, blocks[b] + swGap);
+            }
+            if (cursor < 12) {
+                self.buildSidewalk(sdir * swX, (cursor + 12) / 2, swWidth, 12 - cursor);
+            }
         });
         // A few reflected-light streaks down the wet avenue.
         for (var s = 0; s < 5; s++) {
@@ -2495,12 +2518,17 @@ define('format_mnemo/vr', [], function() {
             // where it actually stands rather than its default slot.
             var tf = act.transform || {};
             var ts = tf.scale > 0 ? tf.scale : 1;
-            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0), built.w * ts, built.d * ts);
+            // Include the per-axis width/depth multipliers so a widened or
+            // deepened building's footprint keeps scattered props clear of it.
+            var tsx = tf.sx > 0 ? tf.sx : 1;
+            var tsz = tf.sz > 0 ? tf.sz : 1;
+            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
+                built.w * ts * tsx, built.d * ts * tsz);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
-            // Pass the signboard so it can be kept facing the street even when
-            // the teacher rotates the building in the editor.
-            self.registerEditable(act, built.group, bx, 0, bz, built.sign);
+            // Pass the signboard (kept street-facing) and the scale node, which
+            // takes the non-uniform width/height/depth so the sign never shears.
+            self.registerEditable(act, built.group, bx, 0, bz, built.sign, built.scalenode);
         });
     };
 
@@ -2929,10 +2957,15 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.makeStructure = function(act, style) {
         var THREE = this.THREE;
         var group = new THREE.Group();
-        // The procedural mass lives in its own sub-group so an attached building
-        // model (buildingModelUrl) can hide it while the sign stays.
+        // A scale node holds everything that stretches with the editor's
+        // width/height/depth (the body and the click-proxy) but NOT the sign,
+        // so an anisotropic scale never shears the sign - it keeps facing the
+        // street. The procedural mass lives in its own sub-group so an attached
+        // building model (buildingModelUrl) can hide it while the sign stays.
+        var scalenode = new THREE.Group();
+        group.add(scalenode);
         var body = new THREE.Group();
-        group.add(body);
+        scalenode.add(body);
         var w = style.footprint[0];
         var d = style.footprint[1];
         var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
@@ -2994,9 +3027,10 @@ define('format_mnemo/vr', [], function() {
         // whatever the model's geometry or scale (e.g. a very small model). It
         // is never rendered (visible=false, casts no shadow), but Three still
         // raycasts it, giving a reliable selection target.
-        group.add(this.editProxy(w, h, d));
+        scalenode.add(this.editProxy(w, h, d));
 
-        return {group: group, panel: sign.panel, body: body, sign: sign.group, w: w, d: d, h: h};
+        return {group: group, scalenode: scalenode, panel: sign.panel, body: body,
+            sign: sign.group, w: w, d: d, h: h};
     };
 
     /**
@@ -4695,8 +4729,11 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} baseZ Default world z.
      * @param {Object} sign Optional signboard group to keep street-facing when
      *     the building is rotated (counter-rotated against the group).
+     * @param {Object} scalenode Optional child group that takes the non-uniform
+     *     width/height/depth so the sign (a sibling) is never sheared; defaults
+     *     to the group itself.
      */
-    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign) {
+    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign, scalenode) {
         var t = act.transform || {};
         var editable = {
             cmid: act.id,
@@ -4704,6 +4741,11 @@ define('format_mnemo/vr', [], function() {
             name: act.name,
             group: group,
             sign: sign || null,
+            // The node that takes the non-uniform width/height/depth (the
+            // building body, kept apart from the sign so the sign never shears);
+            // falls back to the group for objects with no separate scale node.
+            scaleNode: scalenode || group,
+            signBaseZ: sign ? sign.position.z : 0,
             baseX: baseX, baseY: baseY, baseZ: baseZ,
             baseRotY: group.rotation.y,
             emits: false,
@@ -4743,12 +4785,23 @@ define('format_mnemo/vr', [], function() {
         var sx = t.sx > 0 ? t.sx : 1;
         var sy = t.sy > 0 ? t.sy : 1;
         var sz = t.sz > 0 ? t.sz : 1;
-        g.scale.set(t.scale * sx, t.scale * sy, t.scale * sz);
+        var node = editable.scaleNode || g;
+        if (node !== g) {
+            // The group carries only the uniform scale (and rotation), so the
+            // sign under it is never sheared; the scale node takes the
+            // anisotropic stretch of the body.
+            g.scale.setScalar(t.scale);
+            node.scale.set(sx, sy, sz);
+        } else {
+            g.scale.set(t.scale * sx, t.scale * sy, t.scale * sz);
+        }
         // Keep the signboard facing the street: counter-rotate it against the
         // building's editor rotation so its world orientation stays where it was
-        // placed (the street centreline), even as the building turns.
+        // placed (the street centreline), even as the building turns; and track
+        // the (depth-scaled) front face so a deepened building keeps it on-face.
         if (editable.sign) {
             editable.sign.rotation.y = -t.rot * Math.PI / 180;
+            editable.sign.position.z = (editable.signBaseZ || 0) * sz;
         }
         if (this.selBox) {
             this.selBox.update();

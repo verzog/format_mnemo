@@ -1133,6 +1133,32 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: a scale node takes the stretch so the sign is not sheared',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const node = new THREE.Group();
+            const sign = new THREE.Group();
+            g.add(node);
+            g.add(sign);
+            const self = {THREE, selBox: null, selLabel: null, selected: null, renderer: null};
+            const ed = {
+                group: g, scaleNode: node, sign: sign, signBaseZ: 2,
+                baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 2, sx: 1.5, sy: 1, sz: 0.5, x: 0, y: 0, z: 0, rot: 30}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // The group carries only the uniform scale (so the sign, its child,
+            // is never anisotropically scaled); the node carries the stretch.
+            const pass = Math.abs(g.scale.x - 2) < 1e-6 && Math.abs(g.scale.z - 2) < 1e-6 &&
+                Math.abs(node.scale.x - 1.5) < 1e-6 && Math.abs(node.scale.z - 0.5) < 1e-6 &&
+                Math.abs(sign.scale.x - 1) < 1e-6 &&
+                Math.abs(sign.position.z - 1) < 1e-6; // signBaseZ(2) * sz(0.5).
+            return {pass, detail: `g=${g.scale.x} node=${node.scale.x} signz=${sign.position.z}`};
+        }
+    },
+    {
         name: 'surface: sidewalk registers a singleton editable and retiles',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

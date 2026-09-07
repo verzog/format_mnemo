@@ -614,7 +614,9 @@ function format_mnemo_coursemodule_edit_post_actions($data, $course) {
             // the editor); only drop it once nothing custom remains.
             $hastransform = (float)$existing->scale != 1.0 || (float)$existing->offsetx != 0.0 ||
                 (float)$existing->offsety != 0.0 || (float)$existing->offsetz != 0.0 ||
-                (float)$existing->rotation != 0.0;
+                (float)$existing->rotation != 0.0 ||
+                (float)$existing->scalex != 1.0 || (float)$existing->scaley != 1.0 ||
+                (float)$existing->scalez != 1.0;
             if ($hastransform) {
                 $existing->model = '';
                 $existing->timemodified = time();
