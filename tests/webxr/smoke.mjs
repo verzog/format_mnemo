@@ -1669,12 +1669,25 @@ const scenarios = [
             sign.userData = {frameMat: new THREE.MeshBasicMaterial()};
             done.registerActivity({group}, {id: 7, state: 'complete'}, sign);
             const rec = done.activities[7];
-            const inGroup = group.children.some((c) => c.isSprite);
+            // The tick is parented to the sign (so it follows a depth edit).
+            const inSign = sign.children.some((c) => c.isSprite);
+            // A video screen has no sign: the frame material comes from the
+            // interactive panel instead, and the tick sits on the group.
+            const vid = mk();
+            const vgroup = new THREE.Group();
+            const vmat = new THREE.MeshBasicMaterial();
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial());
+            screen.userData = {material: vmat, baseColour: 0x111111};
+            vid.registerActivity({group: vgroup}, {id: 9, state: 'available'}, null, screen);
+            const vrec = vid.activities[9];
             const notdone = mk();
             notdone.registerActivity({group: new THREE.Group()}, {id: 8, state: 'available'}, null);
             const pass = !!rec && rec.tick.visible === true && rec.frameMat === sign.userData.frameMat &&
-                inGroup && notdone.activities[8].tick.visible === false;
-            return {pass, detail: `done=${rec && rec.tick.visible} inGroup=${inGroup} open=${notdone.activities[8].tick.visible}`};
+                inSign && notdone.activities[8].tick.visible === false &&
+                vrec.frameMat === vmat && vrec.panel === screen &&
+                vgroup.children.some((c) => c.isSprite);
+            return {pass, detail: `done=${rec && rec.tick.visible} inSign=${inSign} ` +
+                `vidMat=${vrec.frameMat === vmat} open=${notdone.activities[8].tick.visible}`};
         }
     },
     {
@@ -1684,12 +1697,17 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const tick11 = {visible: false};
             const tick12 = {visible: true};
+            const tick13 = {visible: false};
             const frameMat = new THREE.MeshBasicMaterial({color: 0x123456});
+            const panel11 = {userData: {baseColour: 0x123456}};
+            const frame13 = new THREE.MeshBasicMaterial({color: 0x39ff14});
             const self = {
                 renderer: null, applyStates: CS.prototype.applyStates,
                 activities: {
-                    11: {tick: tick11, frameMat: frameMat, state: 'available'},
-                    12: {tick: tick12, frameMat: null, state: 'complete'}
+                    11: {tick: tick11, frameMat: frameMat, panel: panel11, state: 'available'},
+                    12: {tick: tick12, frameMat: null, state: 'complete'},
+                    // Present at build, omitted by the refresh: became unavailable.
+                    13: {tick: tick13, frameMat: frame13, state: 'complete'}
                 }
             };
             self.applyStates([
@@ -1698,8 +1716,15 @@ const scenarios = [
                 {cmid: 99, state: 'complete'} // Unknown cmid: ignored.
             ]);
             const pass = tick11.visible === true && self.activities[11].state === 'complete' &&
-                frameMat.color.getHex() === 0x39ff14 && tick12.visible === false;
-            return {pass, detail: `t11=${tick11.visible} hex=${frameMat.color.getHex().toString(16)} t12=${tick12.visible}`};
+                frameMat.color.getHex() === 0x39ff14 &&
+                // Hover-restore colour tracks the refreshed state.
+                panel11.userData.baseColour === 0x39ff14 &&
+                tick12.visible === false &&
+                // The omitted activity is invalidated to restricted, red, no tick.
+                self.activities[13].state === 'restricted' && tick13.visible === false &&
+                frame13.color.getHex() === 0xff3b6b;
+            return {pass, detail: `t11=${tick11.visible} hex=${frameMat.color.getHex().toString(16)} ` +
+                `base=${panel11.userData.baseColour.toString(16)} a13=${self.activities[13].state}`};
         }
     }
 ];

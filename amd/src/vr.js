@@ -233,6 +233,9 @@ define('format_mnemo/vr', [], function() {
         // completion tick and sign frame material, so their state can be
         // refreshed live (colour + tick) when the learner finishes one.
         this.activities = {};
+        // Bumped on each live state refresh so a slower earlier response cannot
+        // overwrite a newer one (overlays closed in quick succession).
+        this.stateRefreshSeq = 0;
         this.ads = []; // Holographic billboards that flicker.
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
@@ -2810,7 +2813,7 @@ define('format_mnemo/vr', [], function() {
                 vscreen.group.position.set(bx, 3.2, bz);
                 vscreen.group.lookAt(bx, 3.2, z);
                 self.scene.add(vscreen.group);
-                self.registerEditable(act, vscreen.group, bx, 3.2, bz);
+                self.registerEditable(act, vscreen.group, bx, 3.2, bz, null, null, vscreen.panel);
                 return;
             }
             var built = self.makeStructure(act, style);
@@ -2836,7 +2839,7 @@ define('format_mnemo/vr', [], function() {
             self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
             // takes the non-uniform width/height/depth so the sign never shears.
-            self.registerEditable(act, built.group, bx, 0, bz, built.sign, built.scalenode);
+            self.registerEditable(act, built.group, bx, 0, bz, built.sign, built.scalenode, built.panel);
         });
     };
 
@@ -3877,8 +3880,15 @@ define('format_mnemo/vr', [], function() {
         if (!url || !window.fetch) {
             return;
         }
+        var self = this;
         try {
-            window.fetch(url, {credentials: 'same-origin', redirect: 'manual'}).catch(function() {
+            window.fetch(url, {credentials: 'same-origin', redirect: 'manual'}).then(function() {
+                // The view may have satisfied view-based completion (a video
+                // played in-world never opens the overlay), so refresh the
+                // scene's states to update the tick and sign colour.
+                self.refreshActivityStates();
+                return null;
+            }).catch(function() {
                 // Best-effort view ping; nothing to do on failure.
             });
         } catch (e) {
@@ -5307,8 +5317,10 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} scalenode Optional child group that takes the non-uniform
      *     width/height/depth so the sign (a sibling) is never sheared; defaults
      *     to the group itself.
+     * @param {Object} panel Optional interactive mesh (the sign face or video
+     *     screen) whose material and base colour a live refresh recolours.
      */
-    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign, scalenode) {
+    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign, scalenode, panel) {
         var t = act.transform || {};
         var editable = {
             cmid: act.id,
@@ -5338,7 +5350,7 @@ define('format_mnemo/vr', [], function() {
         // Record the activity (for every viewer, editable or not) with a
         // completion tick, so its state can be refreshed live.
         if (act.id) {
-            this.registerActivity(editable, act, sign || null);
+            this.registerActivity(editable, act, sign || null, panel || null);
         }
         // Only objects the viewer may edit at their own module context become
         // selectable, matching the web service's permission check (a course-
@@ -5358,20 +5370,32 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} editable The activity's editable record.
      * @param {Object} act The activity node (id, state).
      * @param {Object} sign The sign group, or null (e.g. a video screen).
+     * @param {Object} panel The interactive mesh (sign face or video screen),
+     *     or null; carries the frame material and hover-restore base colour.
      */
-    Cyberspace.prototype.registerActivity = function(editable, act, sign) {
+    Cyberspace.prototype.registerActivity = function(editable, act, sign, panel) {
         var tick = this.makeTick();
         if (sign) {
-            tick.position.set(sign.position.x, sign.position.y + 1.1, sign.position.z + 0.4);
+            // Parent the tick to the sign so it follows the sign when the
+            // editor's depth control shifts the sign's z (otherwise it would be
+            // left embedded in, or detached from, a deepened building).
+            sign.add(tick);
+            tick.position.set(0, 1.1, 0.4);
         } else {
+            editable.group.add(tick);
             tick.position.set(0, 2.4, 0.4);
         }
         tick.visible = act.state === 'complete';
-        editable.group.add(tick);
+        // The state colour lives on the frame material (exposed on the sign
+        // group for buildings; the video screen has no sign, so read it from the
+        // interactive panel's material instead).
+        var frameMat = (sign && sign.userData && sign.userData.frameMat) ||
+            (panel && panel.userData && panel.userData.material) || null;
         this.activities[act.id] = {
             group: editable.group,
             tick: tick,
-            frameMat: (sign && sign.userData && sign.userData.frameMat) || null,
+            frameMat: frameMat,
+            panel: (panel && panel.userData) ? panel : null,
             state: act.state
         };
     };
@@ -5420,12 +5444,18 @@ define('format_mnemo/vr', [], function() {
         if (!window.require || !this.config.courseid) {
             return;
         }
+        var seq = ++this.stateRefreshSeq;
         var request = {
             methodname: 'format_mnemo_get_states',
             args: {courseid: this.config.courseid}
         };
         window.require(['core/ajax'], function(ajax) {
             ajax.call([request])[0].then(function(res) {
+                // Drop a response overtaken by a later refresh, so an older
+                // snapshot cannot revert a state a newer one already applied.
+                if (self.stateRefreshSeq !== seq) {
+                    return null;
+                }
                 self.applyStates((res && res.states) || []);
                 return null;
             }).catch(function() {
@@ -5436,18 +5466,29 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * Apply refreshed activity states: toggle each activity's completion tick
-     * and recolour its sign frame to the state colour. Only activities already
-     * built into the scene are updated; one newly revealed from being fully
-     * hidden still needs a page reload.
+     * and recolour its sign frame to the state colour. An activity the server no
+     * longer lists has become unavailable since the scene was built (hidden, or
+     * a time window closed), so it is set to restricted rather than left reading
+     * as open. Only activities already built into the scene are updated; one
+     * newly revealed from being fully hidden still needs a page reload.
      *
      * @param {Array} states [{cmid, state}] from get_states.
      */
     Cyberspace.prototype.applyStates = function(states) {
+        var seen = {};
+        var i;
+        for (i = 0; i < states.length; i++) {
+            seen[states[i].cmid] = states[i].state;
+        }
         var changed = false;
-        for (var i = 0; i < states.length; i++) {
-            var a = this.activities[states[i].cmid];
-            var state = states[i].state;
-            if (!a || a.state === state) {
+        var cmids = Object.keys(this.activities);
+        for (i = 0; i < cmids.length; i++) {
+            var cmid = cmids[i];
+            var a = this.activities[cmid];
+            // A cmid absent from the response is no longer visible: treat it as
+            // restricted so it stops reading as available without a reload.
+            var state = Object.prototype.hasOwnProperty.call(seen, cmid) ? seen[cmid] : 'restricted';
+            if (a.state === state) {
                 continue;
             }
             a.state = state;
@@ -5455,8 +5496,15 @@ define('format_mnemo/vr', [], function() {
                 a.tick.visible = state === 'complete';
             }
             var colour = STATE_COLOURS[state];
-            if (a.frameMat && a.frameMat.color && typeof colour === 'number') {
-                a.frameMat.color.setHex(colour);
+            if (typeof colour === 'number') {
+                if (a.frameMat && a.frameMat.color) {
+                    a.frameMat.color.setHex(colour);
+                }
+                // Keep the hover-restore colour in step, so moving the pointer
+                // off the sign does not snap it back to the pre-refresh colour.
+                if (a.panel && a.panel.userData) {
+                    a.panel.userData.baseColour = colour;
+                }
             }
             changed = true;
         }
