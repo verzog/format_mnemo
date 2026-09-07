@@ -148,5 +148,19 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026091000, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026091009) {
+        // A "hidden" flag on scene objects so a teacher can delete a generated
+        // prop (lamp/barrier/kiosk) from the course: the row records that the
+        // slot is removed and the build skips it. Default 0 keeps existing
+        // props visible.
+        $table = new xmldb_table('format_mnemo_sceneobj');
+        $field = new xmldb_field('hidden', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'brightness');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026091009, 'format', 'mnemo');
+    }
+
     return true;
 }

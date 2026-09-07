@@ -40,6 +40,7 @@
         <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the default position."/>
         <FIELD NAME="rotation" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view extra rotation about the vertical axis, in degrees."/>
         <FIELD NAME="brightness" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view brightness multiplier for light-emitting objects."/>
+        <FIELD NAME="hidden" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether a generated prop at this slot has been removed from the course (1 = hidden)."/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the override was last set."/>
       </FIELDS>
       <KEYS>

@@ -232,6 +232,7 @@ class scene implements renderable, templatable {
                 'z' => (float)$row->offsetz,
                 'rot' => (float)$row->rotation,
                 'brightness' => (float)$row->brightness,
+                'hidden' => !empty($row->hidden),
             ];
         }
         return $map;

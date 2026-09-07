@@ -2365,6 +2365,10 @@ define('format_mnemo/vr', [], function() {
             for (var s = -1; s <= 1; s += 2) {
                 var objkey = kind + ':' + slot;
                 slot++;
+                // A prop a teacher deleted stays gone.
+                if (this.isHidden(objkey)) {
+                    continue;
+                }
                 var stored = this.sceneObjects[objkey];
                 var px = this.snapBase(s * edge, stored);
                 var pz = this.snapBase(z, stored);
@@ -2478,6 +2482,10 @@ define('format_mnemo/vr', [], function() {
         for (var i = 0; i < this.lampSlots.length; i++) {
             var slot = this.lampSlots[i];
             var objkey = 'lamp:' + i;
+            // A lamp a teacher deleted stays gone.
+            if (this.isHidden(objkey)) {
+                continue;
+            }
             var stored = this.sceneObjects[objkey];
             var px = this.snapBase(slot.x, stored);
             var pz = this.snapBase(slot.z, stored);
@@ -2510,6 +2518,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.scatterKiosks = function(tpl) {
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
+            // A kiosk a teacher deleted stays gone.
+            if (this.isHidden('kiosk:' + r.section)) {
+                continue;
+            }
             var innerX = r.xMin < 0 ? r.xMax : r.xMin;
             var dir = r.xMin < 0 ? -1 : 1;
             var kx = innerX + dir * 2;
@@ -4445,7 +4457,7 @@ define('format_mnemo/vr', [], function() {
             self.deselectEditable();
         });
         panel.querySelector('[data-mnemo-ed-act="delete"]').addEventListener('click', function() {
-            self.deletePlaced();
+            self.deleteSelected();
         });
 
         btn.addEventListener('click', function() {
@@ -4731,9 +4743,9 @@ define('format_mnemo/vr', [], function() {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
         });
-        // Only teacher-placed props can be deleted from the editor.
-        var placed = !!(editable.objkey && /^placed:/.test(editable.objkey));
-        panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !placed;
+        // Deletable objects: teacher-placed props, and generated decorative
+        // props (a street lamp, barrier or kiosk) which are hidden per course.
+        panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !this.isDeletable(editable);
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.updateSnapSurfaceUi();
         this.syncEditorOutputs();
@@ -5003,6 +5015,99 @@ define('format_mnemo/vr', [], function() {
             }
         }
         this.deselectEditable();
+    };
+
+    /**
+     * Whether the selected object can be deleted from the editor: a
+     * teacher-placed prop, or a generated decorative prop (lamp/barrier/kiosk).
+     * Gates, pylons and activities are not deletable.
+     *
+     * @param {Object} editable The editable record.
+     * @return {Boolean} Whether a Delete control should be offered.
+     */
+    Cyberspace.prototype.isDeletable = function(editable) {
+        if (!editable || !editable.objkey) {
+            return false;
+        }
+        if (/^placed:/.test(editable.objkey)) {
+            return true;
+        }
+        var t = this.propType(editable);
+        return t === 'lamp' || t === 'barrier' || t === 'kiosk';
+    };
+
+    /**
+     * Whether a generated prop's slot has been removed (hidden) for this course,
+     * so the build should skip it.
+     *
+     * @param {String} objkey The slot key.
+     * @return {Boolean} Whether the slot is hidden.
+     */
+    Cyberspace.prototype.isHidden = function(objkey) {
+        var o = this.sceneObjects[objkey];
+        return !!(o && o.hidden);
+    };
+
+    /**
+     * Delete the selected object: a teacher-placed prop is removed outright; a
+     * generated decorative prop is hidden for the course (so it stays gone on
+     * reload). Anything else is a no-op.
+     */
+    Cyberspace.prototype.deleteSelected = function() {
+        var editable = this.selected;
+        if (!editable || !editable.objkey) {
+            return;
+        }
+        if (/^placed:/.test(editable.objkey)) {
+            this.deletePlaced();
+        } else if (this.isDeletable(editable)) {
+            this.deleteGeneratedProp(editable);
+        }
+    };
+
+    /**
+     * Hide a generated decorative prop for the course through the web service,
+     * then take it out of the scene. The hidden state persists so the prop stays
+     * gone for every viewer and on reload.
+     *
+     * @param {Object} editable The generated prop's editable record.
+     */
+    Cyberspace.prototype.deleteGeneratedProp = function(editable) {
+        var self = this;
+        var objkey = editable.objkey;
+        var apply = function() {
+            // Remember the removal so it also holds if the scene is rebuilt in
+            // this session, then detach the prop and clear the selection.
+            self.sceneObjects[objkey] = self.sceneObjects[objkey] || {};
+            self.sceneObjects[objkey].hidden = true;
+            if (editable.group) {
+                self.scene.remove(editable.group);
+            }
+            var idx = self.editables.indexOf(editable);
+            if (idx >= 0) {
+                self.editables.splice(idx, 1);
+            }
+            self.deselectEditable();
+        };
+        if (!window.require) {
+            apply();
+            return;
+        }
+        var s = this.config.strings || {};
+        var status = this.editorPanel.querySelector('[data-mnemo-ed-status]');
+        status.textContent = s.editsaving || 'Saving…';
+        var request = {
+            methodname: 'format_mnemo_remove_scene_object',
+            args: {courseid: this.config.courseid, objkey: objkey}
+        };
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([request])[0].then(function() {
+                apply();
+                return null;
+            }).catch(function() {
+                status.textContent = s.editsaveerror || 'Could not save';
+            });
+        });
     };
 
     /**

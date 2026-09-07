@@ -1458,6 +1458,7 @@ const scenarios = [
                 ],
                 footprints: [{xMin: 4, xMax: 8, zMin: -8, zMax: -4}],
                 surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt,
+                isHidden: CS.prototype.isHidden,
                 snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord,
                 gridStep: 2, footprintClear: CS.prototype.footprintClear,
                 addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
@@ -1540,6 +1541,79 @@ const scenarios = [
             const pass = withSky.bg === tex && withSky.starfield === 0 &&
                 without.starfield === 1;
             return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
+    },
+    {
+        name: 'delete: isHidden and isDeletable classify slots',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                sceneObjects: {'lamp:2': {hidden: true}, 'lamp:3': {}},
+                placedObjects: [{id: 5, type: 'lamp', x: 0, z: 0}],
+                isHidden: CS.prototype.isHidden, isDeletable: CS.prototype.isDeletable,
+                propType: CS.prototype.propType
+            };
+            const pass = self.isHidden('lamp:2') === true && self.isHidden('lamp:3') === false &&
+                self.isHidden('lamp:9') === false &&
+                self.isDeletable({objkey: 'lamp:1'}) === true &&
+                self.isDeletable({objkey: 'kiosk:0'}) === true &&
+                self.isDeletable({objkey: 'placed:5'}) === true &&
+                self.isDeletable({objkey: 'gate:0'}) === false &&
+                self.isDeletable({cmid: 1}) === false;
+            return {pass, detail: `hid2=${self.isHidden('lamp:2')} gate=${self.isDeletable({objkey: 'gate:0'})}`};
+        }
+    },
+    {
+        name: 'delete: placeLampSlots skips a hidden lamp slot',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshStandardMaterial()));
+            const self = {
+                THREE, config: {canedit: true, strings: {placelamp: 'Street lamp'}},
+                sceneObjects: {'lamp:0': {hidden: true}}, editables: [], lampLights: 0,
+                palette: {primary: 0x00e5ff}, scene: {add: () => {}},
+                lampSlots: [{x: 6, z: 4, rotY: 0}, {x: -6, z: 4, rotY: Math.PI}],
+                footprints: [], surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt,
+                snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord, gridStep: 2,
+                footprintClear: CS.prototype.footprintClear, isHidden: CS.prototype.isHidden,
+                addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
+                addPickProxy: CS.prototype.addPickProxy,
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness,
+                placeLampSlots: CS.prototype.placeLampSlots
+            };
+            self.placeLampSlots(tpl);
+            const keys = self.editables.map((e) => e.objkey);
+            const pass = self.editables.length === 1 && keys[0] === 'lamp:1';
+            return {pass, detail: `keys=${keys.join(',')}`};
+        }
+    },
+    {
+        name: 'delete: deleteSelected hides a generated prop in-scene',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const group = new THREE.Group();
+            const ed = {objkey: 'lamp:4', group};
+            const removed = [];
+            let deselected = 0;
+            const self = {
+                selected: ed, sceneObjects: {}, placedObjects: [], editables: [ed],
+                scene: {remove: (o) => removed.push(o)}, config: {courseid: 1, strings: {}},
+                deselectEditable: () => { deselected++; },
+                propType: CS.prototype.propType, isDeletable: CS.prototype.isDeletable,
+                deletePlaced: () => { self.placedCalled = true; },
+                deleteGeneratedProp: CS.prototype.deleteGeneratedProp,
+                deleteSelected: CS.prototype.deleteSelected
+            };
+            // No window.require in the harness, so the hide applies synchronously.
+            self.deleteSelected();
+            const o = self.sceneObjects['lamp:4'];
+            const pass = !!(o && o.hidden === true) && removed.indexOf(group) !== -1 &&
+                self.editables.length === 0 && deselected === 1 && !self.placedCalled;
+            return {pass, detail: `hidden=${o && o.hidden} removed=${removed.length} eds=${self.editables.length}`};
         }
     }
 ];

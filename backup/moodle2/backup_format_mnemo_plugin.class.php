@@ -114,7 +114,7 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
 
         $sceneobj = new backup_nested_element('sceneobj', ['id'], [
             'objkey', 'scale', 'scalex', 'scaley', 'scalez',
-            'offsetx', 'offsety', 'offsetz', 'rotation', 'brightness', 'timemodified',
+            'offsetx', 'offsety', 'offsetz', 'rotation', 'brightness', 'hidden', 'timemodified',
         ]);
         $sceneobjs->add_child($sceneobj);
 
