@@ -54,6 +54,11 @@ define('format_mnemo/vr', [], function() {
         restricted: 0xff3b6b
     };
 
+    // Height of the raised sidewalk kerb (world units). Shared so the alignment
+    // grid can sit clearly above the sidewalk tops rather than being hidden
+    // under them, and so surface-snapping rests objects on the right level.
+    var SIDEWALK_HEIGHT = 0.18;
+
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
@@ -140,6 +145,18 @@ define('format_mnemo/vr', [], function() {
         } catch (e) {
             this.snap = false;
         }
+        // Snap-to-surface: when on, moving (or placing) an object rests it on
+        // the road/sidewalk/ground surface beneath it, so a prop stands on a
+        // raised sidewalk rather than sinking to road level. Remembered per
+        // viewer; the resulting vertical offset is saved so every learner sees
+        // the object at that level. `surfaces` are the raycast targets.
+        this.snapSurface = false;
+        try {
+            this.snapSurface = window.localStorage.getItem('format_mnemo_snapsurface') === '1';
+        } catch (e) {
+            this.snapSurface = false;
+        }
+        this.surfaces = [];
         // In-view object placer: teacher-placed props, the loaded model
         // templates to clone when placing, and the current placement state.
         this.placedObjects = config.placedobjects || [];
@@ -2205,6 +2222,7 @@ define('format_mnemo/vr', [], function() {
             }
             this.setShadow(m, true);
             this.scene.add(m);
+            this.addPickProxy(m);
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
                 m, p.x, y, p.z, type === 'lamp' || type === 'av');
         }
@@ -2295,7 +2313,8 @@ define('format_mnemo/vr', [], function() {
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
-                this.registerSceneEditable(objkey, label, m, px, 0, pz, true);
+                this.addPickProxy(m);
+                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp');
             }
         }
     };
@@ -2333,9 +2352,10 @@ define('format_mnemo/vr', [], function() {
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
+            this.addPickProxy(m);
             // Key by the side street's section number (course-stable across
             // viewers), not a filtered ordinal.
-            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, true);
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false);
         }
     };
 
@@ -2594,6 +2614,8 @@ define('format_mnemo/vr', [], function() {
         road.position.set(cx, y + 0.02, cz);
         road.receiveShadow = true;
         this.scene.add(road);
+        // A snap target so objects can rest on the road surface.
+        this.surfaces.push(road);
         if (this.roadTexture) {
             this.registerSurfaceMesh('road', road, w, d);
         }
@@ -2613,7 +2635,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSidewalk = function(cx, cz, w, d) {
         var THREE = this.THREE;
-        var height = 0.18;
+        var height = SIDEWALK_HEIGHT;
         // The kerb body: a low concrete slab that gives the sidewalk a visible
         // raised edge above the road.
         var body = new THREE.Mesh(
@@ -2638,6 +2660,9 @@ define('format_mnemo/vr', [], function() {
         top.position.set(cx, height + 0.01, cz);
         top.receiveShadow = true;
         this.scene.add(top);
+        // The walking surface is a snap target so objects rest on the raised
+        // sidewalk rather than sinking to road level.
+        this.surfaces.push(top);
         // Only a textured sidewalk offers the texture-size control (matching
         // road/ground); a plain concrete top has nothing to retune.
         if (this.sidewalkTexture) {
@@ -2711,6 +2736,7 @@ define('format_mnemo/vr', [], function() {
         patch.position.set(cx, 0.035, cz);
         patch.receiveShadow = true;
         this.scene.add(patch);
+        this.surfaces.push(patch);
         this.registerSurfaceMesh('ground', patch, size, size);
     };
 
@@ -3116,6 +3142,40 @@ define('format_mnemo/vr', [], function() {
         proxy.receiveShadow = false;
         proxy.userData.mnemoProxy = true;
         return proxy;
+    };
+
+    /**
+     * Add an invisible box around a loaded prop model so it is as easy to select
+     * in the editor as a tall building - without one, a low or thin prop (a
+     * barrier, a kerbside kiosk) is hard to hit and reads as uneditable, while a
+     * tall lamp is easy. Sized to the model's bounds with a minimum clickable
+     * volume, and parented to the group so it moves and scales with it. Not
+     * rendered (visible=false) but still raycast, like a building's editProxy.
+     *
+     * @param {Object} group The prop group (a loaded model clone).
+     */
+    Cyberspace.prototype.addPickProxy = function(group) {
+        var THREE = this.THREE;
+        group.updateWorldMatrix(true, true);
+        var box = new THREE.Box3().setFromObject(group);
+        if (box.isEmpty()) {
+            return;
+        }
+        var size = box.getSize(new THREE.Vector3());
+        var center = box.getCenter(new THREE.Vector3());
+        var proxy = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                Math.max(size.x, 1.2), Math.max(size.y, 1.4), Math.max(size.z, 1.2)),
+            new THREE.MeshBasicMaterial()
+        );
+        // Convert the world-space centre into the group's local frame so the box
+        // sits over the model whatever the group's position/rotation.
+        proxy.position.copy(group.worldToLocal(center));
+        proxy.visible = false;
+        proxy.castShadow = false;
+        proxy.receiveShadow = false;
+        proxy.userData.mnemoProxy = true;
+        group.add(proxy);
     };
 
     /**
@@ -4065,6 +4125,10 @@ define('format_mnemo/vr', [], function() {
             '<input type="checkbox" data-mnemo-ed-snap>' +
             '<span>' + (s.editsnap || 'Snap to grid') + '</span>' +
             '</label>' +
+            '<label class="format-mnemo__editor-snap" data-mnemo-ed-snapsurfacerow>' +
+            '<input type="checkbox" data-mnemo-ed-snapsurface>' +
+            '<span>' + (s.editsnapsurface || 'Snap to surface') + '</span>' +
+            '</label>' +
             '<div class="format-mnemo__editor-actions">' +
             '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
@@ -4099,6 +4163,15 @@ define('format_mnemo/vr', [], function() {
                 if (key === 'brightness') {
                     self.applyBrightness(self.selected);
                 } else {
+                    // With snap-to-surface on, moving in the plane re-rests the
+                    // object on whatever surface it is now over (e.g. up onto a
+                    // sidewalk), and the resulting Move-Y is reflected below.
+                    if (self.snapSurface && (key === 'x' || key === 'z') &&
+                            self.propType(self.selected)) {
+                        self.dropToSurface(self.selected);
+                        var yInput = panel.querySelector('[data-mnemo-ed="y"]');
+                        yInput.value = self.selected.transform.y;
+                    }
                     self.applyTransform(self.selected);
                 }
                 self.syncEditorOutputs();
@@ -4115,6 +4188,30 @@ define('format_mnemo/vr', [], function() {
                 window.localStorage.setItem('format_mnemo_snap', self.snap ? '1' : '0');
             } catch (e) {
                 // Ignore storage being unavailable; the toggle still works.
+            }
+        });
+
+        // Snap-to-surface toggle: remembered per viewer. Turning it on drops the
+        // selected object onto the surface beneath it now (and each later move
+        // re-drops it); the Move-Y control is disabled while it is on, since the
+        // vertical position is then driven by the surface.
+        var surfBox = panel.querySelector('[data-mnemo-ed-snapsurface]');
+        surfBox.checked = this.snapSurface;
+        surfBox.addEventListener('change', function() {
+            self.snapSurface = surfBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_snapsurface', self.snapSurface ? '1' : '0');
+            } catch (e) {
+                // Ignore storage being unavailable; the toggle still works.
+            }
+            if (self.snapSurface && self.selected && self.propType(self.selected)) {
+                self.dropToSurface(self.selected);
+                self.applyTransform(self.selected);
+            }
+            if (self.selected) {
+                self.fillEditor(self.selected);
+            } else {
+                self.updateSnapSurfaceUi();
             }
         });
 
@@ -4271,10 +4368,11 @@ define('format_mnemo/vr', [], function() {
             span = Math.ceil(span / g) * g;
             var divisions = Math.round(span / g);
             var grid = new THREE.GridHelper(span, divisions, this.palette.primary, this.palette.primary);
-            // Sit clearly above the road strips and textured plazas so those
-            // opaque surfaces do not wash the lines out, centred on a grid
-            // multiple so the drawn lines land on the lattice placement snaps to.
-            grid.position.set(0, 0.12, this.snapCoord((zmin + zmax) / 2));
+            // Sit clearly above the road strips, textured plazas and the raised
+            // sidewalk tops (which are SIDEWALK_HEIGHT high) so none of those
+            // opaque surfaces hide the lines, centred on a grid multiple so the
+            // drawn lines land on the lattice placement snaps to.
+            grid.position.set(0, SIDEWALK_HEIGHT + 0.06, this.snapCoord((zmin + zmax) / 2));
             if (grid.material) {
                 grid.material.transparent = true;
                 grid.material.opacity = 0.6;
@@ -4430,7 +4528,30 @@ define('format_mnemo/vr', [], function() {
         var placed = !!(editable.objkey && /^placed:/.test(editable.objkey));
         panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !placed;
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
+        this.updateSnapSurfaceUi();
         this.syncEditorOutputs();
+    };
+
+    /**
+     * Reflect the snap-to-surface state in the editor: while it is on and a
+     * snappable prop is selected, the Move-Y control is locked, since the
+     * object's height is driven by the surface beneath it rather than set by
+     * hand.
+     */
+    Cyberspace.prototype.updateSnapSurfaceUi = function() {
+        if (!this.editorPanel) {
+            return;
+        }
+        var yInput = this.editorPanel.querySelector('[data-mnemo-ed="y"]');
+        if (!yInput) {
+            return;
+        }
+        var lock = !!(this.snapSurface && this.selected && this.propType(this.selected));
+        yInput.disabled = lock;
+        var row = yInput.closest('.format-mnemo__editor-row');
+        if (row) {
+            row.classList.toggle('format-mnemo__editor-row--locked', lock);
+        }
     };
 
     /**
@@ -4466,15 +4587,43 @@ define('format_mnemo/vr', [], function() {
         }
         saveBtn.disabled = true;
         status.textContent = s.editsaving || 'Saving…';
+        var savedText = s.editsaved || 'Saved';
+        var errorText = s.editsaveerror || 'Could not save';
+        var promise = this.persistTransform(editable);
+        if (!promise) {
+            saveBtn.disabled = false;
+            return;
+        }
+        promise.then(function() {
+            status.textContent = savedText;
+            saveBtn.disabled = false;
+            return null;
+        }).catch(function() {
+            status.textContent = errorText;
+            saveBtn.disabled = false;
+        });
+    };
+
+    /**
+     * Persist an editable's transform through the Moodle web service, without
+     * touching the editor panel, and return the request promise (or null when
+     * ajax is unavailable). Activities save by course-module id; non-activity
+     * scene objects save by their per-course slot key (with brightness). Both
+     * carry the per-axis width/height/depth multipliers. Used both by Save and
+     * by the placer (to persist a surface-snapped drop for a freshly placed
+     * prop that is not the current selection).
+     *
+     * @param {Object} editable The editable to persist.
+     * @return {Promise|null} The web-service call promise, or null.
+     */
+    Cyberspace.prototype.persistTransform = function(editable) {
+        if (!editable || !window.require) {
+            return null;
+        }
         var t = editable.transform;
         var one = function(v) {
             return typeof v === 'number' ? v : 1;
         };
-        var savedText = s.editsaved || 'Saved';
-        var errorText = s.editsaveerror || 'Could not save';
-        // Activities save by course-module id; non-activity scene objects save
-        // by their per-course slot key (with brightness). Both carry the
-        // per-axis width/height/depth multipliers.
         var request = editable.objkey ? {
             methodname: 'format_mnemo_set_scene_object',
             args: {
@@ -4491,14 +4640,9 @@ define('format_mnemo/vr', [], function() {
                 offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
             }
         };
-        window.require(['core/ajax'], function(ajax) {
-            ajax.call([request])[0].then(function() {
-                status.textContent = savedText;
-                saveBtn.disabled = false;
-                return null;
-            }).catch(function() {
-                status.textContent = errorText;
-                saveBtn.disabled = false;
+        return new Promise(function(resolve, reject) {
+            window.require(['core/ajax'], function(ajax) {
+                ajax.call([request])[0].then(resolve).catch(reject);
             });
         });
     };
@@ -4576,9 +4720,21 @@ define('format_mnemo/vr', [], function() {
         }
         this.setShadow(m, true);
         this.scene.add(m);
+        this.addPickProxy(m);
         this.placedObjects.push({id: id, type: type, x: x, z: z});
         this.registerSceneEditable('placed:' + id, this.propLabel(type),
             m, x, y, z, type === 'lamp' || type === 'av');
+        // With snap-to-surface on, rest the new prop on the surface beneath it
+        // (e.g. a raised sidewalk) and persist that height so every learner sees
+        // it there, not sunk to road level.
+        if (this.snapSurface && type !== 'av') {
+            var editable = this.editables[this.editables.length - 1];
+            if (editable && editable.objkey === 'placed:' + id) {
+                this.dropToSurface(editable);
+                this.applyTransform(editable);
+                this.persistTransform(editable);
+            }
+        }
     };
 
     /**
@@ -4878,6 +5034,79 @@ define('format_mnemo/vr', [], function() {
         if (this.renderer && this.renderer.shadowMap) {
             this.renderer.shadowMap.needsUpdate = true;
         }
+    };
+
+    /**
+     * The height of the topmost road/sidewalk/ground surface directly beneath a
+     * world (x, z), by casting a ray straight down through the recorded surface
+     * meshes. Used by snap-to-surface so an object rests on a raised sidewalk
+     * rather than at road level. Returns 0 (ground datum) when nothing is hit.
+     *
+     * @param {Number} x World x.
+     * @param {Number} z World z.
+     * @return {Number} The surface height (world y).
+     */
+    Cyberspace.prototype.surfaceHeightAt = function(x, z) {
+        if (!this.surfaces || !this.surfaces.length) {
+            return 0;
+        }
+        var THREE = this.THREE;
+        if (!this.surfaceCaster) {
+            this.surfaceCaster = new THREE.Raycaster();
+            this.surfaceDown = new THREE.Vector3(0, -1, 0);
+            this.surfaceOrigin = new THREE.Vector3();
+        }
+        this.surfaceOrigin.set(x, 60, z);
+        this.surfaceCaster.set(this.surfaceOrigin, this.surfaceDown);
+        var hits = this.surfaceCaster.intersectObjects(this.surfaces, false);
+        // intersectObjects sorts nearest-first; from above, that is the topmost
+        // surface at this point.
+        return hits.length ? hits[0].point.y : 0;
+    };
+
+    /**
+     * Set an editable's vertical offset so it rests on the surface beneath its
+     * current world position (base + offset), for snap-to-surface. Flying props
+     * (vehicles) keep their hover height rather than being dropped to a kerb.
+     *
+     * @param {Object} editable The editable to rest on the surface.
+     */
+    Cyberspace.prototype.dropToSurface = function(editable) {
+        if (this.propType(editable) === 'av') {
+            return;
+        }
+        var t = editable.transform;
+        var y = this.surfaceHeightAt(editable.baseX + t.x, editable.baseZ + t.z);
+        t.y = y - editable.baseY;
+    };
+
+    /**
+     * The placed/scattered prop type of an editable (lamp, barrier, kiosk, av),
+     * from its slot key, or null for anything else (activities, gates, pylons,
+     * surfaces).
+     *
+     * @param {Object} editable The editable record.
+     * @return {String|null} The prop type, or null.
+     */
+    Cyberspace.prototype.propType = function(editable) {
+        var key = editable && editable.objkey;
+        if (!key) {
+            return null;
+        }
+        // A teacher-placed prop keys placed:<id>; its type lives in placedObjects.
+        if (key.indexOf('placed:') === 0) {
+            var id = parseInt(key.slice(7), 10);
+            for (var i = 0; i < this.placedObjects.length; i++) {
+                if (this.placedObjects[i].id === id) {
+                    return this.placedObjects[i].type;
+                }
+            }
+            return null;
+        }
+        // A scattered prop keys <type>:<slot> (lamp/barrier/kiosk/av).
+        var prefix = key.split(':')[0];
+        return (prefix === 'lamp' || prefix === 'barrier' || prefix === 'kiosk' ||
+            prefix === 'av') ? prefix : null;
     };
 
     /**

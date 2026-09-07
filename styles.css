@@ -365,6 +365,11 @@
     flex: 0 0 4.5rem;
 }
 
+/* Move-Y is locked while snap-to-surface drives the vertical position. */
+.format-mnemo__editor-row--locked {
+    opacity: 0.45;
+}
+
 .format-mnemo__editor-row input[type="range"] {
     flex: 1 1 auto;
     min-width: 0;

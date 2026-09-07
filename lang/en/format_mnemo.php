@@ -53,6 +53,7 @@ $string['editsection'] = 'Edit node';
 $string['editsectionname'] = 'Edit node name';
 $string['editsidewalksurface'] = 'Sidewalk surface';
 $string['editsnap'] = 'Snap to grid';
+$string['editsnapsurface'] = 'Snap to surface';
 $string['edittexsize'] = 'Texture size';
 $string['editwidth'] = 'Width';
 $string['emptynode'] = 'This node has no activities yet.';
