@@ -47,6 +47,60 @@
     display: none;
 }
 
+/* Activity panel: the real Moodle activity, layered over the 3D stage so the
+   learner does it without leaving the world. Hidden until an activity opens. */
+.format-mnemo__overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    background: rgba(2, 6, 15, 0.94);
+}
+
+.format-mnemo__overlay[hidden] {
+    display: none;
+}
+
+.format-mnemo__overlay-bar {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(0, 229, 255, 0.1);
+    border-bottom: 1px solid #10263b;
+}
+
+.format-mnemo__overlay-title {
+    flex: 1 1 auto;
+    margin: 0;
+    overflow: hidden;
+    color: #00e5ff;
+    font-size: 1rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-shadow: 0 0 10px currentColor;
+}
+
+.format-mnemo__overlay-full {
+    flex: 0 0 auto;
+    color: #9fe8ff;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.format-mnemo__overlay-close {
+    flex: 0 0 auto;
+}
+
+.format-mnemo__overlay-frame {
+    flex: 1 1 auto;
+    width: 100%;
+    border: 0;
+    background: #fff;
+}
+
 /* Fallback list: shown when JS is off, on failure, or when toggled. */
 .format-mnemo--active .format-mnemo__fallback {
     display: none;

@@ -505,6 +505,8 @@ class scene implements renderable, templatable {
                 'loading' => get_string('loadingscene', 'format_mnemo'),
                 'failed' => get_string('scenefailed', 'format_mnemo'),
                 'controls' => get_string('scenecontrols', 'format_mnemo'),
+                'activityclose' => get_string('activityclose', 'format_mnemo'),
+                'activityopen' => get_string('activityopen', 'format_mnemo'),
                 'complete' => get_string('statecomplete', 'format_mnemo'),
                 'available' => get_string('stateavailable', 'format_mnemo'),
                 'restricted' => get_string('staterestricted', 'format_mnemo'),

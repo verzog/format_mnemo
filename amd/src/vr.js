@@ -161,6 +161,8 @@ define('format_mnemo/vr', [], function() {
         this.day = null; // Daylight parameters, computed in build().
 
         this.interactive = []; // Meshes that can be gazed/clicked to open.
+        this.activityOverlay = null; // In-scene activity panel (built on demand).
+        this.overlayReturnFocus = null; // Element to refocus when the panel closes.
         this.videos = []; // HTMLVideoElements driving in-world screens.
         this.hovered = null; // Currently highlighted mesh.
         this.controllers = []; // XR controller target-ray spaces.
@@ -3627,7 +3629,7 @@ define('format_mnemo/vr', [], function() {
         } else if (ud.videoSrc) {
             this.startVideo(target);
         } else if (ud.url) {
-            this.open(ud.url);
+            this.openActivity(ud.url, ud.name);
         }
     };
 
@@ -5091,12 +5093,137 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Open a course activity from within the scene. Outside an immersive
+     * headset session (desktop, phone or magic-window) the activity is shown
+     * in a panel layered over the 3D view - its real Moodle page in an iframe -
+     * so the learner does the quiz, assignment or resource without leaving the
+     * world. Inside an immersive session the page DOM is not visible, so this
+     * falls back to navigating to the activity (which ends the session);
+     * presenting activities natively in-scene is a later phase.
+     *
+     * @param {String} url The activity view URL.
+     * @param {String} name The activity name (panel heading).
+     */
+    Cyberspace.prototype.openActivity = function(url, name) {
+        if (!url) {
+            return;
+        }
+        if (this.renderer.xr.isPresenting) {
+            this.open(url);
+            return;
+        }
+        this.showActivityOverlay(url, name);
+    };
+
+    /**
+     * Show (building it once) the in-scene activity overlay for a URL, layered
+     * over the stage with a heading, a close control and an open-in-new-tab
+     * link, and load the activity's Moodle page into its iframe. In-world video
+     * audio is paused while the panel is open so it does not sound behind it.
+     *
+     * @param {String} url The activity view URL to load in the panel.
+     * @param {String} name The activity name shown as the panel heading.
+     */
+    Cyberspace.prototype.showActivityOverlay = function(url, name) {
+        var overlay = this.activityOverlay || this.buildActivityOverlay();
+        this.overlayReturnFocus = document.activeElement;
+        overlay.title.textContent = name || '';
+        overlay.el.setAttribute('aria-label', name || '');
+        overlay.frame.setAttribute('title', name || '');
+        overlay.frame.src = url;
+        overlay.full.href = url;
+        overlay.el.hidden = false;
+        this.pauseVideos();
+        overlay.close.focus();
+    };
+
+    /**
+     * Build the activity overlay DOM once, layered over the stage, and wire its
+     * close control and Escape-to-close. Returns the record of its parts;
+     * subsequent opens reuse it.
+     *
+     * @return {Object} {el, title, frame, close, full}.
+     */
+    Cyberspace.prototype.buildActivityOverlay = function() {
+        var self = this;
+        var s = this.config.strings || {};
+
+        var el = document.createElement('div');
+        el.className = 'format-mnemo__overlay';
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-modal', 'true');
+        el.hidden = true;
+
+        var bar = document.createElement('div');
+        bar.className = 'format-mnemo__overlay-bar';
+
+        var title = document.createElement('h3');
+        title.className = 'format-mnemo__overlay-title';
+
+        var full = document.createElement('a');
+        full.className = 'format-mnemo__overlay-full';
+        full.target = '_blank';
+        full.rel = 'noopener';
+        full.textContent = s.activityopen || 'Open in new tab';
+
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'btn btn-secondary format-mnemo__overlay-close';
+        close.textContent = s.activityclose || 'Close';
+        close.addEventListener('click', function() {
+            self.closeActivityOverlay();
+        });
+
+        var frame = document.createElement('iframe');
+        frame.className = 'format-mnemo__overlay-frame';
+
+        bar.appendChild(title);
+        bar.appendChild(full);
+        bar.appendChild(close);
+        el.appendChild(bar);
+        el.appendChild(frame);
+
+        el.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                self.closeActivityOverlay();
+            }
+        });
+
+        this.root.appendChild(el);
+        this.activityOverlay = {el: el, title: title, frame: frame, close: close, full: full};
+        return this.activityOverlay;
+    };
+
+    /**
+     * Hide the activity overlay, stop the framed page (and any media it plays)
+     * by clearing its src, and return focus to the element that opened it.
+     */
+    Cyberspace.prototype.closeActivityOverlay = function() {
+        var overlay = this.activityOverlay;
+        if (!overlay || overlay.el.hidden) {
+            return;
+        }
+        overlay.el.hidden = true;
+        overlay.frame.src = 'about:blank';
+        if (this.overlayReturnFocus && this.overlayReturnFocus.focus) {
+            this.overlayReturnFocus.focus();
+        }
+    };
+
+    /**
      * Per-frame update: locomotion, spinning, flicker, highlighting, rendering.
      */
     Cyberspace.prototype.tick = function() {
         var dt = Math.min(0.05, this.clock.getDelta());
         this.time += dt;
         var presenting = this.renderer.xr.isPresenting;
+
+        // While the on-screen activity panel covers the stage, pause the scene:
+        // it is fully hidden, so there is nothing to animate or render. (An
+        // immersive session never shows the panel, so it keeps running.)
+        if (!presenting && this.activityOverlay && !this.activityOverlay.el.hidden) {
+            return;
+        }
 
         // Spin the rooftop holo elements.
         for (var i = 0; i < this.spinners.length; i++) {

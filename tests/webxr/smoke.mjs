@@ -390,7 +390,9 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const obj = {open: function(u) {
                 this.opened = u;
-            }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate};
+            }, toggleVideo: CS.prototype.toggleVideo, activate: CS.prototype.activate,
+                openActivity: CS.prototype.openActivity,
+                renderer: {xr: {isPresenting: true}}};
             obj.activate({userData: {url: 'openme'}});
             return {pass: obj.opened === 'openme', detail: `opened=${obj.opened}`};
         }
@@ -1214,6 +1216,75 @@ const scenarios = [
             self.addLampLight(g2);
             const capped = g2.children.length === 0 && self.lampLights === 24;
             return {pass: added && capped, detail: `added=${added} capped=${capped}`};
+        }
+    },
+    {
+        name: 'activity: openActivity shows an in-scene panel when not presenting',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const url = 'https://moodle.example/mod/quiz/view.php?id=5';
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {activityclose: 'Close', activityopen: 'Open'}},
+                root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            document.body.appendChild(self.root);
+            self.openActivity(url, 'My Quiz');
+            const o = self.activityOverlay;
+            const pass = !!o && o.el.hidden === false &&
+                o.frame.getAttribute('src') === url && o.full.getAttribute('href') === url &&
+                o.title.textContent === 'My Quiz' && self.root.contains(o.el);
+            document.body.removeChild(self.root);
+            return {pass, detail: `built=${!!o} src=${o && o.frame.getAttribute('src')}`};
+        }
+    },
+    {
+        name: 'activity: openActivity navigates (no panel) inside an immersive session',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            let opened = null;
+            const self = {
+                renderer: {xr: {isPresenting: true}},
+                config: {strings: {}}, root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                pauseVideos: CS.prototype.pauseVideos,
+                open: (u) => { opened = u; }
+            };
+            self.openActivity('https://moodle.example/mod/assign/view.php?id=9', 'Essay');
+            const pass = opened === 'https://moodle.example/mod/assign/view.php?id=9' &&
+                self.activityOverlay === null;
+            return {pass, detail: `opened=${opened} overlay=${self.activityOverlay}`};
+        }
+    },
+    {
+        name: 'activity: closeActivityOverlay hides the panel and stops the framed page',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {}}, root: document.createElement('div'),
+                videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            document.body.appendChild(self.root);
+            self.openActivity('https://moodle.example/mod/page/view.php?id=3', 'Notes');
+            self.closeActivityOverlay();
+            const o = self.activityOverlay;
+            const pass = o.el.hidden === true && /about:blank$/.test(o.frame.getAttribute('src'));
+            document.body.removeChild(self.root);
+            return {pass, detail: `hidden=${o.el.hidden} src=${o.frame.getAttribute('src')}`};
         }
     }
 ];
