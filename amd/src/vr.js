@@ -106,7 +106,8 @@ define('format_mnemo/vr', [], function() {
      *     KTX2Loader, MeshoptDecoder); absent when only the built-in parser is
      *     available.
      * @param {Object} assets Optional site-wide sign assets loaded before
-     *     construction: {signFontFamily, signTexture} (each nullable).
+     *     construction: {signFontFamily, signTexture, roadTexture,
+     *     groundTexture} (each nullable).
      */
     function Cyberspace(THREE, root, config, loaders, assets) {
         this.THREE = THREE;
@@ -114,11 +115,22 @@ define('format_mnemo/vr', [], function() {
         this.config = config;
         this.loaders = loaders || {};
         assets = assets || {};
-        // Optional site-wide sign assets, loaded before construction (see
-        // loadSignAssets): a custom CSS font-family for neon text, and a Three
-        // texture tinted onto every sign frame. Either may be null.
+        // Optional site-wide assets, loaded before construction (see
+        // loadSceneAssets): a custom CSS font-family for neon text, a texture
+        // tinted onto every sign frame, and tiled road/ground textures. Any may
+        // be null, in which case the bundled neon look is used.
         this.signFontFamily = assets.signFontFamily || null;
         this.signTexture = assets.signTexture || null;
+        this.roadTexture = assets.roadTexture || null;
+        this.groundTexture = assets.groundTexture || null;
+        // Tiling scale (world units per texture tile) and the size of the
+        // textured ground patch laid around each building. Admin-configurable.
+        this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
+        this.groundScale = config.groundtexturescale > 0 ? config.groundtexturescale : 8;
+        this.groundPatch = config.groundpatchsize > 0 ? config.groundpatchsize : 0;
+        // World-space XZ footprints of placed buildings, so scattered props
+        // (kiosks, lamps, barriers) can avoid dropping on top of a building.
+        this.footprints = [];
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2106,8 +2118,12 @@ define('format_mnemo/vr', [], function() {
         var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
         for (var z = road.zMax - 6; z > road.zMin + 6; z -= step) {
             for (var s = -1; s <= 1; s += 2) {
+                // Skip a prop that would drop on a building footprint.
+                if (!this.footprintClear(s * edge, z, 0.8)) {
+                    continue;
+                }
                 var m = tpl.clone();
-                m.position.set(s * edge, 0, z + (kind === 'barrier' ? 0 : 0));
+                m.position.set(s * edge, 0, z);
                 if (s < 0 && kind === 'lamp') {
                     m.rotation.y = Math.PI; // Arm faces the road on both sides.
                 }
@@ -2125,9 +2141,25 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.scatterKiosks = function(tpl) {
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
-            var m = tpl.clone();
             var innerX = r.xMin < 0 ? r.xMax : r.xMin;
-            m.position.set(innerX + (r.xMin < 0 ? -2 : 2), 0, r.zMin - 2);
+            var dir = r.xMin < 0 ? -1 : 1;
+            var kx = innerX + dir * 2;
+            // Nudge the kiosk further from the mouth until it clears the nearby
+            // buildings' footprints, so it no longer drops on top of one.
+            var kz = r.zMin - 2;
+            var placed = false;
+            for (var t = 0; t < 4; t++) {
+                if (this.footprintClear(kx, kz - t * 1.5, 1.6)) {
+                    kz = kz - t * 1.5;
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed) {
+                continue; // No clear spot near this mouth; skip the kiosk.
+            }
+            var m = tpl.clone();
+            m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
@@ -2298,6 +2330,10 @@ define('format_mnemo/vr', [], function() {
             // Face the street centreline so the signboard reads from the street.
             built.group.lookAt(bx, built.group.position.y, z);
             self.scene.add(built.group);
+            // A textured ground patch (plaza) under the building, then record
+            // its footprint so props avoid it.
+            self.groundPatchAt(bx, bz);
+            self.recordFootprint(bx, bz, built.w, built.d);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
         });
@@ -2316,16 +2352,102 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         // A lit (dark, wet-looking) asphalt strip that receives the sun's
         // shadows, so buildings are grounded on the streets the learner walks.
-        var road = new THREE.Mesh(
-            new THREE.PlaneGeometry(w, d),
-            new THREE.MeshStandardMaterial({
-                color: 0x05070d, roughness: 0.5, metalness: 0.5
-            })
-        );
+        // A site-wide road texture, if uploaded, tiles across it at the admin's
+        // chosen scale; otherwise the flat wet-asphalt colour is kept.
+        var mat = new THREE.MeshStandardMaterial({
+            color: this.roadTexture ? 0xffffff : 0x05070d,
+            roughness: 0.5, metalness: 0.5
+        });
+        if (this.roadTexture) {
+            mat.map = this.tiledClone(this.roadTexture, w / this.roadScale, d / this.roadScale);
+        }
+        var road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
         road.receiveShadow = true;
         this.scene.add(road);
+    };
+
+    /**
+     * Clone a tiling texture and set its wrap/repeat, so several surfaces of
+     * different sizes can share one uploaded image while each tiles it at the
+     * right density (a texture's repeat is per-texture, not per-mesh).
+     *
+     * @param {Object} texture The source Three.Texture (already RepeatWrapping).
+     * @param {Number} repeatX Horizontal tile count.
+     * @param {Number} repeatY Vertical tile count.
+     * @return {Object} The cloned texture.
+     */
+    Cyberspace.prototype.tiledClone = function(texture, repeatX, repeatY) {
+        var clone = texture.clone();
+        clone.wrapS = this.THREE.RepeatWrapping;
+        clone.wrapT = this.THREE.RepeatWrapping;
+        clone.repeat.set(Math.max(1, Math.round(repeatX)), Math.max(1, Math.round(repeatY)));
+        clone.needsUpdate = true;
+        return clone;
+    };
+
+    /**
+     * Lay a textured ground patch of a fixed size, centred on (cx, cz), when a
+     * site-wide ground texture is configured. Used to give each building a
+     * grounded plaza that reads against the dark floor. No-op without a texture
+     * or when the patch size is zero.
+     *
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     */
+    Cyberspace.prototype.groundPatchAt = function(cx, cz) {
+        if (!this.groundTexture || this.groundPatch <= 0) {
+            return;
+        }
+        var THREE = this.THREE;
+        var size = this.groundPatch;
+        var mat = new THREE.MeshStandardMaterial({
+            map: this.tiledClone(this.groundTexture, size / this.groundScale, size / this.groundScale),
+            roughness: 0.8, metalness: 0.2
+        });
+        var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+        patch.rotation.x = -Math.PI / 2;
+        // Just above the road strips (y+0.02) so the plaza reads over them.
+        patch.position.set(cx, 0.035, cz);
+        patch.receiveShadow = true;
+        this.scene.add(patch);
+    };
+
+    /**
+     * Record a building's world-space XZ footprint so scattered props can avoid
+     * dropping on top of it.
+     *
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     * @param {Number} w Footprint width (x).
+     * @param {Number} d Footprint depth (z).
+     */
+    Cyberspace.prototype.recordFootprint = function(cx, cz, w, d) {
+        this.footprints.push({
+            xMin: cx - w / 2, xMax: cx + w / 2,
+            zMin: cz - d / 2, zMax: cz + d / 2
+        });
+    };
+
+    /**
+     * Whether the point (x, z) is clear of every recorded building footprint,
+     * expanded by a margin. Used to keep scattered props off buildings.
+     *
+     * @param {Number} x Point x.
+     * @param {Number} z Point z.
+     * @param {Number} margin Clearance to require around each footprint.
+     * @return {Boolean} True when the point sits on no footprint.
+     */
+    Cyberspace.prototype.footprintClear = function(x, z, margin) {
+        for (var i = 0; i < this.footprints.length; i++) {
+            var f = this.footprints[i];
+            if (x >= f.xMin - margin && x <= f.xMax + margin &&
+                    z >= f.zMin - margin && z <= f.zMax + margin) {
+                return false;
+            }
+        }
+        return true;
     };
 
     /**
@@ -3090,7 +3212,7 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * The CSS font-family stack used when drawing neon sign text to a canvas.
-     * A site-wide custom sign font (loaded by loadSignAssets) takes precedence;
+     * A site-wide custom sign font (loaded by loadSceneAssets) takes precedence;
      * otherwise the bundled monospace stack is used.
      *
      * @return {String} A CSS font-family value.
@@ -4571,17 +4693,72 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
-     * Load the optional site-wide sign assets (a neon webfont and a sign frame
-     * texture) before the scene is built, so signs render with them from the
-     * first frame. Both are best-effort: a failed or absent asset leaves the
-     * client on its bundled monospace font and flat neon frame. Never rejects.
+     * Load one image URL into a Three texture, downscaled to a bounded canvas
+     * before it reaches WebGL so an oversized upload cannot exceed the GPU's max
+     * texture size or exhaust memory on mobile/headset browsers. crossOrigin
+     * lets a CORS-enabled remote image be drawn without tainting the canvas.
+     * Best-effort: resolves either way and calls assign(texture) on success.
      *
-     * @param {Object} config The scene configuration (signfonturl, signtextureurl).
-     * @param {Object} THREE The Three.js module namespace (for TextureLoader).
-     * @return {Promise} Resolves with {signFontFamily, signTexture} (each nullable).
+     * @param {String} url The image URL.
+     * @param {Object} THREE The Three.js module namespace.
+     * @param {Boolean} repeat Whether the texture will tile (RepeatWrapping).
+     * @param {Function} assign Called with the loaded texture on success.
+     * @return {Promise} Resolves when the image loads, fails or errors.
      */
-    function loadSignAssets(config, THREE) {
-        var assets = {signFontFamily: null, signTexture: null};
+    function loadBoundedTexture(url, THREE, repeat, assign) {
+        return new Promise(function(resolve) {
+            var image = new Image();
+            image.crossOrigin = 'anonymous';
+            image.onload = function() {
+                try {
+                    var max = 1024;
+                    var scale = Math.min(1, max / Math.max(image.width, image.height));
+                    var cw = Math.max(1, Math.round(image.width * scale));
+                    var ch = Math.max(1, Math.round(image.height * scale));
+                    var canvas = document.createElement('canvas');
+                    canvas.width = cw;
+                    canvas.height = ch;
+                    canvas.getContext('2d').drawImage(image, 0, 0, cw, ch);
+                    var texture = new THREE.CanvasTexture(canvas);
+                    if (texture.colorSpace !== undefined) {
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                    }
+                    if (repeat) {
+                        texture.wrapS = THREE.RepeatWrapping;
+                        texture.wrapT = THREE.RepeatWrapping;
+                    }
+                    assign(texture);
+                } catch (e) {
+                    // A tainted (non-CORS) or unusable image; keep the fallback.
+                }
+                resolve();
+            };
+            image.onerror = function() {
+                // Texture failed to load; keep the fallback look.
+                resolve();
+            };
+            image.src = url;
+        });
+    }
+
+    /**
+     * Load the optional site-wide scene assets before the scene is built, so it
+     * renders with them from the first frame: a neon webfont and sign frame
+     * texture, and tiled road and ground textures. All are best-effort — a
+     * failed or absent asset leaves the client on its bundled neon look — and
+     * the returned promise never rejects.
+     *
+     * @param {Object} config The scene configuration (signfonturl,
+     *     signtextureurl, roadtextureurl, groundtextureurl).
+     * @param {Object} THREE The Three.js module namespace.
+     * @return {Promise} Resolves with {signFontFamily, signTexture,
+     *     roadTexture, groundTexture} (each nullable).
+     */
+    function loadSceneAssets(config, THREE) {
+        var assets = {
+            signFontFamily: null, signTexture: null,
+            roadTexture: null, groundTexture: null
+        };
         var jobs = [];
 
         // Custom sign font, loaded via the CSS Font Loading API so canvas text
@@ -4604,40 +4781,21 @@ define('format_mnemo/vr', [], function() {
             }
         }
 
-        // Sign frame texture, loaded through an Image and downscaled to a
-        // bounded canvas before it reaches WebGL, so an oversized upload cannot
-        // exceed the GPU's max texture size or exhaust memory on mobile/headset
-        // browsers. crossOrigin lets a CORS-enabled remote image be drawn to
-        // the canvas without tainting it.
+        // Sign frame texture (not tiled), and the tiled road and ground
+        // textures, each downscaled to a bounded canvas before WebGL.
         if (config.signtextureurl) {
-            jobs.push(new Promise(function(resolve) {
-                var image = new Image();
-                image.crossOrigin = 'anonymous';
-                image.onload = function() {
-                    try {
-                        var max = 1024;
-                        var scale = Math.min(1, max / Math.max(image.width, image.height));
-                        var cw = Math.max(1, Math.round(image.width * scale));
-                        var ch = Math.max(1, Math.round(image.height * scale));
-                        var canvas = document.createElement('canvas');
-                        canvas.width = cw;
-                        canvas.height = ch;
-                        canvas.getContext('2d').drawImage(image, 0, 0, cw, ch);
-                        var texture = new THREE.CanvasTexture(canvas);
-                        if (texture.colorSpace !== undefined) {
-                            texture.colorSpace = THREE.SRGBColorSpace;
-                        }
-                        assets.signTexture = texture;
-                    } catch (e) {
-                        // A tainted (non-CORS) or unusable image; keep the flat frame.
-                    }
-                    resolve();
-                };
-                image.onerror = function() {
-                    // Texture failed to load; keep the flat neon frame.
-                    resolve();
-                };
-                image.src = config.signtextureurl;
+            jobs.push(loadBoundedTexture(config.signtextureurl, THREE, false, function(tex) {
+                assets.signTexture = tex;
+            }));
+        }
+        if (config.roadtextureurl) {
+            jobs.push(loadBoundedTexture(config.roadtextureurl, THREE, true, function(tex) {
+                assets.roadTexture = tex;
+            }));
+        }
+        if (config.groundtextureurl) {
+            jobs.push(loadBoundedTexture(config.groundtextureurl, THREE, true, function(tex) {
+                assets.groundTexture = tex;
             }));
         }
 
@@ -4690,11 +4848,11 @@ define('format_mnemo/vr', [], function() {
             bindToggle(container);
 
             // Load Three.js as a native ES module (see loadThree), then the
-            // optional sign font/texture, then build the scene. The chain is
-            // kept flat (loaded is carried in a closure variable) so there is
-            // no nested promise; loadSignAssets never rejects, so a missing
-            // asset does not block the build. Kept out of the AMD graph on
-            // purpose.
+            // optional scene assets (font/textures), then build the scene. The
+            // chain is kept flat (loaded is carried in a closure variable) so
+            // there is no nested promise; loadSceneAssets never rejects, so a
+            // missing asset does not block the build. Kept out of the AMD graph
+            // on purpose.
             var loaded = null;
             loadThree(config).then(function(three) {
                 loaded = three;
@@ -4702,7 +4860,7 @@ define('format_mnemo/vr', [], function() {
                 if (loading) {
                     loading.remove();
                 }
-                return loadSignAssets(config, three.THREE);
+                return loadSceneAssets(config, three.THREE);
             }).then(function(assets) {
                 try {
                     new Cyberspace(loaded.THREE, root, config, loaded, assets);

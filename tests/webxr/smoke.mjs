@@ -580,6 +580,77 @@ const scenarios = [
             const pass = frameWith.material.map === tex && frameWithout.material.map === null;
             return {pass, detail: `with=${!!frameWith.material.map} without=${!!frameWithout.material.map}`};
         }
+    },
+    {
+        name: 'layout: footprintClear rejects points on/near a building, accepts clear ones',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {footprints: [{xMin: -2, xMax: 2, zMin: -2, zMax: 2}]};
+            const onIt = CS.prototype.footprintClear.call(self, 0, 0, 0.5);
+            const withinMargin = CS.prototype.footprintClear.call(self, 2.4, 0, 0.5);
+            const clear = CS.prototype.footprintClear.call(self, 6, 6, 0.5);
+            const pass = onIt === false && withinMargin === false && clear === true;
+            return {pass, detail: `on=${onIt} margin=${withinMargin} clear=${clear}`};
+        }
+    },
+    {
+        name: 'ground: paveStrip tiles the road texture at the configured scale',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const added = [];
+            const self = {
+                THREE, roadTexture: tex, roadScale: 8,
+                tiledClone: CS.prototype.tiledClone,
+                scene: {add: (o) => added.push(o)},
+                paveStrip: CS.prototype.paveStrip
+            };
+            self.paveStrip(0, 0, 16, 32, 0);
+            const map = added[0].material.map;
+            const pass = !!map && map.repeat.x === 2 && map.repeat.y === 4 &&
+                map.wrapS === THREE.RepeatWrapping;
+            return {pass, detail: `map=${!!map} repeat=${map && map.repeat.x}x${map && map.repeat.y}`};
+        }
+    },
+    {
+        name: 'ground: paveStrip stays flat asphalt without a road texture',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const added = [];
+            const self = {
+                THREE, roadTexture: null, roadScale: 8,
+                tiledClone: CS.prototype.tiledClone,
+                scene: {add: (o) => added.push(o)},
+                paveStrip: CS.prototype.paveStrip
+            };
+            self.paveStrip(0, 0, 16, 32, 0);
+            const pass = added[0].material.map === null;
+            return {pass, detail: `map=${added[0].material.map}`};
+        }
+    },
+    {
+        name: 'ground: groundPatchAt lays a patch only with a texture and non-zero size',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const added = [];
+            const mk = (groundTexture, groundPatch) => ({
+                THREE, groundTexture, groundPatch, groundScale: 7,
+                tiledClone: CS.prototype.tiledClone,
+                scene: {add: (o) => added.push(o)},
+                groundPatchAt: CS.prototype.groundPatchAt
+            });
+            mk(tex, 14).groundPatchAt(3, 5);
+            const afterTex = added.length;
+            mk(null, 14).groundPatchAt(3, 5); // No texture: no patch.
+            mk(tex, 0).groundPatchAt(3, 5); // Zero size: no patch.
+            const pass = afterTex === 1 && added.length === 1 &&
+                !!added[0].material.map && added[0].material.map.repeat.x === 2;
+            return {pass, detail: `count=${added.length} repeat=${added[0].material.map.repeat.x}`};
+        }
     }
 ];
 

@@ -139,6 +139,81 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
+    // Road texture. Left blank, streets are the bundled flat wet-asphalt
+    // colour. Point this at a hosted tileable image (or upload one below) to
+    // tile a surface across every road. The uploaded texture is used if this is
+    // blank; this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/roadtextureurl',
+        get_string('setting_roadtextureurl', 'format_mnemo'),
+        get_string('setting_roadtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a tileable road texture straight into Moodle instead of hosting it
+    // at a URL. The file lands in the 'roadtexture' file area at system context
+    // and is served via pluginfile. The URL setting above, if set, wins.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/roadtexture',
+        get_string('setting_roadtexture', 'format_mnemo'),
+        get_string('setting_roadtexture_desc', 'format_mnemo'),
+        'roadtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Ground texture, tiled as a plaza patch around each building (see the patch
+    // size below). Left blank, the ground stays the dark neon floor. Point this
+    // at a hosted tileable image, or upload one below; the URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/groundtextureurl',
+        get_string('setting_groundtextureurl', 'format_mnemo'),
+        get_string('setting_groundtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a tileable ground texture straight into Moodle instead of hosting
+    // it at a URL. The file lands in the 'groundtexture' file area at system
+    // context and is served via pluginfile. The URL setting above, if set, wins.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/groundtexture',
+        get_string('setting_groundtexture', 'format_mnemo'),
+        get_string('setting_groundtexture_desc', 'format_mnemo'),
+        'groundtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Texture tiling scale (world units per tile) for the road and ground
+    // textures. Larger values stretch the texture over more ground (fewer, more
+    // spread-out tiles); smaller values repeat it more densely.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/roadtexturescale',
+        get_string('setting_roadtexturescale', 'format_mnemo'),
+        get_string('setting_roadtexturescale_desc', 'format_mnemo'),
+        '8',
+        PARAM_INT
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/groundtexturescale',
+        get_string('setting_groundtexturescale', 'format_mnemo'),
+        get_string('setting_groundtexturescale_desc', 'format_mnemo'),
+        '8',
+        PARAM_INT
+    ));
+
+    // Size (in world units) of the textured ground patch laid around each
+    // building. Zero disables the patches even when a ground texture is set.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/groundpatchsize',
+        get_string('setting_groundpatchsize', 'format_mnemo'),
+        get_string('setting_groundpatchsize_desc', 'format_mnemo'),
+        '14',
+        PARAM_INT
+    ));
+
     // Default drag-to-look direction for newly created courses. Teachers can
     // override this per course, so the direction never needs a code change.
     $settings->add(new admin_setting_configcheckbox(
