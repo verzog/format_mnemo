@@ -604,6 +604,7 @@ const scenarios = [
                 THREE, roadTexture: tex, roadScale: 8, roadTexMult: 1,
                 config: {canedit: false}, roadMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                showSurfaceTexture: CS.prototype.showSurfaceTexture,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
@@ -612,7 +613,8 @@ const scenarios = [
             self.paveStrip(0, 0, 16, 32, 0);
             const map = added[0].material.map;
             const pass = !!map && map.repeat.x === 2 && map.repeat.y === 4 &&
-                map.wrapS === THREE.RepeatWrapping;
+                map.wrapS === THREE.RepeatWrapping &&
+                added[0].material.emissiveMap === map;
             return {pass, detail: `map=${!!map} repeat=${map && map.repeat.x}x${map && map.repeat.y}`};
         }
     },
@@ -644,6 +646,7 @@ const scenarios = [
                 THREE, groundTexture, groundPatch, groundScale: 7, groundTexMult: 1,
                 config: {canedit: false}, groundMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                showSurfaceTexture: CS.prototype.showSurfaceTexture,
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
