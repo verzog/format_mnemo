@@ -137,6 +137,9 @@ define('format_mnemo/vr', [], function() {
         this.editables = [];
         this.selected = null;
         this.editMode = false;
+        // Stored per-course transforms for non-activity scene objects, keyed by
+        // a course-stable slot key (section number, or a physical avenue slot).
+        this.sceneObjects = config.sceneobjects || {};
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2125,8 +2128,17 @@ define('format_mnemo/vr', [], function() {
         }
         var step = kind === 'lamp' ? 24 : 16;
         var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
+        var label = kind === 'lamp' ? 'Street lamp' : 'Barrier';
+        // A physical slot index, advanced for every candidate position along the
+        // avenue (from a fixed start, by a fixed step) whether or not the prop is
+        // actually placed. This keeps each prop's key tied to its physical spot
+        // and stable across viewers, even though footprint skipping (which
+        // depends on per-viewer activities) changes which slots are filled.
+        var slot = 0;
         for (var z = road.zMax - 6; z > road.zMin + 6; z -= step) {
             for (var s = -1; s <= 1; s += 2) {
+                var objkey = kind + ':' + slot;
+                slot++;
                 // Skip a prop that would drop on a building footprint.
                 if (!this.footprintClear(s * edge, z, 0.8)) {
                     continue;
@@ -2138,6 +2150,7 @@ define('format_mnemo/vr', [], function() {
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
+                this.registerSceneEditable(objkey, label, m, s * edge, 0, z, true);
             }
         }
     };
@@ -2172,6 +2185,9 @@ define('format_mnemo/vr', [], function() {
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
+            // Key by the side street's section number (course-stable across
+            // viewers), not a filtered ordinal.
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, true);
         }
     };
 
@@ -2304,7 +2320,8 @@ define('format_mnemo/vr', [], function() {
         var xb = mouthX + side * streetLen;
         this.roads.push({
             xMin: Math.min(xa, xb), xMax: Math.max(xa, xb),
-            zMin: z - streetHalf, zMax: z + streetHalf
+            zMin: z - streetHalf, zMax: z + streetHalf,
+            section: section.number
         });
 
         // Side-street road surface + neon kerb lines.
@@ -2315,8 +2332,9 @@ define('format_mnemo/vr', [], function() {
 
         // Topic gate spanning the mouth, plus a tall vertical pylon at the corner.
         var wayColour = section.current ? 0xffffff : this.palette.primary;
-        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour);
-        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour);
+        this.buildGate(section, mouthX + side * 1.2, z, side, streetHalf, wayColour, 'gate:' + section.number);
+        this.buildPylon(section.name, mouthX + side * 0.6, z - streetHalf - 0.8, wayColour,
+            'pylon:' + section.number);
 
         // Activities line both sides of the street, receding down it.
         activities.forEach(function(act, k) {
@@ -2519,8 +2537,9 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} side Avenue side (-1/+1).
      * @param {Number} streetHalf Half-width of the street.
      * @param {Number} colour Wayfinding colour.
+     * @param {String} objkey The editor slot key for this gate.
      */
-    Cyberspace.prototype.buildGate = function(section, x, z, side, streetHalf, colour) {
+    Cyberspace.prototype.buildGate = function(section, x, z, side, streetHalf, colour, objkey) {
         var THREE = this.THREE;
         var group = new THREE.Group();
         var postMat = new THREE.MeshBasicMaterial({
@@ -2556,6 +2575,7 @@ define('format_mnemo/vr', [], function() {
         // Orient the gate to face back up the avenue (toward +Z at the mouth).
         group.lookAt(x, 0, z + side * 0.0001 + 10);
         this.scene.add(group);
+        this.registerSceneEditable(objkey, section.name + ' gate', group, x, 0, z, true);
     };
 
     /**
@@ -2565,8 +2585,9 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} x Pylon x.
      * @param {Number} z Pylon z.
      * @param {Number} colour Neon colour.
+     * @param {String} objkey The editor slot key for this pylon.
      */
-    Cyberspace.prototype.buildPylon = function(name, x, z, colour) {
+    Cyberspace.prototype.buildPylon = function(name, x, z, colour, objkey) {
         var THREE = this.THREE;
         var group = new THREE.Group();
         var h = 16;
@@ -2596,6 +2617,7 @@ define('format_mnemo/vr', [], function() {
 
         group.position.set(x, 0, z);
         this.scene.add(group);
+        this.registerSceneEditable(objkey, name + ' pylon', group, x, 0, z, true);
     };
 
     /**
@@ -3639,6 +3661,7 @@ define('format_mnemo/vr', [], function() {
             field('y', (s.editmove || 'Move') + ' Y', -10, 30, 0.5) +
             field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5) +
             field('rot', s.editrotate || 'Rotate', 0, 360, 1) +
+            field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05) +
             '<div class="format-mnemo__editor-actions">' +
             '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
@@ -3649,7 +3672,7 @@ define('format_mnemo/vr', [], function() {
         this.editorPanel = panel;
 
         // Live-apply slider changes to the selected object.
-        var keys = ['scale', 'x', 'y', 'z', 'rot'];
+        var keys = ['scale', 'x', 'y', 'z', 'rot', 'brightness'];
         keys.forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             input.addEventListener('input', function() {
@@ -3657,7 +3680,11 @@ define('format_mnemo/vr', [], function() {
                     return;
                 }
                 self.selected.transform[key] = parseFloat(input.value);
-                self.applyTransform(self.selected);
+                if (key === 'brightness') {
+                    self.applyBrightness(self.selected);
+                } else {
+                    self.applyTransform(self.selected);
+                }
                 self.syncEditorOutputs();
             });
         });
@@ -3669,8 +3696,11 @@ define('format_mnemo/vr', [], function() {
             if (!self.selected) {
                 return;
             }
-            self.selected.transform = {scale: 1, x: 0, y: 0, z: 0, rot: 0};
+            self.selected.transform = {scale: 1, x: 0, y: 0, z: 0, rot: 0, brightness: 1};
             self.applyTransform(self.selected);
+            if (self.selected.emits) {
+                self.applyBrightness(self.selected);
+            }
             self.fillEditor(self.selected);
         });
         panel.querySelector('[data-mnemo-ed-act="close"]').addEventListener('click', function() {
@@ -3729,10 +3759,14 @@ define('format_mnemo/vr', [], function() {
         var panel = this.editorPanel;
         panel.querySelector('[data-mnemo-ed-name]').textContent = editable.name || '';
         var t = editable.transform;
-        var map = {scale: t.scale, x: t.x, y: t.y, z: t.z, rot: t.rot};
+        var map = {scale: t.scale, x: t.x, y: t.y, z: t.z, rot: t.rot,
+            brightness: t.brightness !== undefined ? t.brightness : 1};
         Object.keys(map).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
         });
+        // The brightness slider is only shown for light-emitting objects.
+        panel.querySelector('[data-mnemo-ed="brightness"]')
+            .closest('.format-mnemo__editor-row').hidden = !editable.emits;
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.syncEditorOutputs();
     };
@@ -3742,11 +3776,11 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.syncEditorOutputs = function() {
         var panel = this.editorPanel;
-        ['scale', 'x', 'y', 'z', 'rot'].forEach(function(key) {
+        ['scale', 'x', 'y', 'z', 'rot', 'brightness'].forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             var out = panel.querySelector('[data-mnemo-out="' + key + '"]');
-            out.textContent = key === 'scale' ? parseFloat(input.value).toFixed(2) :
-                Math.round(parseFloat(input.value));
+            out.textContent = (key === 'scale' || key === 'brightness') ?
+                parseFloat(input.value).toFixed(2) : Math.round(parseFloat(input.value));
         });
     };
 
@@ -3772,14 +3806,24 @@ define('format_mnemo/vr', [], function() {
         var t = editable.transform;
         var savedText = s.editsaved || 'Saved';
         var errorText = s.editsaveerror || 'Could not save';
+        // Activities save by course-module id; non-activity scene objects save
+        // by their per-course slot key (with brightness).
+        var request = editable.objkey ? {
+            methodname: 'format_mnemo_set_scene_object',
+            args: {
+                courseid: this.config.courseid, objkey: editable.objkey, scale: t.scale,
+                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot,
+                brightness: t.brightness !== undefined ? t.brightness : 1
+            }
+        } : {
+            methodname: 'format_mnemo_set_transform',
+            args: {
+                cmid: editable.cmid, scale: t.scale,
+                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
+            }
+        };
         window.require(['core/ajax'], function(ajax) {
-            ajax.call([{
-                methodname: 'format_mnemo_set_transform',
-                args: {
-                    cmid: editable.cmid, scale: t.scale,
-                    offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
-                }
-            }])[0].then(function() {
+            ajax.call([request])[0].then(function() {
                 status.textContent = savedText;
                 saveBtn.disabled = false;
                 return null;
@@ -3940,10 +3984,12 @@ define('format_mnemo/vr', [], function() {
         var t = act.transform || {};
         var editable = {
             cmid: act.id,
+            objkey: null,
             name: act.name,
             group: group,
             baseX: baseX, baseY: baseY, baseZ: baseZ,
             baseRotY: group.rotation.y,
+            emits: false,
             transform: {
                 scale: t.scale > 0 ? t.scale : 1,
                 x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
@@ -3981,6 +4027,101 @@ define('format_mnemo/vr', [], function() {
         if (this.renderer && this.renderer.shadowMap) {
             this.renderer.shadowMap.needsUpdate = true;
         }
+    };
+
+    /**
+     * Register a non-activity scene object (a prop, gate or pylon) as editable,
+     * keyed per course by a stable slot key, applying any stored transform and
+     * brightness for every viewer. Only wired into the editor when the viewer
+     * can edit the course.
+     *
+     * @param {String} objkey The slot key from slotKey().
+     * @param {String} name A human label for the editor panel.
+     * @param {Object} group The Three.Group placed for the object.
+     * @param {Number} baseX Default world x.
+     * @param {Number} baseY Default world y.
+     * @param {Number} baseZ Default world z.
+     * @param {Boolean} emits Whether it emits light (offer a brightness slider).
+     */
+    Cyberspace.prototype.registerSceneEditable = function(objkey, name, group, baseX, baseY, baseZ, emits) {
+        var o = this.sceneObjects[objkey] || {};
+        var editable = {
+            cmid: null,
+            objkey: objkey,
+            name: name,
+            group: group,
+            baseX: baseX, baseY: baseY, baseZ: baseZ,
+            baseRotY: group.rotation.y,
+            emits: !!emits,
+            transform: {
+                scale: o.scale > 0 ? o.scale : 1,
+                x: o.x || 0, y: o.y || 0, z: o.z || 0, rot: o.rot || 0,
+                // Brightness may legitimately be 0 (off), so keep any finite
+                // stored value rather than treating 0 as "unset".
+                brightness: typeof o.brightness === 'number' ? o.brightness : 1
+            }
+        };
+        // Apply any stored override so it renders that way for every viewer.
+        if (this.sceneObjects[objkey]) {
+            this.applyTransform(editable);
+            if (editable.emits) {
+                this.applyBrightness(editable);
+            }
+        }
+        if (this.config.canedit) {
+            group.userData.mnemoEditable = editable;
+            this.editables.push(editable);
+        }
+    };
+
+    /**
+     * Apply an editable's brightness multiplier to the emissive materials and
+     * lights under its group, relative to a base captured on first apply (so it
+     * is idempotent and reversible). Basic (unlit neon) materials are scaled by
+     * colour, which can only dim.
+     *
+     * @param {Object} editable The editable record.
+     */
+    Cyberspace.prototype.applyBrightness = function(editable) {
+        var b = editable.transform.brightness;
+        editable.group.traverse(function(o) {
+            if (o.isLight) {
+                if (o.userData.mnemoBaseIntensity === undefined) {
+                    o.userData.mnemoBaseIntensity = o.intensity;
+                }
+                o.intensity = o.userData.mnemoBaseIntensity * b;
+                return;
+            }
+            if (!o.material) {
+                return;
+            }
+            // Props are placed as tpl.clone(), which shares material instances
+            // across every clone. Give this mesh its own material(s) once, so
+            // changing one prop's brightness does not bleed into its siblings.
+            if (!o.userData.mnemoOwnMaterial) {
+                o.material = Array.isArray(o.material) ?
+                    o.material.map(function(m) {
+                        return m.clone();
+                    }) : o.material.clone();
+                o.userData.mnemoOwnMaterial = true;
+            }
+            var mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (var i = 0; i < mats.length; i++) {
+                var m = mats[i];
+                if (typeof m.emissiveIntensity === 'number' && m.emissive &&
+                        (m.emissive.r || m.emissive.g || m.emissive.b)) {
+                    if (m.userData.mnemoBaseEmissive === undefined) {
+                        m.userData.mnemoBaseEmissive = m.emissiveIntensity;
+                    }
+                    m.emissiveIntensity = m.userData.mnemoBaseEmissive * b;
+                } else if (m.isMeshBasicMaterial && m.color) {
+                    if (!m.userData.mnemoBaseColor) {
+                        m.userData.mnemoBaseColor = m.color.clone();
+                    }
+                    m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
+                }
+            }
+        });
     };
 
     /**

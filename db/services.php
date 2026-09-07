@@ -33,4 +33,12 @@ $functions = [
         'ajax'        => true,
         'capabilities' => 'moodle/course:manageactivities',
     ],
+    'format_mnemo_set_scene_object' => [
+        'classname'   => 'format_mnemo\\external\\set_scene_object',
+        'methodname'  => 'execute',
+        'description' => 'Save a non-activity scene object\'s in-view transform and brightness.',
+        'type'        => 'write',
+        'ajax'        => true,
+        'capabilities' => 'moodle/course:manageactivities',
+    ],
 ];

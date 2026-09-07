@@ -209,6 +209,31 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The per-course in-view overrides for non-activity scene objects (props,
+     * gates, pylons), as a map of slot key => {scale, x, y, z, rot, brightness}.
+     * Only non-default rows are stored, so the map is small.
+     *
+     * @param int $courseid the course id
+     * @return array map of objkey => transform array
+     */
+    protected function scene_objects(int $courseid): array {
+        global $DB;
+        $rows = $DB->get_records('format_mnemo_sceneobj', ['courseid' => $courseid]);
+        $map = [];
+        foreach ($rows as $row) {
+            $map[$row->objkey] = [
+                'scale' => (float)$row->scale,
+                'x' => (float)$row->offsetx,
+                'y' => (float)$row->offsety,
+                'z' => (float)$row->offsetz,
+                'rot' => (float)$row->rotation,
+                'brightness' => (float)$row->brightness,
+            ];
+        }
+        return $map;
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -396,6 +421,9 @@ class scene implements renderable, templatable {
                 'moodle/course:manageactivities',
                 context_course::instance((int)$course->id)
             ),
+            // Per-course in-view transforms for non-activity scene objects
+            // (props, gates, pylons), keyed by their stable slot key.
+            'sceneobjects' => $this->scene_objects((int)$course->id),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -444,6 +472,7 @@ class scene implements renderable, templatable {
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
                 'edit' => get_string('editlayout', 'format_mnemo'),
                 'editdone' => get_string('editdone', 'format_mnemo'),
+                'editbrightness' => get_string('editbrightness', 'format_mnemo'),
                 'editscale' => get_string('editscale', 'format_mnemo'),
                 'editmove' => get_string('editmove', 'format_mnemo'),
                 'editrotate' => get_string('editrotate', 'format_mnemo'),

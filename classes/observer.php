@@ -53,4 +53,16 @@ class observer {
         global $DB;
         $DB->delete_records('format_mnemo_building', ['cmid' => $event->objectid]);
     }
+
+    /**
+     * Remove a course's saved scene-object transforms when the course is
+     * deleted, so per-course rows are not left orphaned. A harmless no-op for
+     * courses that never had any overrides.
+     *
+     * @param \core\event\course_deleted $event the course deletion event
+     */
+    public static function course_deleted(\core\event\course_deleted $event): void {
+        global $DB;
+        $DB->delete_records('format_mnemo_sceneobj', ['courseid' => $event->objectid]);
+    }
 }
