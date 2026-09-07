@@ -105,12 +105,20 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} loaders Optional addon classes (GLTFLoader, DRACOLoader,
      *     KTX2Loader, MeshoptDecoder); absent when only the built-in parser is
      *     available.
+     * @param {Object} assets Optional site-wide sign assets loaded before
+     *     construction: {signFontFamily, signTexture} (each nullable).
      */
-    function Cyberspace(THREE, root, config, loaders) {
+    function Cyberspace(THREE, root, config, loaders, assets) {
         this.THREE = THREE;
         this.root = root;
         this.config = config;
         this.loaders = loaders || {};
+        assets = assets || {};
+        // Optional site-wide sign assets, loaded before construction (see
+        // loadSignAssets): a custom CSS font-family for neon text, and a Three
+        // texture tinted onto every sign frame. Either may be null.
+        this.signFontFamily = assets.signFontFamily || null;
+        this.signTexture = assets.signTexture || null;
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2775,10 +2783,16 @@ define('format_mnemo/vr', [], function() {
         var w = opts.width;
         var h = opts.height;
 
-        // Neon frame glow (slightly larger, behind the panel).
+        // Neon frame glow (slightly larger, behind the panel). A site-wide sign
+        // frame texture, if uploaded, tints the frame; the neon colour multiplies
+        // over it so state colours still read.
         var frameMat = new THREE.MeshBasicMaterial({
             color: opts.colour, transparent: true, opacity: 0.9
         });
+        if (this.signTexture) {
+            frameMat.map = this.signTexture;
+            frameMat.needsUpdate = true;
+        }
         var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, h + 0.3), frameMat);
 
         // Dark readable face; also the raycast target.
@@ -3082,7 +3096,18 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Build a neon text texture on a transparent canvas for a sign face.
+     * The CSS font-family stack used when drawing neon sign text to a canvas.
+     * A site-wide custom sign font (loaded by loadSignAssets) takes precedence;
+     * otherwise the bundled monospace stack is used.
+     *
+     * @return {String} A CSS font-family value.
+     */
+    Cyberspace.prototype.signFontStack = function() {
+        return this.signFontFamily || '"Courier New", monospace';
+    };
+
+    /**
+     * Build a horizontal neon text texture for a signboard.
      *
      * @param {String} text The label text.
      * @param {Number} colour Hex int colour.
@@ -3096,7 +3121,7 @@ define('format_mnemo/vr', [], function() {
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
 
-        ctx.font = 'bold 52px "Courier New", monospace';
+        ctx.font = 'bold 52px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = hex;
@@ -3125,7 +3150,7 @@ define('format_mnemo/vr', [], function() {
         canvas.height = 512;
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
-        ctx.font = 'bold 62px "Courier New", monospace';
+        ctx.font = 'bold 62px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = hex;
@@ -3157,7 +3182,7 @@ define('format_mnemo/vr', [], function() {
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
 
-        ctx.font = 'bold 54px "Courier New", monospace';
+        ctx.font = 'bold 54px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         // Cheap neon glow.
@@ -4454,6 +4479,57 @@ define('format_mnemo/vr', [], function() {
         });
     }
 
+    /**
+     * Load the optional site-wide sign assets (a neon webfont and a sign frame
+     * texture) before the scene is built, so signs render with them from the
+     * first frame. Both are best-effort: a failed or absent asset leaves the
+     * client on its bundled monospace font and flat neon frame. Never rejects.
+     *
+     * @param {Object} config The scene configuration (signfonturl, signtextureurl).
+     * @param {Object} THREE The Three.js module namespace (for TextureLoader).
+     * @return {Promise} Resolves with {signFontFamily, signTexture} (each nullable).
+     */
+    function loadSignAssets(config, THREE) {
+        var assets = {signFontFamily: null, signTexture: null};
+        var jobs = [];
+
+        // Custom sign font, loaded via the CSS Font Loading API so canvas text
+        // can use it. The family name is private to the plugin.
+        if (config.signfonturl && typeof window.FontFace === 'function' && document.fonts) {
+            try {
+                var face = new window.FontFace('MnemoSign', 'url(' + config.signfonturl + ')');
+                jobs.push(face.load().then(function(loaded) {
+                    document.fonts.add(loaded);
+                    assets.signFontFamily = '"MnemoSign", "Courier New", monospace';
+                }).catch(function() {
+                    // Font failed to load; keep the monospace fallback.
+                }));
+            } catch (e) {
+                // FontFace rejected the URL; keep the monospace fallback.
+            }
+        }
+
+        // Sign frame texture, loaded through Three's texture loader.
+        if (config.signtextureurl) {
+            jobs.push(new Promise(function(resolve) {
+                new THREE.TextureLoader().load(config.signtextureurl, function(tex) {
+                    if (tex.colorSpace !== undefined) {
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                    }
+                    assets.signTexture = tex;
+                    resolve();
+                }, undefined, function() {
+                    // Texture failed to load; keep the flat neon frame.
+                    resolve();
+                });
+            }));
+        }
+
+        return Promise.all(jobs).then(function() {
+            return assets;
+        });
+    }
+
     return {
         // Exposed for the headless tests (tests/webxr): the gesture manager so
         // its input->action mapping can be driven with scripted input, and the
@@ -4493,15 +4569,19 @@ define('format_mnemo/vr', [], function() {
                 if (loading) {
                     loading.remove();
                 }
-                try {
-                    new Cyberspace(loaded.THREE, root, config, loaded);
-                } catch (e) {
-                    failGracefully(container, root, config.strings.failed);
-                    if (window.console) {
-                        window.console.error(e);
+                // Load the optional sign font/texture, then build the scene. The
+                // asset loader never rejects, so a missing asset does not block.
+                return loadSignAssets(config, loaded.THREE).then(function(assets) {
+                    try {
+                        new Cyberspace(loaded.THREE, root, config, loaded, assets);
+                    } catch (e) {
+                        failGracefully(container, root, config.strings.failed);
+                        if (window.console) {
+                            window.console.error(e);
+                        }
                     }
-                }
-                return loaded;
+                    return loaded;
+                });
             }).catch(function(e) {
                 failGracefully(container, root, config.strings.failed);
                 if (window.console) {

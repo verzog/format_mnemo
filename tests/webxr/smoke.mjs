@@ -485,6 +485,45 @@ const scenarios = [
                 Math.abs(sign.position.z - 2.0) < 1e-6;
             return {pass, detail: `vis=${built.body.visible} signz=${sign.position.z}`};
         }
+    },
+    {
+        name: 'sign: signFontStack falls back to monospace without a custom font',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const stack = CS.prototype.signFontStack.call({signFontFamily: null});
+            return {pass: stack === '"Courier New", monospace', detail: stack};
+        }
+    },
+    {
+        name: 'sign: signFontStack uses the custom family when one is loaded',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const stack = CS.prototype.signFontStack.call(
+                {signFontFamily: '"MnemoSign", "Courier New", monospace'});
+            return {pass: /MnemoSign/.test(stack), detail: stack};
+        }
+    },
+    {
+        name: 'sign: a frame takes the uploaded texture, or stays flat without one',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const make = (signTexture) => {
+                const self = {
+                    THREE, interactive: [], signTexture, signFontFamily: null,
+                    makeTextTexture: CS.prototype.makeTextTexture,
+                    signFontStack: CS.prototype.signFontStack,
+                    makeSign: CS.prototype.makeSign
+                };
+                return self.makeSign(
+                    {text: 'Shop', colour: 0x00ffff, width: 3, height: 1.4, post: false});
+            };
+            const frameWith = make(tex).group.children[0];
+            const frameWithout = make(null).group.children[0];
+            const pass = frameWith.material.map === tex && frameWithout.material.map === null;
+            return {pass, detail: `with=${!!frameWith.material.map} without=${!!frameWithout.material.map}`};
+        }
     }
 ];
 

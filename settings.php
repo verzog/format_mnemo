@@ -91,6 +91,54 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
     ));
 
+    // Neon sign webfont. Left blank, sign and label text is drawn in the
+    // bundled "Courier New"/monospace stack. Point this at a hosted webfont file
+    // (.woff2/.woff/.ttf/.otf) to give every neon sign a custom typeface. The
+    // uploaded font below is used if this is blank; this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/signfonturl',
+        get_string('setting_signfonturl', 'format_mnemo'),
+        get_string('setting_signfonturl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a neon sign webfont straight into Moodle instead of hosting it at a
+    // URL. The file lands in the 'signfont' file area at system context and is
+    // served via pluginfile. The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/signfont',
+        get_string('setting_signfont', 'format_mnemo'),
+        get_string('setting_signfont_desc', 'format_mnemo'),
+        'signfont',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['.woff2', '.woff', '.ttf', '.otf']]
+    ));
+
+    // Sign frame texture. Left blank, sign frames are drawn as a flat neon glow.
+    // Point this at a hosted image to tint every sign's frame with a texture
+    // (e.g. brushed metal, worn plastic). The uploaded texture below is used if
+    // this is blank; this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/signtextureurl',
+        get_string('setting_signtextureurl', 'format_mnemo'),
+        get_string('setting_signtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a sign frame texture straight into Moodle instead of hosting it at
+    // a URL. The file lands in the 'signtexture' file area at system context and
+    // is served via pluginfile. The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/signtexture',
+        get_string('setting_signtexture', 'format_mnemo'),
+        get_string('setting_signtexture_desc', 'format_mnemo'),
+        'signtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['image']]
+    ));
+
     // Default drag-to-look direction for newly created courses. Teachers can
     // override this per course, so the direction never needs a code change.
     $settings->add(new admin_setting_configcheckbox(
