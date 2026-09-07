@@ -708,6 +708,37 @@ const scenarios = [
                 g.userData.mnemoEditable === ed;
             return {pass, detail: `cmid=${ed.cmid} posx=${g.position.x} s=${g.scale.x}`};
         }
+    },
+    {
+        name: 'editor: editProxy is an invisible, non-shadowing box at the footprint',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const proxy = CS.prototype.editProxy.call({THREE}, 4, 8, 4);
+            const pass = proxy.visible === false && proxy.castShadow === false &&
+                proxy.userData.mnemoProxy === true &&
+                Math.abs(proxy.position.y - 4) < 1e-6;
+            return {pass, detail: `visible=${proxy.visible} y=${proxy.position.y}`};
+        }
+    },
+    {
+        name: 'editor: an invisible proxy is still selectable (raycast + editableFor)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const group = new THREE.Group();
+            const ed = {cmid: 9};
+            group.userData.mnemoEditable = ed;
+            // A hidden model stand-in: body invisible, proxy invisible, no visible mesh.
+            group.add(CS.prototype.editProxy.call({THREE}, 4, 8, 4));
+            group.position.set(0, 0, -10);
+            group.updateMatrixWorld(true);
+            const ray = new THREE.Raycaster();
+            ray.set(new THREE.Vector3(0, 4, 0), new THREE.Vector3(0, 0, -1));
+            const hits = ray.intersectObjects([group], true);
+            const found = hits.length ? CS.prototype.editableFor.call({}, hits[0].object) : null;
+            return {pass: hits.length > 0 && found === ed, detail: `hits=${hits.length} cmid=${found && found.cmid}`};
+        }
     }
 ];
 
