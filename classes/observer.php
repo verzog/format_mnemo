@@ -64,5 +64,6 @@ class observer {
     public static function course_deleted(\core\event\course_deleted $event): void {
         global $DB;
         $DB->delete_records('format_mnemo_sceneobj', ['courseid' => $event->objectid]);
+        $DB->delete_records('format_mnemo_placedobj', ['courseid' => $event->objectid]);
     }
 }

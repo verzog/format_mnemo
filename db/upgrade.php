@@ -106,5 +106,26 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026090800, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026090900) {
+        // Per-course teacher-placed decorative props dropped with the in-view
+        // object placer. Each row records the prop type and its grid-snapped
+        // base position; any move/scale/rotate/brightness edit lives in
+        // format_mnemo_sceneobj under the key placed:<id>.
+        $table = new xmldb_table('format_mnemo_placedobj');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('type', XMLDB_TYPE_CHAR, '32', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('basex', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('basez', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('courseid', XMLDB_INDEX_NOTUNIQUE, ['courseid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026090900, 'format', 'mnemo');
+    }
+
     return true;
 }

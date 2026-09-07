@@ -41,4 +41,20 @@ $functions = [
         'ajax'        => true,
         'capabilities' => 'moodle/course:manageactivities',
     ],
+    'format_mnemo_add_placed_object' => [
+        'classname'   => 'format_mnemo\\external\\add_placed_object',
+        'methodname'  => 'execute',
+        'description' => 'Place a decorative prop in the scene at a grid-snapped position.',
+        'type'        => 'write',
+        'ajax'        => true,
+        'capabilities' => 'moodle/course:manageactivities',
+    ],
+    'format_mnemo_remove_placed_object' => [
+        'classname'   => 'format_mnemo\\external\\remove_placed_object',
+        'methodname'  => 'execute',
+        'description' => 'Remove a teacher-placed decorative prop.',
+        'type'        => 'write',
+        'ajax'        => true,
+        'capabilities' => 'moodle/course:manageactivities',
+    ],
 ];

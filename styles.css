@@ -176,6 +176,95 @@
     box-shadow: 0 0 16px rgba(0, 229, 255, 0.6);
 }
 
+.format-mnemo__place-btn {
+    position: absolute;
+    top: 12px;
+    left: 150px;
+    z-index: 5;
+    padding: 0.4rem 0.8rem;
+    font-family: "Courier New", monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #00e5ff;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__place-btn:hover {
+    background: rgba(0, 229, 255, 0.18);
+}
+
+.format-mnemo__place-btn--on {
+    color: #02060f;
+    background: #00e5ff;
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.6);
+}
+
+.format-mnemo__placer {
+    position: absolute;
+    top: 60px;
+    left: 12px;
+    z-index: 6;
+    width: 250px;
+    padding: 0.75rem;
+    font-family: "Courier New", monospace;
+    font-size: 0.8rem;
+    color: #cdefff;
+    background: rgba(2, 6, 15, 0.85);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 6px;
+    box-shadow: 0 0 20px rgba(0, 229, 255, 0.25);
+}
+
+.format-mnemo__placer-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.format-mnemo__placer-type {
+    flex: 1 1 45%;
+    padding: 0.35rem 0.2rem;
+    font-family: inherit;
+    color: #00e5ff;
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__placer-type:hover {
+    background: rgba(0, 229, 255, 0.25);
+}
+
+.format-mnemo__placer-type--on {
+    color: #02060f;
+    background: #00e5ff;
+}
+
+.format-mnemo__placer-hint {
+    margin-top: 0.5rem;
+    color: #7fe3ff;
+}
+
+.format-mnemo__editor-delete {
+    width: 100%;
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.2rem;
+    font-family: inherit;
+    color: #ff9ab0;
+    background: rgba(255, 90, 120, 0.12);
+    border: 1px solid rgba(255, 90, 120, 0.55);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__editor-delete:hover {
+    background: rgba(255, 90, 120, 0.28);
+}
+
 .format-mnemo__editor {
     position: absolute;
     top: 60px;
