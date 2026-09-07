@@ -362,6 +362,11 @@ class scene implements renderable, templatable {
             // Module types that have a building-<modname>.glb model available, so
             // the client only attempts to load buildings it can expect to find.
             'buildingmodels' => $this->building_models($nodes),
+            // Optional neon sign webfont and sign frame texture. Each resolves to
+            // an admin-set URL, then an uploaded file, then null (the client
+            // keeps its monospace font / flat neon frame). See sign_asset_url().
+            'signfonturl' => $this->sign_asset_url('signfonturl', 'signfont'),
+            'signtextureurl' => $this->sign_asset_url('signtextureurl', 'signtexture'),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
                 'exitvr' => get_string('exitvr', 'format_mnemo'),
@@ -447,6 +452,58 @@ class scene implements renderable, templatable {
             $sentinel
         )->out(false);
         return substr($url, 0, -strlen($sentinel));
+    }
+
+    /**
+     * Resolve an optional site-wide sign asset (the neon webfont or the sign
+     * frame texture) to a URL, in order of precedence: an admin-configured
+     * external URL, then a file uploaded into the plugin's settings, then null
+     * (the client falls back to its bundled font / flat frame).
+     *
+     * @param string $urlsetting The URL config key (e.g. 'signfonturl').
+     * @param string $filearea   The system-context file area (e.g. 'signfont').
+     * @return string|null
+     */
+    protected function sign_asset_url(string $urlsetting, string $filearea): ?string {
+        $url = get_config('format_mnemo', $urlsetting);
+        if (!empty($url)) {
+            return $url;
+        }
+        return $this->stored_asset_url($filearea);
+    }
+
+    /**
+     * The pluginfile URL for a single-file site-wide asset uploaded into the
+     * given system-context file area, or null when none has been uploaded. The
+     * newest file's modified time is embedded as a cache-busting revision (the
+     * pluginfile handler discards it and serves from itemid 0).
+     *
+     * @param string $filearea The system-context file area.
+     * @return string|null
+     */
+    protected function stored_asset_url(string $filearea): ?string {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+        if (empty($files)) {
+            return null;
+        }
+        $rev = 0;
+        $stored = null;
+        foreach ($files as $file) {
+            if ((int)$file->get_timemodified() >= $rev) {
+                $rev = (int)$file->get_timemodified();
+                $stored = $file;
+            }
+        }
+        return moodle_url::make_pluginfile_url(
+            $context->id,
+            'format_mnemo',
+            $filearea,
+            $rev,
+            '/',
+            $stored->get_filename()
+        )->out(false);
     }
 
     /**

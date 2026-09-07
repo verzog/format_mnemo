@@ -105,12 +105,20 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} loaders Optional addon classes (GLTFLoader, DRACOLoader,
      *     KTX2Loader, MeshoptDecoder); absent when only the built-in parser is
      *     available.
+     * @param {Object} assets Optional site-wide sign assets loaded before
+     *     construction: {signFontFamily, signTexture} (each nullable).
      */
-    function Cyberspace(THREE, root, config, loaders) {
+    function Cyberspace(THREE, root, config, loaders, assets) {
         this.THREE = THREE;
         this.root = root;
         this.config = config;
         this.loaders = loaders || {};
+        assets = assets || {};
+        // Optional site-wide sign assets, loaded before construction (see
+        // loadSignAssets): a custom CSS font-family for neon text, and a Three
+        // texture tinted onto every sign frame. Either may be null.
+        this.signFontFamily = assets.signFontFamily || null;
+        this.signTexture = assets.signTexture || null;
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2443,7 +2451,7 @@ define('format_mnemo/vr', [], function() {
         group.add(blade);
         var frame = new THREE.Mesh(
             new THREE.PlaneGeometry(1.3, 5.7),
-            new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.5})
+            this.frameMaterial(colour, 0.5)
         );
         frame.position.set(0.5, h - 3.2, -0.02);
         group.add(frame);
@@ -2775,10 +2783,9 @@ define('format_mnemo/vr', [], function() {
         var w = opts.width;
         var h = opts.height;
 
-        // Neon frame glow (slightly larger, behind the panel).
-        var frameMat = new THREE.MeshBasicMaterial({
-            color: opts.colour, transparent: true, opacity: 0.9
-        });
+        // Neon frame glow (slightly larger, behind the panel). frameMaterial()
+        // applies a site-wide sign frame texture when one is uploaded.
+        var frameMat = this.frameMaterial(opts.colour, 0.9);
         var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.3, h + 0.3), frameMat);
 
         // Dark readable face; also the raycast target.
@@ -2869,7 +2876,7 @@ define('format_mnemo/vr', [], function() {
         var colour = STATE_COLOURS[act.state] || this.palette.primary;
 
         // Neon frame (glow behind the screen); also the hover-highlight target.
-        var frameMat = new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.9});
+        var frameMat = this.frameMaterial(colour, 0.9);
         var frame = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.4, h + 0.4), frameMat);
 
         var screenMat = new THREE.MeshBasicMaterial({map: this.makePosterTexture(act.name)});
@@ -2996,7 +3003,7 @@ define('format_mnemo/vr', [], function() {
 
         // Activity name.
         ctx.shadowBlur = 16;
-        ctx.font = 'bold 46px "Courier New", monospace';
+        ctx.font = 'bold 46px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = hex;
@@ -3082,7 +3089,86 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Build a neon text texture on a transparent canvas for a sign face.
+     * The CSS font-family stack used when drawing neon sign text to a canvas.
+     * A site-wide custom sign font (loaded by loadSignAssets) takes precedence;
+     * otherwise the bundled monospace stack is used.
+     *
+     * @return {String} A CSS font-family value.
+     */
+    Cyberspace.prototype.signFontStack = function() {
+        return this.signFontFamily || '"Courier New", monospace';
+    };
+
+    /**
+     * Build the neon frame material shared by every sign-like frame (building
+     * signboards, video screens and corner pylon blades). A site-wide sign
+     * frame texture, if uploaded, tints the frame; the neon colour multiplies
+     * over it so state colours still read.
+     *
+     * @param {Number} colour Hex int neon colour.
+     * @param {Number} opacity Frame opacity.
+     * @return {Object} Three.MeshBasicMaterial.
+     */
+    Cyberspace.prototype.frameMaterial = function(colour, opacity) {
+        var mat = new this.THREE.MeshBasicMaterial({
+            color: colour, transparent: true, opacity: opacity
+        });
+        if (this.signTexture) {
+            mat.map = this.signTexture;
+        }
+        return mat;
+    };
+
+    /**
+     * Wrap text to fit a maximum pixel width, breaking on word boundaries with
+     * the canvas context's current font. A word too wide to fit a line on its
+     * own is hard-broken by characters, so no line ever overflows.
+     *
+     * @param {Object} ctx A 2D canvas context (its font is used to measure).
+     * @param {String} text The text to wrap.
+     * @param {Number} maxWidth The maximum line width in pixels.
+     * @return {Array} The wrapped lines.
+     */
+    Cyberspace.prototype.wrapLines = function(ctx, text, maxWidth) {
+        var tokens = String(text).split(/\s+/).filter(Boolean);
+        var lines = [];
+        var current = '';
+        for (var i = 0; i < tokens.length; i++) {
+            var word = tokens[i];
+            // Hard-break any single word too wide to fit a line on its own.
+            while (word.length > 1 && ctx.measureText(word).width > maxWidth) {
+                if (current) {
+                    lines.push(current);
+                    current = '';
+                }
+                var fit = 1;
+                while (fit < word.length &&
+                        ctx.measureText(word.slice(0, fit + 1)).width <= maxWidth) {
+                    fit++;
+                }
+                lines.push(word.slice(0, fit));
+                word = word.slice(fit);
+            }
+            if (!current) {
+                current = word;
+            } else if (ctx.measureText(current + ' ' + word).width <= maxWidth) {
+                current += ' ' + word;
+            } else {
+                lines.push(current);
+                current = word;
+            }
+        }
+        if (current) {
+            lines.push(current);
+        }
+        return lines;
+    };
+
+    /**
+     * Build a horizontal neon text texture for a signboard. The text is wrapped
+     * on word boundaries and the font auto-shrinks so the whole name fits the
+     * sign face; a name too long even at the smallest size is clipped to the
+     * lines that fit, with an ellipsis on the last one.
      *
      * @param {String} text The label text.
      * @param {Number} colour Hex int colour.
@@ -3095,16 +3181,46 @@ define('format_mnemo/vr', [], function() {
         canvas.height = 128;
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
+        var family = this.signFontStack();
+        var maxWidth = canvas.width * 0.92;
+        var maxHeight = canvas.height * 0.9;
 
-        ctx.font = 'bold 52px "Courier New", monospace';
+        // Pick the largest font (56 -> 20px) at which the wrapped block fits the
+        // face, so short names stay big and bold while long ones wrap smaller.
+        var lines = [];
+        var fontSize = 56;
+        var lineHeight = fontSize * 1.18;
+        for (; fontSize >= 20; fontSize -= 2) {
+            ctx.font = 'bold ' + fontSize + 'px ' + family;
+            lines = this.wrapLines(ctx, text, maxWidth);
+            lineHeight = fontSize * 1.18;
+            if (lines.length * lineHeight <= maxHeight) {
+                break;
+            }
+        }
+        ctx.font = 'bold ' + fontSize + 'px ' + family;
+
+        // Guard against an extreme name that still overflows at the minimum
+        // size: keep only the lines that fit and ellipsise the last of them.
+        var maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
+        if (lines.length > maxLines) {
+            lines = lines.slice(0, maxLines);
+            var last = lines[maxLines - 1];
+            lines[maxLines - 1] = (last.length > 1 ? last.slice(0, -1) : last) + '…';
+        }
+
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = hex;
         ctx.shadowBlur = 22;
         ctx.fillStyle = hex;
-        var clipped = text.length > 24 ? text.slice(0, 23) + '…' : text;
-        ctx.fillText(clipped, 256, 64);
-        ctx.fillText(clipped, 256, 64);
+        var startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
+        for (var l = 0; l < lines.length; l++) {
+            var y = startY + l * lineHeight;
+            // Double-draw thickens the cheap neon glow.
+            ctx.fillText(lines[l], 256, y);
+            ctx.fillText(lines[l], 256, y);
+        }
 
         var texture = new THREE.CanvasTexture(canvas);
         texture.anisotropy = 4;
@@ -3125,7 +3241,7 @@ define('format_mnemo/vr', [], function() {
         canvas.height = 512;
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
-        ctx.font = 'bold 62px "Courier New", monospace';
+        ctx.font = 'bold 62px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.shadowColor = hex;
@@ -3157,7 +3273,7 @@ define('format_mnemo/vr', [], function() {
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
 
-        ctx.font = 'bold 54px "Courier New", monospace';
+        ctx.font = 'bold 54px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         // Cheap neon glow.
@@ -4454,6 +4570,93 @@ define('format_mnemo/vr', [], function() {
         });
     }
 
+    /**
+     * Load the optional site-wide sign assets (a neon webfont and a sign frame
+     * texture) before the scene is built, so signs render with them from the
+     * first frame. Both are best-effort: a failed or absent asset leaves the
+     * client on its bundled monospace font and flat neon frame. Never rejects.
+     *
+     * @param {Object} config The scene configuration (signfonturl, signtextureurl).
+     * @param {Object} THREE The Three.js module namespace (for TextureLoader).
+     * @return {Promise} Resolves with {signFontFamily, signTexture} (each nullable).
+     */
+    function loadSignAssets(config, THREE) {
+        var assets = {signFontFamily: null, signTexture: null};
+        var jobs = [];
+
+        // Custom sign font, loaded via the CSS Font Loading API so canvas text
+        // can use it. The URL is serialised as a quoted CSS string so a valid
+        // URL containing CSS-significant characters (parentheses, spaces) is
+        // still parsed correctly. The family name is private to the plugin.
+        if (config.signfonturl && typeof window.FontFace === 'function' && document.fonts) {
+            try {
+                var src = 'url(' + JSON.stringify(config.signfonturl) + ')';
+                var face = new window.FontFace('MnemoSign', src);
+                jobs.push(face.load().then(function(loadedface) {
+                    document.fonts.add(loadedface);
+                    assets.signFontFamily = '"MnemoSign", "Courier New", monospace';
+                    return loadedface;
+                }).catch(function() {
+                    // Font failed to load; keep the monospace fallback.
+                }));
+            } catch (e) {
+                // FontFace rejected the URL; keep the monospace fallback.
+            }
+        }
+
+        // Sign frame texture, loaded through an Image and downscaled to a
+        // bounded canvas before it reaches WebGL, so an oversized upload cannot
+        // exceed the GPU's max texture size or exhaust memory on mobile/headset
+        // browsers. crossOrigin lets a CORS-enabled remote image be drawn to
+        // the canvas without tainting it.
+        if (config.signtextureurl) {
+            jobs.push(new Promise(function(resolve) {
+                var image = new Image();
+                image.crossOrigin = 'anonymous';
+                image.onload = function() {
+                    try {
+                        var max = 1024;
+                        var scale = Math.min(1, max / Math.max(image.width, image.height));
+                        var cw = Math.max(1, Math.round(image.width * scale));
+                        var ch = Math.max(1, Math.round(image.height * scale));
+                        var canvas = document.createElement('canvas');
+                        canvas.width = cw;
+                        canvas.height = ch;
+                        canvas.getContext('2d').drawImage(image, 0, 0, cw, ch);
+                        var texture = new THREE.CanvasTexture(canvas);
+                        if (texture.colorSpace !== undefined) {
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                        }
+                        assets.signTexture = texture;
+                    } catch (e) {
+                        // A tainted (non-CORS) or unusable image; keep the flat frame.
+                    }
+                    resolve();
+                };
+                image.onerror = function() {
+                    // Texture failed to load; keep the flat neon frame.
+                    resolve();
+                };
+                image.src = config.signtextureurl;
+            }));
+        }
+
+        // Never block scene construction on a hung asset request: an external
+        // font/texture URL that accepts the connection but never completes has
+        // no load timeout of its own, so race the jobs against one. Whatever is
+        // ready wins; the rest falls back to the bundled look.
+        return Promise.race([
+            Promise.all(jobs).then(function() {
+                return assets;
+            }),
+            new Promise(function(resolve) {
+                window.setTimeout(function() {
+                    resolve(assets);
+                }, 8000);
+            })
+        ]);
+    }
+
     return {
         // Exposed for the headless tests (tests/webxr): the gesture manager so
         // its input->action mapping can be driven with scripted input, and the
@@ -4486,22 +4689,30 @@ define('format_mnemo/vr', [], function() {
             container.classList.add('format-mnemo--active');
             bindToggle(container);
 
-            // Load Three.js as a native ES module (see loadThree), then build
-            // the scene. Kept out of the AMD dependency graph on purpose.
-            loadThree(config).then(function(loaded) {
+            // Load Three.js as a native ES module (see loadThree), then the
+            // optional sign font/texture, then build the scene. The chain is
+            // kept flat (loaded is carried in a closure variable) so there is
+            // no nested promise; loadSignAssets never rejects, so a missing
+            // asset does not block the build. Kept out of the AMD graph on
+            // purpose.
+            var loaded = null;
+            loadThree(config).then(function(three) {
+                loaded = three;
                 var loading = root.querySelector('[data-mnemo-loading]');
                 if (loading) {
                     loading.remove();
                 }
+                return loadSignAssets(config, three.THREE);
+            }).then(function(assets) {
                 try {
-                    new Cyberspace(loaded.THREE, root, config, loaded);
+                    new Cyberspace(loaded.THREE, root, config, loaded, assets);
                 } catch (e) {
                     failGracefully(container, root, config.strings.failed);
                     if (window.console) {
                         window.console.error(e);
                     }
                 }
-                return loaded;
+                return assets;
             }).catch(function(e) {
                 failGracefully(container, root, config.strings.failed);
                 if (window.console) {

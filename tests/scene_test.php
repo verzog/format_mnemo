@@ -362,4 +362,51 @@ final class scene_test extends \advanced_testcase {
         $errors = format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'not a model']);
         $this->assertArrayHasKey('format_mnemo_building', $errors);
     }
+
+    /**
+     * With no sign font/texture configured, the scene config carries null for
+     * both, so the client keeps its bundled monospace font and flat neon frame.
+     */
+    public function test_scene_config_sign_assets_default_null(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertNull($config['signfonturl']);
+        $this->assertNull($config['signtextureurl']);
+    }
+
+    /**
+     * An admin-configured sign font/texture URL is passed through to the scene
+     * config, so the client loads it as the neon font and frame texture.
+     */
+    public function test_scene_config_sign_assets_url(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        set_config('signfonturl', 'https://cdn.example/neon.woff2', 'format_mnemo');
+        set_config('signtextureurl', 'https://cdn.example/frame.png', 'format_mnemo');
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $format = course_get_format($course);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertSame('https://cdn.example/neon.woff2', $config['signfonturl']);
+        $this->assertSame('https://cdn.example/frame.png', $config['signtextureurl']);
+    }
 }

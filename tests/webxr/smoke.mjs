@@ -324,6 +324,8 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                frameMaterial: CS.prototype.frameMaterial,
+                signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen
             };
             const r = obj.makeVideoScreen(
@@ -343,6 +345,8 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                frameMaterial: CS.prototype.frameMaterial,
+                signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen
             };
             const r = obj.makeVideoScreen(
@@ -362,6 +366,8 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                frameMaterial: CS.prototype.frameMaterial,
+                signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen,
                 activate: CS.prototype.activate, startVideo: CS.prototype.startVideo,
                 toggleVideo: CS.prototype.toggleVideo,
@@ -484,6 +490,95 @@ const scenarios = [
                 built.group.children.length === 1 &&
                 Math.abs(sign.position.z - 2.0) < 1e-6;
             return {pass, detail: `vis=${built.body.visible} signz=${sign.position.z}`};
+        }
+    },
+    {
+        name: 'sign: signFontStack falls back to monospace without a custom font',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const stack = CS.prototype.signFontStack.call({signFontFamily: null});
+            return {pass: stack === '"Courier New", monospace', detail: stack};
+        }
+    },
+    {
+        name: 'sign: signFontStack uses the custom family when one is loaded',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const stack = CS.prototype.signFontStack.call(
+                {signFontFamily: '"MnemoSign", "Courier New", monospace'});
+            return {pass: /MnemoSign/.test(stack), detail: stack};
+        }
+    },
+    {
+        name: 'sign: wrapLines breaks on word boundaries within the width',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const c = document.createElement('canvas');
+            c.width = 512;
+            c.height = 128;
+            const ctx = c.getContext('2d');
+            ctx.font = 'bold 52px "Courier New", monospace';
+            const lines = CS.prototype.wrapLines.call({}, ctx, 'Introduction to Cyberspace', 470);
+            // Multiple lines, none exceeding the width, and no word split.
+            const withinWidth = lines.every((ln) => ctx.measureText(ln).width <= 470);
+            const joined = lines.join(' ');
+            const pass = lines.length >= 2 && withinWidth &&
+                joined === 'Introduction to Cyberspace';
+            return {pass, detail: `lines=${lines.length} [${lines.join('|')}]`};
+        }
+    },
+    {
+        name: 'sign: wrapLines hard-breaks a single over-long word',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const c = document.createElement('canvas');
+            c.width = 512;
+            c.height = 128;
+            const ctx = c.getContext('2d');
+            ctx.font = 'bold 52px "Courier New", monospace';
+            const lines = CS.prototype.wrapLines.call({}, ctx, 'Supercalifragilisticexpialidocious', 300);
+            const withinWidth = lines.every((ln) => ctx.measureText(ln).width <= 300);
+            // Every character is preserved across the broken lines.
+            const pass = lines.length >= 2 && withinWidth &&
+                lines.join('') === 'Supercalifragilisticexpialidocious';
+            return {pass, detail: `lines=${lines.length} [${lines.join('|')}]`};
+        }
+    },
+    {
+        name: 'sign: frameMaterial applies the texture to any neon frame',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const withTex = CS.prototype.frameMaterial.call({THREE, signTexture: tex}, 0x00ffff, 0.5);
+            const withoutTex = CS.prototype.frameMaterial.call({THREE, signTexture: null}, 0x00ffff, 0.5);
+            const pass = withTex.map === tex && withoutTex.map === null &&
+                Math.abs(withTex.opacity - 0.5) < 1e-6;
+            return {pass, detail: `with=${!!withTex.map} without=${!!withoutTex.map}`};
+        }
+    },
+    {
+        name: 'sign: a frame takes the uploaded texture, or stays flat without one',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const make = (signTexture) => {
+                const self = {
+                    THREE, interactive: [], signTexture, signFontFamily: null,
+                    makeTextTexture: CS.prototype.makeTextTexture,
+                    signFontStack: CS.prototype.signFontStack,
+                    wrapLines: CS.prototype.wrapLines,
+                    frameMaterial: CS.prototype.frameMaterial,
+                    makeSign: CS.prototype.makeSign
+                };
+                return self.makeSign(
+                    {text: 'Shop', colour: 0x00ffff, width: 3, height: 1.4, post: false});
+            };
+            const frameWith = make(tex).group.children[0];
+            const frameWithout = make(null).group.children[0];
+            const pass = frameWith.material.map === tex && frameWithout.material.map === null;
+            return {pass, detail: `with=${!!frameWith.material.map} without=${!!frameWithout.material.map}`};
         }
     }
 ];

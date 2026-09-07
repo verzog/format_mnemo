@@ -453,10 +453,12 @@ function format_mnemo_inplace_editable($itemtype, $itemid, $newvalue) {
  * @return bool false if the file was not found, just send the file otherwise and do not return anything
  */
 function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options = []) {
-    // Site-wide prop asset pack uploaded in the plugin's admin settings, served
-    // from the system context. These are decorative 3D models, served like the
-    // plugin's bundled ones (which are already public plugin static files).
-    if ($filearea === 'assetpack') {
+    // Site-wide assets uploaded in the plugin's admin settings, served from the
+    // system context: the prop asset pack ('assetpack'), the neon sign webfont
+    // ('signfont'), and the sign frame texture ('signtexture'). These are all
+    // decorative, served like the plugin's bundled static files (which are
+    // already public).
+    if (in_array($filearea, ['assetpack', 'signfont', 'signtexture'], true)) {
         if ($context->contextlevel != CONTEXT_SYSTEM) {
             return false;
         }
@@ -468,7 +470,7 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
         $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
 
         $fs = get_file_storage();
-        $file = $fs->get_file($context->id, 'format_mnemo', 'assetpack', 0, $filepath, $filename);
+        $file = $fs->get_file($context->id, 'format_mnemo', $filearea, 0, $filepath, $filename);
         if (!$file || $file->is_directory()) {
             return false;
         }
