@@ -1008,6 +1008,21 @@ const scenarios = [
         }
     },
     {
+        name: 'placer: snapBase snaps defaults but preserves edited bases',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {gridStep: 2, snapCoord: CS.prototype.snapCoord,
+                snapBase: CS.prototype.snapBase};
+            // No stored transform -> snap to grid (-11 rounds to -10).
+            const def = self.snapBase(-11, null);
+            // A stored transform -> keep the original base so the saved offset
+            // is not re-applied from a shifted origin.
+            const edited = self.snapBase(-11, {scale: 1, x: 3});
+            const pass = def === -10 && edited === -11;
+            return {pass, detail: `def=${def} edited=${edited}`};
+        }
+    },
+    {
         name: 'placer: placeProp builds, registers and records a placed prop',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

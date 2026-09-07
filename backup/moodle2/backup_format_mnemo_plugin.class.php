@@ -81,9 +81,12 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
     }
 
     /**
-     * Back up the per-course in-view transforms for non-activity scene objects
-     * (props, gates, pylons) so a saved layout survives backup and restore. The
-     * slot keys are per-course-relative, so no id remapping is needed.
+     * Back up the per-course scene data so a saved layout survives backup,
+     * restore, duplicate and import: the teacher-placed props and the in-view
+     * transforms for non-activity scene objects (props, gates, pylons). Placed
+     * props are backed up before the transforms so the restore can remap each
+     * prop's id in its associated placed:&lt;id&gt; transform key. The slot keys
+     * for generated objects are per-course-relative and need no remapping.
      *
      * @return backup_plugin_element the plugin element attached to the course
      */
@@ -92,6 +95,18 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
 
         $pluginwrapper = new backup_nested_element($this->get_recommended_name());
         $plugin->add_child($pluginwrapper);
+
+        // Teacher-placed props first, so their ids are mapped before the
+        // transforms that reference them (placed:<id>) are restored.
+        $placedobjs = new backup_nested_element('placedobjs');
+        $pluginwrapper->add_child($placedobjs);
+
+        $placedobj = new backup_nested_element('placedobj', ['id'], [
+            'type', 'basex', 'basez', 'timecreated',
+        ]);
+        $placedobjs->add_child($placedobj);
+
+        $placedobj->set_source_table('format_mnemo_placedobj', ['courseid' => backup::VAR_COURSEID]);
 
         $sceneobjs = new backup_nested_element('sceneobjs');
         $pluginwrapper->add_child($sceneobjs);

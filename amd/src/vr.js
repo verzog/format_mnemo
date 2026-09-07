@@ -2231,8 +2231,9 @@ define('format_mnemo/vr', [], function() {
             for (var s = -1; s <= 1; s += 2) {
                 var objkey = kind + ':' + slot;
                 slot++;
-                var px = this.snapCoord(s * edge);
-                var pz = this.snapCoord(z);
+                var stored = this.sceneObjects[objkey];
+                var px = this.snapBase(s * edge, stored);
+                var pz = this.snapBase(z, stored);
                 // Skip a prop that would drop on a building footprint.
                 if (!this.footprintClear(px, pz, 0.8)) {
                     continue;
@@ -2274,8 +2275,9 @@ define('format_mnemo/vr', [], function() {
             if (!placed) {
                 continue; // No clear spot near this mouth; skip the kiosk.
             }
-            kx = this.snapCoord(kx);
-            kz = this.snapCoord(kz);
+            var kioskstored = this.sceneObjects['kiosk:' + r.section];
+            kx = this.snapBase(kx, kioskstored);
+            kz = this.snapBase(kz, kioskstored);
             var m = tpl.clone();
             m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
@@ -2428,10 +2430,12 @@ define('format_mnemo/vr', [], function() {
 
         // Topic gate spanning the mouth, plus a tall vertical pylon at the corner.
         var wayColour = section.current ? 0xffffff : this.palette.primary;
-        this.buildGate(section, this.snapCoord(mouthX + side * 1.2), this.snapCoord(z), side,
-            streetHalf, wayColour, 'gate:' + section.number);
-        this.buildPylon(section.name, this.snapCoord(mouthX + side * 0.6),
-            this.snapCoord(z - streetHalf - 0.8), wayColour, 'pylon:' + section.number);
+        var gatekey = 'gate:' + section.number;
+        var pylonkey = 'pylon:' + section.number;
+        this.buildGate(section, this.snapBase(mouthX + side * 1.2, this.sceneObjects[gatekey]),
+            this.snapBase(z, this.sceneObjects[gatekey]), side, streetHalf, wayColour, gatekey);
+        this.buildPylon(section.name, this.snapBase(mouthX + side * 0.6, this.sceneObjects[pylonkey]),
+            this.snapBase(z - streetHalf - 0.8, this.sceneObjects[pylonkey]), wayColour, pylonkey);
 
         // Activities line both sides of the street, receding down it.
         activities.forEach(function(act, k) {
@@ -2440,9 +2444,11 @@ define('format_mnemo/vr', [], function() {
             var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
             var depth = style.footprint[1];
             // Snap the default placement to the layout grid so buildings line
-            // up from the start (the editor and placer share this grid).
-            var bx = self.snapCoord(mouthX + side * (first + along * step));
-            var bz = self.snapCoord(z + zside * (streetHalf + depth / 2 + 0.4));
+            // up from the start (the editor and placer share this grid). An
+            // object a teacher already positioned keeps its original base, so a
+            // stored offset is not re-applied from a shifted origin on upgrade.
+            var bx = self.snapBase(mouthX + side * (first + along * step), act.transform);
+            var bz = self.snapBase(z + zside * (streetHalf + depth / 2 + 0.4), act.transform);
             // A video activity is a large screen instead of a building.
             if (act.video) {
                 var vscreen = self.makeVideoScreen(act);
@@ -4045,10 +4051,20 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         if (!this.groundGrid && on) {
             var g = this.gridStep > 0 ? this.gridStep : 2;
-            var span = 240; // Covers the walkable city with room to spare.
+            // Size and centre the grid to the generated avenue so it covers the
+            // whole layout however many sections there are, not a fixed box.
+            var road = this.roads && this.roads[0];
+            var zmin = road ? road.zMin : -120;
+            var zmax = road ? road.zMax : 12;
+            // A square that spans the avenue's length (plus margin for the side
+            // streets that branch off it in x), rounded to whole grid cells.
+            var span = Math.max(160, (zmax - zmin) + 60);
+            span = Math.ceil(span / g) * g;
             var divisions = Math.round(span / g);
             var grid = new THREE.GridHelper(span, divisions, this.palette.primary, this.palette.primary);
-            grid.position.y = 0.06; // Just above the road/plaza surfaces.
+            // Centre on a grid multiple so the drawn lines land on the same
+            // lattice placement snaps to.
+            grid.position.set(0, 0.06, this.snapCoord((zmin + zmax) / 2));
             if (grid.material) {
                 grid.material.transparent = true;
                 grid.material.opacity = 0.35;
@@ -4635,6 +4651,21 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.snapCoord = function(v) {
         var g = this.gridStep > 0 ? this.gridStep : 2;
         return Math.round(v / g) * g;
+    };
+
+    /**
+     * Snap a base coordinate to the grid, but only when the object has no
+     * stored in-view transform. A stored transform is an offset from the
+     * original (unsnapped) base, so snapping the base of an object a teacher
+     * already positioned would shift it on upgrade; keeping the original base
+     * for those preserves saved layouts while new/default objects align.
+     *
+     * @param {Number} v The default base coordinate.
+     * @param {Object} stored The object's stored transform/override, if any.
+     * @return {Number} The snapped base, or the original when a transform exists.
+     */
+    Cyberspace.prototype.snapBase = function(v, stored) {
+        return stored ? v : this.snapCoord(v);
     };
 
     Cyberspace.prototype.snapValue = function(key, raw, editable) {

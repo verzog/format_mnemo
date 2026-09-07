@@ -30,6 +30,10 @@
  * each old section id to the newly created one.
  */
 class restore_format_mnemo_plugin extends restore_format_plugin {
+    /** @var array<int, int> Old-to-new id map for placed props, so a
+     * placed:&lt;id&gt; transform key can be remapped to the restored prop. */
+    protected $placedmap = [];
+
     /**
      * Define the section-level path element used to trigger the file restore.
      *
@@ -103,14 +107,37 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
      * @return restore_path_element[] the paths handled by this plugin
      */
     protected function define_course_plugin_structure() {
+        // Placed props first so their ids are mapped before the transforms
+        // that reference them (placed:<id>) are restored. The backup writes
+        // them in this order too, so the callbacks fire in step.
         return [
+            new restore_path_element('mnemoplacedobj', $this->get_pathfor('/placedobjs/placedobj')),
             new restore_path_element('mnemosceneobj', $this->get_pathfor('/sceneobjs/sceneobj')),
         ];
     }
 
     /**
+     * Restore a teacher-placed prop for the restored course, remembering the
+     * old-to-new id map so its placed:&lt;id&gt; transform can be remapped.
+     *
+     * @param array $data the element data
+     * @return void
+     */
+    public function process_mnemoplacedobj($data) {
+        global $DB;
+
+        $data = (object)$data;
+        $oldid = (int)$data->id;
+        $data->courseid = $this->task->get_courseid();
+        unset($data->id);
+        $this->placedmap[$oldid] = (int)$DB->insert_record('format_mnemo_placedobj', $data);
+    }
+
+    /**
      * Restore a non-activity scene object's transform for the restored course.
-     * Slot keys are per-course-relative, so only the course id is remapped.
+     * Slot keys are per-course-relative, so only the course id is remapped -
+     * except a placed:&lt;id&gt; key, whose id is remapped to the restored prop
+     * (a transform whose prop did not come across is dropped).
      *
      * @param array $data the element data
      * @return void
@@ -121,6 +148,13 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
         $data = (object)$data;
         $data->courseid = $this->task->get_courseid();
         unset($data->id);
+        if (preg_match('/^placed:([0-9]+)$/', $data->objkey, $matches)) {
+            $oldid = (int)$matches[1];
+            if (!isset($this->placedmap[$oldid])) {
+                return; // Orphan transform: its prop was not restored.
+            }
+            $data->objkey = 'placed:' . $this->placedmap[$oldid];
+        }
         if (
             !$DB->record_exists(
                 'format_mnemo_sceneobj',
