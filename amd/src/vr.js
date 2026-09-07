@@ -4290,8 +4290,12 @@ define('format_mnemo/vr', [], function() {
         }
         var g = this.gridStep;
         if (key === 'x' || key === 'y' || key === 'z') {
-            var base = key === 'x' ? editable.baseX :
-                (key === 'y' ? editable.baseY : editable.baseZ);
+            var base = editable.baseX;
+            if (key === 'y') {
+                base = editable.baseY;
+            } else if (key === 'z') {
+                base = editable.baseZ;
+            }
             return Math.round((base + raw) / g) * g - base;
         }
         if (key === 'rot') {
