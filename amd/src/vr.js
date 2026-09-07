@@ -2669,7 +2669,37 @@ define('format_mnemo/vr', [], function() {
         sign.group.position.set(0, Math.min(h - 1.1, 2.6), d / 2 + 0.12);
         group.add(sign.group);
 
+        // Invisible full-footprint click-proxy so the in-view editor can select
+        // this building immediately - before any attached model has loaded, and
+        // whatever the model's geometry or scale (e.g. a very small model). It
+        // is never rendered (visible=false, casts no shadow), but Three still
+        // raycasts it, giving a reliable selection target.
+        group.add(this.editProxy(w, h, d));
+
         return {group: group, panel: sign.panel, body: body, sign: sign.group, w: w, d: d, h: h};
+    };
+
+    /**
+     * Build the invisible box used as a reliable editor selection target for an
+     * object, covering roughly its footprint and height. Not rendered, but
+     * raycast by the editor's picker.
+     *
+     * @param {Number} w Box width (x).
+     * @param {Number} h Box height (y); the box sits from the ground up.
+     * @param {Number} d Box depth (z).
+     * @return {Object} Three.Mesh (visible=false).
+     */
+    Cyberspace.prototype.editProxy = function(w, h, d) {
+        var proxy = new this.THREE.Mesh(
+            new this.THREE.BoxGeometry(w, h, d),
+            new this.THREE.MeshBasicMaterial()
+        );
+        proxy.position.y = h / 2;
+        proxy.visible = false;
+        proxy.castShadow = false;
+        proxy.receiveShadow = false;
+        proxy.userData.mnemoProxy = true;
+        return proxy;
     };
 
     /**
@@ -3030,6 +3060,19 @@ define('format_mnemo/vr', [], function() {
         post.position.set(0, -h / 2 - 12, -0.05);
         frame.add(post);
         group.add(frame);
+
+        // Invisible click-proxy centred on the screen (the group origin), a
+        // little thicker than the panel so the editor can select the screen
+        // reliably, from either side. Not rendered, but raycast by the picker.
+        var proxy = new THREE.Mesh(
+            new THREE.BoxGeometry(w + 0.4, h + 0.4, 0.4),
+            new THREE.MeshBasicMaterial()
+        );
+        proxy.visible = false;
+        proxy.castShadow = false;
+        proxy.receiveShadow = false;
+        proxy.userData.mnemoProxy = true;
+        group.add(proxy);
 
         screen.userData = {
             name: act.name,
