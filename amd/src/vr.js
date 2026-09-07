@@ -59,21 +59,26 @@ define('format_mnemo/vr', [], function() {
     // under them, and so surface-snapping rests objects on the right level.
     var SIDEWALK_HEIGHT = 0.18;
 
-    // Fixed positions for the Void's planets, spread across the far sky so they
-    // do not overlap. The first three match the original hand-placed trio (so
-    // the default look is unchanged); the rest extend it to a maximum of nine,
-    // used when that many planet textures are uploaded. `ring` adds a ring.
+    // Per-planet size, distance from the scene centre and elevation for the
+    // Void's planets, plus ring/band. Their azimuth is spread evenly around the
+    // full sky by planet index at build time (see buildPlanets), so only two or
+    // three fall within the view at once, and the whole field slowly revolves
+    // (PLANET_SPIN). Up to nine are used, one per uploaded planet texture.
     var PLANET_SLOTS = [
-        {r: 72, x: -195, y: 110, z: -340, ring: true, band: [0xc9975f, 0x7d5a37]},
-        {r: 54, x: 205, y: 150, z: -430, ring: false, band: [0x5680bb, 0x223b63]},
-        {r: 24, x: 150, y: 66, z: -270, ring: false, band: [0x9aa0a8, 0x4b5058]},
-        {r: 40, x: -260, y: 60, z: -300, ring: false, band: [0xb06a4a, 0x5c2f22]},
-        {r: 90, x: 60, y: 190, z: -540, ring: true, band: [0x6fae8c, 0x2f5a49]},
-        {r: 30, x: 300, y: 44, z: -360, ring: false, band: [0x8f8fb8, 0x3d3d63]},
-        {r: 48, x: -120, y: 205, z: -470, ring: false, band: [0xc0b070, 0x615636]},
-        {r: 20, x: -40, y: 92, z: -235, ring: false, band: [0x9a9aa2, 0x4b4b52]},
-        {r: 64, x: 250, y: 120, z: -510, ring: true, band: [0xb5734f, 0x5a3626]}
+        {r: 72, dist: 392, y: 110, ring: true, band: [0xc9975f, 0x7d5a37]},
+        {r: 54, dist: 474, y: 150, ring: false, band: [0x5680bb, 0x223b63]},
+        {r: 24, dist: 310, y: 66, ring: false, band: [0x9aa0a8, 0x4b5058]},
+        {r: 40, dist: 396, y: 60, ring: false, band: [0xb06a4a, 0x5c2f22]},
+        {r: 90, dist: 543, y: 190, ring: true, band: [0x6fae8c, 0x2f5a49]},
+        {r: 30, dist: 468, y: 44, ring: false, band: [0x8f8fb8, 0x3d3d63]},
+        {r: 48, dist: 485, y: 205, ring: false, band: [0xc0b070, 0x615636]},
+        {r: 20, dist: 238, y: 92, ring: false, band: [0x9a9aa2, 0x4b4b52]},
+        {r: 64, dist: 565, y: 120, ring: true, band: [0xb5734f, 0x5a3626]}
     ];
+
+    // Angular speed of the Void's planet field: one full revolution per hour, so
+    // the planets drift slowly in and out of view.
+    var PLANET_SPIN = (2 * Math.PI) / 3600;
 
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
@@ -237,6 +242,7 @@ define('format_mnemo/vr', [], function() {
         this.lastShadowPos = new THREE.Vector3(1e9, 0, 1e9); // Last shadow recentre.
         this.modelCache = {}; // Loaded .glb templates, keyed by URL.
         this.traffic = []; // Flying-car instances animated each frame.
+        this.planetField = null; // Void planet group; revolves slowly each frame.
 
         this.build();
     }
@@ -695,9 +701,35 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildPlanets = function() {
         var texs = this.planetTextures || [];
         var count = texs.length > 0 ? Math.min(texs.length, PLANET_SLOTS.length) : 3;
+        // A parent group holds every planet so the whole field can revolve
+        // slowly about the vertical axis (see spinPlanets). Planets are added
+        // to it rather than straight to the scene.
+        this.planetField = new this.THREE.Group();
+        this.scene.add(this.planetField);
         for (var i = 0; i < count; i++) {
             var s = PLANET_SLOTS[i];
-            this.makePlanet(s.r, {x: s.x, y: s.y, z: s.z}, s.band, s.ring, texs[i] || null);
+            // Spread the planets evenly around the full sky by index, so only
+            // two or three sit within the view at once; planet 0 starts ahead
+            // (-Z) and the rest fan out around it.
+            var az = (i / count) * Math.PI * 2;
+            var at = {
+                x: s.dist * Math.sin(az),
+                y: s.y,
+                z: -s.dist * Math.cos(az)
+            };
+            this.makePlanet(s.r, at, s.band, s.ring, texs[i] || null);
+        }
+    };
+
+    /**
+     * Advance the slow revolution of the Void's planet field (a no-op in the
+     * other environments, where there is no field). One turn per hour.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.spinPlanets = function(dt) {
+        if (this.planetField) {
+            this.planetField.rotation.y += PLANET_SPIN * dt;
         }
     };
 
@@ -764,7 +796,10 @@ define('format_mnemo/vr', [], function() {
             })
         );
         planet.position.set(at.x, at.y, at.z);
-        this.scene.add(planet);
+        // Add to the revolving planet field when there is one, so the planet
+        // drifts with it; otherwise straight to the scene.
+        var parent = this.planetField || this.scene;
+        parent.add(planet);
 
         if (ringed) {
             var ring = new THREE.Mesh(
@@ -776,7 +811,7 @@ define('format_mnemo/vr', [], function() {
             );
             ring.rotation.x = Math.PI / 2.6;
             ring.position.copy(planet.position);
-            this.scene.add(ring);
+            parent.add(ring);
         }
     };
 
@@ -2365,6 +2400,10 @@ define('format_mnemo/vr', [], function() {
             for (var s = -1; s <= 1; s += 2) {
                 var objkey = kind + ':' + slot;
                 slot++;
+                // A prop a teacher deleted stays gone.
+                if (this.isHidden(objkey)) {
+                    continue;
+                }
                 var stored = this.sceneObjects[objkey];
                 var px = this.snapBase(s * edge, stored);
                 var pz = this.snapBase(z, stored);
@@ -2478,6 +2517,10 @@ define('format_mnemo/vr', [], function() {
         for (var i = 0; i < this.lampSlots.length; i++) {
             var slot = this.lampSlots[i];
             var objkey = 'lamp:' + i;
+            // A lamp a teacher deleted stays gone.
+            if (this.isHidden(objkey)) {
+                continue;
+            }
             var stored = this.sceneObjects[objkey];
             var px = this.snapBase(slot.x, stored);
             var pz = this.snapBase(slot.z, stored);
@@ -2510,6 +2553,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.scatterKiosks = function(tpl) {
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
+            // A kiosk a teacher deleted stays gone.
+            if (this.isHidden('kiosk:' + r.section)) {
+                continue;
+            }
             var innerX = r.xMin < 0 ? r.xMax : r.xMin;
             var dir = r.xMin < 0 ? -1 : 1;
             var kx = innerX + dir * 2;
@@ -4445,7 +4492,7 @@ define('format_mnemo/vr', [], function() {
             self.deselectEditable();
         });
         panel.querySelector('[data-mnemo-ed-act="delete"]').addEventListener('click', function() {
-            self.deletePlaced();
+            self.deleteSelected();
         });
 
         btn.addEventListener('click', function() {
@@ -4731,9 +4778,9 @@ define('format_mnemo/vr', [], function() {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
         });
-        // Only teacher-placed props can be deleted from the editor.
-        var placed = !!(editable.objkey && /^placed:/.test(editable.objkey));
-        panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !placed;
+        // Deletable objects: teacher-placed props, and generated decorative
+        // props (a street lamp, barrier or kiosk) which are hidden per course.
+        panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !this.isDeletable(editable);
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.updateSnapSurfaceUi();
         this.syncEditorOutputs();
@@ -5003,6 +5050,99 @@ define('format_mnemo/vr', [], function() {
             }
         }
         this.deselectEditable();
+    };
+
+    /**
+     * Whether the selected object can be deleted from the editor: a
+     * teacher-placed prop, or a generated decorative prop (lamp/barrier/kiosk).
+     * Gates, pylons and activities are not deletable.
+     *
+     * @param {Object} editable The editable record.
+     * @return {Boolean} Whether a Delete control should be offered.
+     */
+    Cyberspace.prototype.isDeletable = function(editable) {
+        if (!editable || !editable.objkey) {
+            return false;
+        }
+        if (/^placed:/.test(editable.objkey)) {
+            return true;
+        }
+        var t = this.propType(editable);
+        return t === 'lamp' || t === 'barrier' || t === 'kiosk';
+    };
+
+    /**
+     * Whether a generated prop's slot has been removed (hidden) for this course,
+     * so the build should skip it.
+     *
+     * @param {String} objkey The slot key.
+     * @return {Boolean} Whether the slot is hidden.
+     */
+    Cyberspace.prototype.isHidden = function(objkey) {
+        var o = this.sceneObjects[objkey];
+        return !!(o && o.hidden);
+    };
+
+    /**
+     * Delete the selected object: a teacher-placed prop is removed outright; a
+     * generated decorative prop is hidden for the course (so it stays gone on
+     * reload). Anything else is a no-op.
+     */
+    Cyberspace.prototype.deleteSelected = function() {
+        var editable = this.selected;
+        if (!editable || !editable.objkey) {
+            return;
+        }
+        if (/^placed:/.test(editable.objkey)) {
+            this.deletePlaced();
+        } else if (this.isDeletable(editable)) {
+            this.deleteGeneratedProp(editable);
+        }
+    };
+
+    /**
+     * Hide a generated decorative prop for the course through the web service,
+     * then take it out of the scene. The hidden state persists so the prop stays
+     * gone for every viewer and on reload.
+     *
+     * @param {Object} editable The generated prop's editable record.
+     */
+    Cyberspace.prototype.deleteGeneratedProp = function(editable) {
+        var self = this;
+        var objkey = editable.objkey;
+        var apply = function() {
+            // Remember the removal so it also holds if the scene is rebuilt in
+            // this session, then detach the prop and clear the selection.
+            self.sceneObjects[objkey] = self.sceneObjects[objkey] || {};
+            self.sceneObjects[objkey].hidden = true;
+            if (editable.group) {
+                self.scene.remove(editable.group);
+            }
+            var idx = self.editables.indexOf(editable);
+            if (idx >= 0) {
+                self.editables.splice(idx, 1);
+            }
+            self.deselectEditable();
+        };
+        if (!window.require) {
+            apply();
+            return;
+        }
+        var s = this.config.strings || {};
+        var status = this.editorPanel.querySelector('[data-mnemo-ed-status]');
+        status.textContent = s.editsaving || 'Saving…';
+        var request = {
+            methodname: 'format_mnemo_remove_scene_object',
+            args: {courseid: this.config.courseid, objkey: objkey}
+        };
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([request])[0].then(function() {
+                apply();
+                return null;
+            }).catch(function() {
+                status.textContent = s.editsaveerror || 'Could not save';
+            });
+        });
     };
 
     /**
@@ -5736,6 +5876,9 @@ define('format_mnemo/vr', [], function() {
 
         // Glide the flying-car traffic.
         this.updateTraffic(dt);
+
+        // Slowly revolve the Void's planet field (one turn per hour).
+        this.spinPlanets(dt);
 
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort

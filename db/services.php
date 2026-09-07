@@ -57,4 +57,12 @@ $functions = [
         'ajax'        => true,
         'capabilities' => 'moodle/course:manageactivities',
     ],
+    'format_mnemo_remove_scene_object' => [
+        'classname'   => 'format_mnemo\\external\\remove_scene_object',
+        'methodname'  => 'execute',
+        'description' => 'Remove (hide) a generated decorative prop from a course.',
+        'type'        => 'write',
+        'ajax'        => true,
+        'capabilities' => 'moodle/course:manageactivities',
+    ],
 ];
