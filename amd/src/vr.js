@@ -115,19 +115,6 @@ define('format_mnemo/vr', [], function() {
         this.config = config;
         this.loaders = loaders || {};
         assets = assets || {};
-        // Optional site-wide assets, loaded before construction (see
-        // loadSceneAssets): a custom CSS font-family for neon text, a texture
-        // tinted onto every sign frame, and tiled road/ground textures. Any may
-        // be null, in which case the bundled neon look is used.
-        this.signFontFamily = assets.signFontFamily || null;
-        this.signTexture = assets.signTexture || null;
-        this.roadTexture = assets.roadTexture || null;
-        this.groundTexture = assets.groundTexture || null;
-        // Tiling scale (world units per texture tile) and the size of the
-        // textured ground patch laid around each building. Admin-configurable.
-        this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
-        this.groundScale = config.groundtexturescale > 0 ? config.groundtexturescale : 8;
-        this.groundPatch = config.groundpatchsize > 0 ? config.groundpatchsize : 0;
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
@@ -160,29 +147,9 @@ define('format_mnemo/vr', [], function() {
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
-        // Per-course texture-size multipliers for the road and ground surfaces
-        // (a teacher can retune these in-view). Stored in the scene-object store
-        // under the singleton keys road:0 / ground:0, reusing their scale field.
-        // A larger multiplier makes each texture tile bigger (fewer repeats).
-        var roadObj = this.sceneObjects['road:0'];
-        var groundObj = this.sceneObjects['ground:0'];
-        var sidewalkObj = this.sceneObjects['sidewalk:0'];
-        this.roadTexMult = (roadObj && roadObj.scale > 0) ? roadObj.scale : 1;
-        this.groundTexMult = (groundObj && groundObj.scale > 0) ? groundObj.scale : 1;
-        this.sidewalkTexMult = (sidewalkObj && sidewalkObj.scale > 0) ? sidewalkObj.scale : 1;
-        // Optional site-wide sidewalk texture and its tiling scale, matching the
-        // road/ground pattern. Sidewalks are always built (raised concrete
-        // slabs); the texture just dresses their walking surface when set.
-        this.sidewalkTexture = assets.sidewalkTexture || null;
-        this.sidewalkScale = config.sidewalktexturescale > 0 ? config.sidewalktexturescale : 4;
-        // Textured road strips, ground patches and sidewalk tops placed in the
-        // scene, with the dimensions needed to re-tile them when the texture
-        // size is edited; and the shared "surface" editables they select.
-        this.roadMeshes = [];
-        this.groundMeshes = [];
-        this.sidewalkMeshes = [];
-        this.surfaceEditables = {};
-        this.surfacePickMeshes = [];
+        // Site-wide textures, tiling scales and the surface-mesh registries
+        // (kept out of the constructor to keep its complexity in check).
+        this.initSurfaces(config, assets);
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -226,6 +193,47 @@ define('format_mnemo/vr', [], function() {
 
         this.build();
     }
+
+    /**
+     * Initialise the site-wide textures, their tiling scales and per-course
+     * size multipliers, and the surface-mesh registries. Any texture may be
+     * null (the bundled neon look is used). Kept out of the constructor so its
+     * cyclomatic complexity stays within lint limits.
+     *
+     * @param {Object} config The scene configuration from PHP.
+     * @param {Object} assets Optional preloaded site-wide assets.
+     */
+    Cyberspace.prototype.initSurfaces = function(config, assets) {
+        // A custom neon font, the sign-frame texture, and the tiled road,
+        // ground and sidewalk textures. Any may be null.
+        this.signFontFamily = assets.signFontFamily || null;
+        this.signTexture = assets.signTexture || null;
+        this.roadTexture = assets.roadTexture || null;
+        this.groundTexture = assets.groundTexture || null;
+        this.sidewalkTexture = assets.sidewalkTexture || null;
+        // Tiling scales (world units per tile) and the size of the ground patch
+        // laid around each building. Admin-configurable.
+        this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
+        this.groundScale = config.groundtexturescale > 0 ? config.groundtexturescale : 8;
+        this.sidewalkScale = config.sidewalktexturescale > 0 ? config.sidewalktexturescale : 4;
+        this.groundPatch = config.groundpatchsize > 0 ? config.groundpatchsize : 0;
+        // Per-course texture-size multipliers, stored in the scene-object store
+        // under the singleton keys road:0 / ground:0 / sidewalk:0 (their scale
+        // field). A larger multiplier makes each texture tile bigger.
+        var mult = function(o) {
+            return (o && o.scale > 0) ? o.scale : 1;
+        };
+        this.roadTexMult = mult(this.sceneObjects['road:0']);
+        this.groundTexMult = mult(this.sceneObjects['ground:0']);
+        this.sidewalkTexMult = mult(this.sceneObjects['sidewalk:0']);
+        // Textured surfaces placed in the scene (with the dimensions needed to
+        // re-tile them) and the shared "surface" editables they select.
+        this.roadMeshes = [];
+        this.groundMeshes = [];
+        this.sidewalkMeshes = [];
+        this.surfaceEditables = {};
+        this.surfacePickMeshes = [];
+    };
 
     Cyberspace.prototype.build = function() {
         var THREE = this.THREE;
