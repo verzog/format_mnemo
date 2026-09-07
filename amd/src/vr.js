@@ -2343,7 +2343,12 @@ define('format_mnemo/vr', [], function() {
             // A textured ground patch (plaza) under the building, then record
             // its footprint so props avoid it.
             self.groundPatchAt(bx, bz);
-            self.recordFootprint(bx, bz, built.w, built.d);
+            // Record the footprint at the building's final placement (a stored
+            // transform may move/scale it), so the later-scattered props avoid
+            // where it actually stands rather than its default slot.
+            var tf = act.transform || {};
+            var ts = tf.scale > 0 ? tf.scale : 1;
+            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0), built.w * ts, built.d * ts);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
             self.registerEditable(act, built.group, bx, 0, bz);
@@ -3714,8 +3719,18 @@ define('format_mnemo/vr', [], function() {
         }
         var s = this.config.strings || {};
         var status = this.editorPanel.querySelector('[data-mnemo-ed-status]');
+        var saveBtn = this.editorPanel.querySelector('[data-mnemo-ed-act="save"]');
+        // Guard against a double-clicked Save firing two concurrent requests.
+        if (saveBtn.disabled) {
+            return;
+        }
+        saveBtn.disabled = true;
         status.textContent = s.editsaving || 'Saving…';
         var t = editable.transform;
+        var done = function(text) {
+            status.textContent = text;
+            saveBtn.disabled = false;
+        };
         window.require(['core/ajax'], function(ajax) {
             ajax.call([{
                 methodname: 'format_mnemo_set_transform',
@@ -3724,10 +3739,10 @@ define('format_mnemo/vr', [], function() {
                     offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
                 }
             }])[0].then(function() {
-                status.textContent = s.editsaved || 'Saved';
+                done(s.editsaved || 'Saved');
                 return null;
             }).catch(function() {
-                status.textContent = s.editsaveerror || 'Could not save';
+                done(s.editsaveerror || 'Could not save');
             });
         });
     };
@@ -3891,11 +3906,17 @@ define('format_mnemo/vr', [], function() {
                 x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
             }
         };
-        group.userData.mnemoEditable = editable;
-        this.editables.push(editable);
-        // Apply any stored transform so it renders from the first frame.
+        // Apply any stored transform so it renders from the first frame, for
+        // every viewer.
         if (act.transform) {
             this.applyTransform(editable);
+        }
+        // Only objects the viewer may edit at their own module context become
+        // selectable, matching the web service's permission check (a course-
+        // level grant that is prohibited on one activity must not offer it).
+        if (act.editable !== false) {
+            group.userData.mnemoEditable = editable;
+            this.editables.push(editable);
         }
     };
 

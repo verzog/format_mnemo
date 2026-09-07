@@ -65,4 +65,35 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
     public function after_restore_section() {
         $this->add_related_files('format_mnemo', 'sectionimage', 'course_section');
     }
+
+    /**
+     * Define the module-level path element for the per-activity building row.
+     *
+     * @return restore_path_element[] the paths handled by this plugin
+     */
+    protected function define_module_plugin_structure() {
+        return [
+            new restore_path_element('mnemobuilding', $this->get_pathfor('/building')),
+        ];
+    }
+
+    /**
+     * Restore an activity's building-model override and in-view transform,
+     * keyed to the newly created course module.
+     *
+     * @param array $data the element data
+     * @return void
+     */
+    public function process_mnemobuilding($data) {
+        global $DB;
+
+        $data = (object)$data;
+        $data->cmid = $this->task->get_moduleid();
+        unset($data->id);
+        // A given module has at most one row (unique cmid); guard against a
+        // pre-existing one from a partial/repeated restore.
+        if (!$DB->record_exists('format_mnemo_building', ['cmid' => $data->cmid])) {
+            $DB->insert_record('format_mnemo_building', $data);
+        }
+    }
 }

@@ -18,6 +18,7 @@ namespace format_mnemo\output;
 
 use completion_info;
 use context_course;
+use context_module;
 use core_courseformat\base as course_format;
 use moodle_url;
 use renderable;
@@ -63,6 +64,11 @@ class scene implements renderable, templatable {
         $completionenabled = $completion->is_enabled();
         $imagefiles = $this->preload_section_images($context);
         $buildingrows = $this->preload_building_rows((int)$course->id);
+        // Whether the viewer can edit activities at all (course level); the
+        // in-view editor is offered only then, and each activity is separately
+        // checked at its own module context (see below) so a module-level
+        // prohibit hides that one object from the editor.
+        $canedit = has_capability('moodle/course:manageactivities', $context);
         // URL activity records and Resource video main files for the course, so
         // video detection is a couple of queries rather than one per activity.
         $urlrecords = $DB->get_records('url', ['course' => (int)$course->id]);
@@ -117,6 +123,11 @@ class scene implements renderable, templatable {
                         // A per-activity in-view transform (scale/position/
                         // rotation) set with the editor, or null when default.
                         'transform' => $this->row_transform($buildingrows[(int)$cm->id] ?? null),
+                        // Whether this specific object may be edited, matching
+                        // the web service's module-context capability check so a
+                        // module-level prohibit removes it from the editor.
+                        'editable' => $canedit &&
+                            has_capability('moodle/course:manageactivities', context_module::instance((int)$cm->id)),
                         // Video info for activities that are videos, so the
                         // client can render them as an interactive screen; null
                         // otherwise. Only exposed for activities the user can

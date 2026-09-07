@@ -97,26 +97,27 @@ class set_transform extends external_api {
             $rotation += 360.0;
         }
 
+        $fields = [
+            'scale' => $scale,
+            'offsetx' => $offsetx,
+            'offsety' => $offsety,
+            'offsetz' => $offsetz,
+            'rotation' => $rotation,
+            'timemodified' => time(),
+        ];
         $record = $DB->get_record('format_mnemo_building', ['cmid' => $cm->id]);
         if ($record) {
-            $record->scale = $scale;
-            $record->offsetx = $offsetx;
-            $record->offsety = $offsety;
-            $record->offsetz = $offsetz;
-            $record->rotation = $rotation;
-            $record->timemodified = time();
-            $DB->update_record('format_mnemo_building', $record);
+            $DB->update_record('format_mnemo_building', (object)(['id' => $record->id] + $fields));
         } else {
-            $DB->insert_record('format_mnemo_building', (object)[
-                'cmid' => $cm->id,
-                'model' => '',
-                'scale' => $scale,
-                'offsetx' => $offsetx,
-                'offsety' => $offsety,
-                'offsetz' => $offsetz,
-                'rotation' => $rotation,
-                'timemodified' => time(),
-            ]);
+            try {
+                $DB->insert_record('format_mnemo_building', (object)(['cmid' => $cm->id, 'model' => ''] + $fields));
+            } catch (\dml_exception $e) {
+                // A concurrent save (e.g. a double-clicked Save) created the row
+                // first; the unique cmid index rejected this insert, so update
+                // the row that now exists instead of failing the request.
+                $record = $DB->get_record('format_mnemo_building', ['cmid' => $cm->id], '*', MUST_EXIST);
+                $DB->update_record('format_mnemo_building', (object)(['id' => $record->id] + $fields));
+            }
         }
 
         return ['status' => true];
