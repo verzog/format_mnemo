@@ -140,6 +140,21 @@ define('format_mnemo/vr', [], function() {
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
+        // Per-course texture-size multipliers for the road and ground surfaces
+        // (a teacher can retune these in-view). Stored in the scene-object store
+        // under the singleton keys road:0 / ground:0, reusing their scale field.
+        // A larger multiplier makes each texture tile bigger (fewer repeats).
+        var roadObj = this.sceneObjects['road:0'];
+        var groundObj = this.sceneObjects['ground:0'];
+        this.roadTexMult = (roadObj && roadObj.scale > 0) ? roadObj.scale : 1;
+        this.groundTexMult = (groundObj && groundObj.scale > 0) ? groundObj.scale : 1;
+        // Textured road strips and ground patches placed in the scene, with the
+        // dimensions needed to re-tile them when the texture size is edited; and
+        // the shared "surface" editables (one per type) they select.
+        this.roadMeshes = [];
+        this.groundMeshes = [];
+        this.surfaceEditables = {};
+        this.surfacePickMeshes = [];
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
@@ -2393,13 +2408,17 @@ define('format_mnemo/vr', [], function() {
             roughness: 0.5, metalness: 0.5
         });
         if (this.roadTexture) {
-            mat.map = this.tiledClone(this.roadTexture, w / this.roadScale, d / this.roadScale);
+            var rdiv = this.roadScale * this.roadTexMult;
+            mat.map = this.tiledClone(this.roadTexture, w / rdiv, d / rdiv);
         }
         var road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
         road.receiveShadow = true;
         this.scene.add(road);
+        if (this.roadTexture) {
+            this.registerSurfaceMesh('road', road, w, d);
+        }
     };
 
     /**
@@ -2436,8 +2455,9 @@ define('format_mnemo/vr', [], function() {
         }
         var THREE = this.THREE;
         var size = this.groundPatch;
+        var gdiv = this.groundScale * this.groundTexMult;
         var mat = new THREE.MeshStandardMaterial({
-            map: this.tiledClone(this.groundTexture, size / this.groundScale, size / this.groundScale),
+            map: this.tiledClone(this.groundTexture, size / gdiv, size / gdiv),
             roughness: 0.8, metalness: 0.2
         });
         var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
@@ -2446,6 +2466,86 @@ define('format_mnemo/vr', [], function() {
         patch.position.set(cx, 0.035, cz);
         patch.receiveShadow = true;
         this.scene.add(patch);
+        this.registerSurfaceMesh('ground', patch, size, size);
+    };
+
+    /**
+     * Track a textured surface mesh so it can be re-tiled when its texture size
+     * is edited, and (for course editors) make it selectable as its shared
+     * per-type surface editable. Road strips and ground patches of a given type
+     * all resolve to one editable, so retuning the texture size retiles them
+     * together and the course sees a single consistent surface.
+     *
+     * @param {String} type Either 'road' or 'ground'.
+     * @param {Object} mesh The Three.Mesh laid for the surface.
+     * @param {Number} w Plane width (x), for recomputing the tile repeat.
+     * @param {Number} d Plane depth (z), for recomputing the tile repeat.
+     */
+    Cyberspace.prototype.registerSurfaceMesh = function(type, mesh, w, d) {
+        var list = type === 'road' ? this.roadMeshes : this.groundMeshes;
+        list.push({mesh: mesh, w: w, d: d});
+        if (this.config.canedit) {
+            mesh.userData.mnemoEditable = this.surfaceEditable(type);
+            this.surfacePickMeshes.push(mesh);
+        }
+    };
+
+    /**
+     * Get (creating once) the shared editable for a surface type. Unlike object
+     * editables it has no single group; picking any of its meshes selects it and
+     * the editor offers only a texture-size control, persisted per course under
+     * the singleton key road:0 / ground:0 (reusing the scale field).
+     *
+     * @param {String} type Either 'road' or 'ground'.
+     * @return {Object} The shared surface editable record.
+     */
+    Cyberspace.prototype.surfaceEditable = function(type) {
+        if (this.surfaceEditables[type]) {
+            return this.surfaceEditables[type];
+        }
+        var s = this.config.strings || {};
+        var mult = type === 'road' ? this.roadTexMult : this.groundTexMult;
+        var editable = {
+            cmid: null,
+            objkey: type + ':0',
+            kind: 'surface',
+            surfaceType: type,
+            group: null,
+            emits: false,
+            name: type === 'road' ?
+                (s.editroadsurface || 'Road surface') :
+                (s.editgroundsurface || 'Ground surface'),
+            transform: {scale: mult > 0 ? mult : 1, x: 0, y: 0, z: 0, rot: 0, brightness: 1}
+        };
+        this.surfaceEditables[type] = editable;
+        return editable;
+    };
+
+    /**
+     * Re-tile every mesh of a surface type from its editable's current
+     * multiplier, disposing the replaced texture clones so live dragging does
+     * not leak GPU memory. A larger multiplier means bigger tiles.
+     *
+     * @param {Object} editable The shared surface editable.
+     */
+    Cyberspace.prototype.retileSurface = function(editable) {
+        var type = editable.surfaceType;
+        var tex = type === 'road' ? this.roadTexture : this.groundTexture;
+        if (!tex) {
+            return;
+        }
+        var list = type === 'road' ? this.roadMeshes : this.groundMeshes;
+        var base = type === 'road' ? this.roadScale : this.groundScale;
+        var mult = editable.transform.scale > 0 ? editable.transform.scale : 1;
+        var div = base * mult;
+        for (var i = 0; i < list.length; i++) {
+            var rec = list[i];
+            if (rec.mesh.material.map) {
+                rec.mesh.material.map.dispose();
+            }
+            rec.mesh.material.map = this.tiledClone(tex, rec.w / div, rec.d / div);
+            rec.mesh.material.needsUpdate = true;
+        }
     };
 
     /**
@@ -3662,6 +3762,7 @@ define('format_mnemo/vr', [], function() {
             field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5) +
             field('rot', s.editrotate || 'Rotate', 0, 360, 1) +
             field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05) +
+            field('texsize', s.edittexsize || 'Texture size', 0.25, 4, 0.05) +
             '<div class="format-mnemo__editor-actions">' +
             '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
@@ -3672,11 +3773,20 @@ define('format_mnemo/vr', [], function() {
         this.editorPanel = panel;
 
         // Live-apply slider changes to the selected object.
-        var keys = ['scale', 'x', 'y', 'z', 'rot', 'brightness'];
+        var keys = ['scale', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'];
         keys.forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             input.addEventListener('input', function() {
                 if (!self.selected) {
+                    return;
+                }
+                // Texture size is a surface property; it reuses the transform's
+                // scale field for storage but retiles the surface rather than
+                // scaling a mesh.
+                if (key === 'texsize') {
+                    self.selected.transform.scale = parseFloat(input.value);
+                    self.retileSurface(self.selected);
+                    self.syncEditorOutputs();
                     return;
                 }
                 self.selected.transform[key] = parseFloat(input.value);
@@ -3697,9 +3807,13 @@ define('format_mnemo/vr', [], function() {
                 return;
             }
             self.selected.transform = {scale: 1, x: 0, y: 0, z: 0, rot: 0, brightness: 1};
-            self.applyTransform(self.selected);
-            if (self.selected.emits) {
-                self.applyBrightness(self.selected);
+            if (self.selected.kind === 'surface') {
+                self.retileSurface(self.selected);
+            } else {
+                self.applyTransform(self.selected);
+                if (self.selected.emits) {
+                    self.applyBrightness(self.selected);
+                }
             }
             self.fillEditor(self.selected);
         });
@@ -3727,9 +3841,14 @@ define('format_mnemo/vr', [], function() {
         this.selected = editable;
         if (this.selBox) {
             this.scene.remove(this.selBox);
+            this.selBox = null;
         }
-        this.selBox = new this.THREE.BoxHelper(editable.group, this.palette.primary);
-        this.scene.add(this.selBox);
+        // Surface editables have no single group (they retile many meshes), so
+        // there is no bounding box to draw around them.
+        if (editable.group) {
+            this.selBox = new this.THREE.BoxHelper(editable.group, this.palette.primary);
+            this.scene.add(this.selBox);
+        }
         if (this.editorPanel) {
             this.editorPanel.hidden = false;
             this.fillEditor(editable);
@@ -3759,14 +3878,22 @@ define('format_mnemo/vr', [], function() {
         var panel = this.editorPanel;
         panel.querySelector('[data-mnemo-ed-name]').textContent = editable.name || '';
         var t = editable.transform;
+        // Texture size reuses the transform's scale field for a surface.
         var map = {scale: t.scale, x: t.x, y: t.y, z: t.z, rot: t.rot,
-            brightness: t.brightness !== undefined ? t.brightness : 1};
+            brightness: t.brightness !== undefined ? t.brightness : 1, texsize: t.scale};
         Object.keys(map).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
         });
-        // The brightness slider is only shown for light-emitting objects.
-        panel.querySelector('[data-mnemo-ed="brightness"]')
-            .closest('.format-mnemo__editor-row').hidden = !editable.emits;
+        // A surface editable offers only its texture-size control; every other
+        // object offers the transform sliders (and brightness only when it emits
+        // light). Toggle each row to match the selected object's kind.
+        var surface = editable.kind === 'surface';
+        var rows = {scale: !surface, x: !surface, y: !surface, z: !surface,
+            rot: !surface, brightness: !surface && editable.emits, texsize: surface};
+        Object.keys(rows).forEach(function(key) {
+            panel.querySelector('[data-mnemo-ed="' + key + '"]')
+                .closest('.format-mnemo__editor-row').hidden = !rows[key];
+        });
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.syncEditorOutputs();
     };
@@ -3776,10 +3903,10 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.syncEditorOutputs = function() {
         var panel = this.editorPanel;
-        ['scale', 'x', 'y', 'z', 'rot', 'brightness'].forEach(function(key) {
+        ['scale', 'x', 'y', 'z', 'rot', 'brightness', 'texsize'].forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             var out = panel.querySelector('[data-mnemo-out="' + key + '"]');
-            out.textContent = (key === 'scale' || key === 'brightness') ?
+            out.textContent = (key === 'scale' || key === 'brightness' || key === 'texsize') ?
                 parseFloat(input.value).toFixed(2) : Math.round(parseFloat(input.value));
         });
     };
@@ -4150,6 +4277,10 @@ define('format_mnemo/vr', [], function() {
         var groups = [];
         for (var i = 0; i < this.editables.length; i++) {
             groups.push(this.editables[i].group);
+        }
+        // Textured road/ground surfaces select their shared surface editable.
+        for (var j = 0; j < this.surfacePickMeshes.length; j++) {
+            groups.push(this.surfacePickMeshes[j]);
         }
         var hits = this.raycaster.intersectObjects(groups, true);
         if (!hits.length) {

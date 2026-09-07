@@ -601,8 +601,10 @@ const scenarios = [
             const tex = new THREE.Texture();
             const added = [];
             const self = {
-                THREE, roadTexture: tex, roadScale: 8,
+                THREE, roadTexture: tex, roadScale: 8, roadTexMult: 1,
+                config: {canedit: false}, roadMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 scene: {add: (o) => added.push(o)},
                 paveStrip: CS.prototype.paveStrip
             };
@@ -638,8 +640,10 @@ const scenarios = [
             const tex = new THREE.Texture();
             const added = [];
             const mk = (groundTexture, groundPatch) => ({
-                THREE, groundTexture, groundPatch, groundScale: 7,
+                THREE, groundTexture, groundPatch, groundScale: 7, groundTexMult: 1,
+                config: {canedit: false}, groundMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 scene: {add: (o) => added.push(o)},
                 groundPatchAt: CS.prototype.groundPatchAt
             });
@@ -807,6 +811,93 @@ const scenarios = [
                 Math.abs(mat.emissiveIntensity - 3) < 1e-6 &&
                 g.userData.mnemoEditable === ed;
             return {pass, detail: `objkey=${ed.objkey} posx=${g.position.x} emis=${mat.emissiveIntensity}`};
+        }
+    },
+    {
+        name: 'surface: retileSurface recomputes tile repeat from the multiplier',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial());
+            const self = {
+                THREE, roadTexture: tex, groundTexture: null,
+                roadScale: 8, groundScale: 8,
+                roadMeshes: [{mesh, w: 80, d: 80}], groundMeshes: [],
+                tiledClone: CS.prototype.tiledClone,
+                retileSurface: CS.prototype.retileSurface
+            };
+            const ed = {surfaceType: 'road', transform: {scale: 1}};
+            self.retileSurface(ed);
+            const r1 = mesh.material.map.repeat.x; // 80 / (8 * 1) = 10
+            ed.transform.scale = 2; // Bigger tiles -> fewer repeats.
+            self.retileSurface(ed);
+            const r2 = mesh.material.map.repeat.x; // 80 / (8 * 2) = 5
+            return {pass: r1 === 10 && r2 === 5, detail: `r1=${r1} r2=${r2}`};
+        }
+    },
+    {
+        name: 'surface: registerSurfaceMesh tags meshes and seeds a shared editable',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+            const self = {
+                config: {canedit: true, strings: {}},
+                roadMeshes: [], groundMeshes: [],
+                surfaceEditables: {}, surfacePickMeshes: [],
+                roadTexMult: 3, groundTexMult: 1,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            self.registerSurfaceMesh('road', mesh, 40, 40);
+            const ed = self.surfaceEditables.road;
+            const pass = self.roadMeshes.length === 1 && self.roadMeshes[0].w === 40 &&
+                mesh.userData.mnemoEditable === ed && self.surfacePickMeshes[0] === mesh &&
+                ed.objkey === 'road:0' && ed.kind === 'surface' &&
+                Math.abs(ed.transform.scale - 3) < 1e-6;
+            return {pass, detail: `objkey=${ed.objkey} mult=${ed.transform.scale}`};
+        }
+    },
+    {
+        name: 'surface: registerSurfaceMesh records but never selects when not editable',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+            const self = {
+                config: {canedit: false, strings: {}},
+                roadMeshes: [], groundMeshes: [],
+                surfaceEditables: {}, surfacePickMeshes: [],
+                roadTexMult: 1, groundTexMult: 1,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            self.registerSurfaceMesh('ground', mesh, 5, 5);
+            const pass = self.groundMeshes.length === 1 &&
+                self.surfacePickMeshes.length === 0 &&
+                mesh.userData.mnemoEditable === undefined &&
+                self.surfaceEditables.ground === undefined;
+            return {pass, detail: `recorded=${self.groundMeshes.length} picks=${self.surfacePickMeshes.length}`};
+        }
+    },
+    {
+        name: 'surface: surfaceEditable is a singleton seeded from the stored multiplier',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                surfaceEditables: {}, roadTexMult: 1, groundTexMult: 2,
+                config: {strings: {editgroundsurface: 'GS'}},
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            const a = self.surfaceEditable('ground');
+            const b = self.surfaceEditable('ground');
+            const pass = a === b && a.name === 'GS' && a.objkey === 'ground:0' &&
+                a.group === null && Math.abs(a.transform.scale - 2) < 1e-6;
+            return {pass, detail: `same=${a === b} name=${a.name} mult=${a.transform.scale}`};
         }
     }
 ];
