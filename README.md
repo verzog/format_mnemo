@@ -109,8 +109,10 @@ off).
   way for every learner. Activity buildings and video screens save per-activity;
   decorative props (kiosks, lamps, barriers) and the topic gates and pylons save
   per-course by a layout slot (so adding or removing activities later can shift
-  which item a saved edit lands on). Guarded by the activity-editing capability,
-  so learners never see it.
+  which item a saved edit lands on). Clicking a **road or ground surface**
+  selects it and offers a **texture size** control that retiles every strip or
+  plaza of that type together, saved per course. Guarded by the activity-editing
+  capability, so learners never see it.
 - **Bring-your-own asset packs** — swap the bundled props for your own
   CC0/licensed models, either by **uploading `.glb` files straight into Moodle**
   (admin settings) or by pointing the plugin at a **URL** of a hosted pack. Name

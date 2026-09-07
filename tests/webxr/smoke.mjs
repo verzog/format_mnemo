@@ -601,8 +601,10 @@ const scenarios = [
             const tex = new THREE.Texture();
             const added = [];
             const self = {
-                THREE, roadTexture: tex, roadScale: 8,
+                THREE, roadTexture: tex, roadScale: 8, roadTexMult: 1,
+                config: {canedit: false}, roadMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 scene: {add: (o) => added.push(o)},
                 paveStrip: CS.prototype.paveStrip
             };
@@ -638,8 +640,10 @@ const scenarios = [
             const tex = new THREE.Texture();
             const added = [];
             const mk = (groundTexture, groundPatch) => ({
-                THREE, groundTexture, groundPatch, groundScale: 7,
+                THREE, groundTexture, groundPatch, groundScale: 7, groundTexMult: 1,
+                config: {canedit: false}, groundMeshes: [],
                 tiledClone: CS.prototype.tiledClone,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 scene: {add: (o) => added.push(o)},
                 groundPatchAt: CS.prototype.groundPatchAt
             });
@@ -807,6 +811,188 @@ const scenarios = [
                 Math.abs(mat.emissiveIntensity - 3) < 1e-6 &&
                 g.userData.mnemoEditable === ed;
             return {pass, detail: `objkey=${ed.objkey} posx=${g.position.x} emis=${mat.emissiveIntensity}`};
+        }
+    },
+    {
+        name: 'surface: retileSurface recomputes tile repeat from the multiplier',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(80, 80), new THREE.MeshStandardMaterial());
+            const self = {
+                THREE, roadTexture: tex, groundTexture: null,
+                roadScale: 8, groundScale: 8,
+                roadMeshes: [{mesh, w: 80, d: 80}], groundMeshes: [],
+                tiledClone: CS.prototype.tiledClone,
+                retileSurface: CS.prototype.retileSurface
+            };
+            const ed = {surfaceType: 'road', transform: {scale: 1}};
+            self.retileSurface(ed);
+            const r1 = mesh.material.map.repeat.x; // 80 / (8 * 1) = 10
+            ed.transform.scale = 2; // Bigger tiles -> fewer repeats.
+            self.retileSurface(ed);
+            const r2 = mesh.material.map.repeat.x; // 80 / (8 * 2) = 5
+            return {pass: r1 === 10 && r2 === 5, detail: `r1=${r1} r2=${r2}`};
+        }
+    },
+    {
+        name: 'surface: registerSurfaceMesh tags meshes and seeds a shared editable',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+            const self = {
+                config: {canedit: true, strings: {}},
+                roadMeshes: [], groundMeshes: [],
+                surfaceEditables: {}, surfacePickMeshes: [],
+                roadTexMult: 3, groundTexMult: 1,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            self.registerSurfaceMesh('road', mesh, 40, 40);
+            const ed = self.surfaceEditables.road;
+            const pass = self.roadMeshes.length === 1 && self.roadMeshes[0].w === 40 &&
+                mesh.userData.mnemoEditable === ed && self.surfacePickMeshes[0] === mesh &&
+                ed.objkey === 'road:0' && ed.kind === 'surface' &&
+                Math.abs(ed.transform.scale - 3) < 1e-6;
+            return {pass, detail: `objkey=${ed.objkey} mult=${ed.transform.scale}`};
+        }
+    },
+    {
+        name: 'surface: registerSurfaceMesh records but never selects when not editable',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+            const self = {
+                config: {canedit: false, strings: {}},
+                roadMeshes: [], groundMeshes: [],
+                surfaceEditables: {}, surfacePickMeshes: [],
+                roadTexMult: 1, groundTexMult: 1,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            self.registerSurfaceMesh('ground', mesh, 5, 5);
+            const pass = self.groundMeshes.length === 1 &&
+                self.surfacePickMeshes.length === 0 &&
+                mesh.userData.mnemoEditable === undefined &&
+                self.surfaceEditables.ground === undefined;
+            return {pass, detail: `recorded=${self.groundMeshes.length} picks=${self.surfacePickMeshes.length}`};
+        }
+    },
+    {
+        name: 'surface: surfaceEditable is a singleton seeded from the stored multiplier',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                surfaceEditables: {}, roadTexMult: 1, groundTexMult: 2,
+                config: {strings: {editgroundsurface: 'GS'}},
+                surfaceEditable: CS.prototype.surfaceEditable
+            };
+            const a = self.surfaceEditable('ground');
+            const b = self.surfaceEditable('ground');
+            const pass = a === b && a.name === 'GS' && a.objkey === 'ground:0' &&
+                a.group === null && Math.abs(a.transform.scale - 2) < 1e-6;
+            return {pass, detail: `same=${a === b} name=${a.name} mult=${a.transform.scale}`};
+        }
+    },
+    {
+        name: 'editor: showSelectionLabel anchors a name label above the object',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(4, 6, 4), new THREE.MeshBasicMaterial());
+            mesh.position.y = 3; // Box spans y 0..6.
+            g.add(mesh);
+            const added = [];
+            const self = {
+                THREE, scene: {add: (o) => added.push(o), remove: () => {}},
+                selLabel: null, palette: {primary: 0x00e5ff},
+                // Stub makeLabel so the test needs no font/canvas.
+                makeLabel: (t, c, s) => {
+                    const sp = new THREE.Sprite(new THREE.SpriteMaterial());
+                    sp.userData.text = t;
+                    sp.scale.set(4 * s, 1 * s, 1);
+                    return sp;
+                },
+                showSelectionLabel: CS.prototype.showSelectionLabel,
+                positionSelLabel: CS.prototype.positionSelLabel
+            };
+            self.showSelectionLabel({group: g, name: 'Assignment 1'});
+            const lbl = self.selLabel;
+            const pass = !!lbl && lbl.userData.text === 'Assignment 1' &&
+                lbl.position.y > 6 && lbl.material.depthTest === false &&
+                lbl.renderOrder === 999 && added.indexOf(lbl) !== -1;
+            return {pass, detail: `label=${!!lbl} y=${lbl && lbl.position.y.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'editor: showSelectionLabel clears and skips surfaces (no group)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const removed = [];
+            const stale = new THREE.Sprite(new THREE.SpriteMaterial());
+            const self = {
+                THREE, scene: {add: () => {}, remove: (o) => removed.push(o)},
+                selLabel: stale, palette: {primary: 0x00e5ff},
+                makeLabel: () => new THREE.Sprite(new THREE.SpriteMaterial()),
+                showSelectionLabel: CS.prototype.showSelectionLabel,
+                positionSelLabel: CS.prototype.positionSelLabel
+            };
+            // A surface editable (group null) clears the stale label, adds none.
+            self.showSelectionLabel({group: null, name: 'Road surface'});
+            const pass = self.selLabel === null && removed[0] === stale;
+            return {pass, detail: `cleared=${self.selLabel === null} removed=${removed.length}`};
+        }
+    },
+    {
+        name: 'editor: applyTransform counter-rotates the sign to keep it street-facing',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const sign = new THREE.Group();
+            g.add(sign);
+            const self = {THREE, selBox: null, selLabel: null, selected: null, renderer: null};
+            const ed = {
+                group: g, sign: sign, baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 1, x: 0, y: 0, z: 0, rot: 90}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // Group turns +90°, the sign's own rotation cancels it, so the sign's
+            // world orientation stays at 0 (the street it was placed to face).
+            const worldRot = g.rotation.y + sign.rotation.y;
+            const pass = Math.abs(g.rotation.y - Math.PI / 2) < 1e-6 &&
+                Math.abs(worldRot) < 1e-6;
+            return {pass, detail: `group=${g.rotation.y.toFixed(3)} sign=${sign.rotation.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'editor: snapValue aligns absolute position, rotation and scale',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const ed = {baseX: 12.37, baseY: 0, baseZ: -4.8};
+            const on = {snap: true, gridStep: 1, snapValue: CS.prototype.snapValue};
+            const off = {snap: false, gridStep: 1, snapValue: CS.prototype.snapValue};
+            // Absolute x = base + offset snaps to the 1-unit grid: 12.37 + 0.9
+            // = 13.27 -> 13, so the stored offset becomes 13 - 12.37 = 0.63.
+            const x = on.snapValue('x', 0.9, ed);
+            const absX = ed.baseX + x;
+            const rot = on.snapValue('rot', 52, ed);   // -> 45
+            const scale = on.snapValue('scale', 1.11, ed); // -> 1.0
+            const passthru = off.snapValue('x', 0.9, ed); // snap off: unchanged
+            const bright = on.snapValue('brightness', 1.37, ed); // never snapped
+            const pass = Math.abs(absX - 13) < 1e-6 && rot === 45 &&
+                Math.abs(scale - 1.0) < 1e-6 && passthru === 0.9 &&
+                Math.abs(bright - 1.37) < 1e-6;
+            return {pass, detail: `absX=${absX} rot=${rot} scale=${scale} off=${passthru}`};
         }
     }
 ];

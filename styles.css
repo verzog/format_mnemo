@@ -192,10 +192,22 @@
     box-shadow: 0 0 20px rgba(0, 229, 255, 0.25);
 }
 
+.format-mnemo__editor-caption {
+    font-size: 0.6rem;
+    font-weight: normal;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(205, 239, 255, 0.6);
+}
+
 .format-mnemo__editor-title {
     margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid rgba(0, 229, 255, 0.35);
+    font-size: 1rem;
     font-weight: bold;
     color: #00e5ff;
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.55);
     overflow-wrap: anywhere;
 }
 
@@ -218,6 +230,14 @@
 .format-mnemo__editor-row output {
     flex: 0 0 2.6rem;
     text-align: right;
+}
+
+.format-mnemo__editor-snap {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.35rem;
+    cursor: pointer;
 }
 
 .format-mnemo__editor-actions {
