@@ -73,7 +73,9 @@ off).
 - **Authored 3D props** — the streets are dressed with real glTF models: flying
   cars gliding above the avenue, street lamps and road barriers along the kerbs,
   and kiosks at the side-street mouths. They cast the sun shadows and their
-  emissive parts glow after dark. A compact, self-contained **glTF (`.glb`)
+  emissive parts glow after dark. Street lamps also carry a real point light, so
+  they cast a neon pool with a specular glint on the reflective road, ground and
+  sidewalks beneath them (dimmable per lamp with the editor's brightness slider). A compact, self-contained **glTF (`.glb`)
   loader** (built on the bundled Three.js — no add-ons) reads the full common
   scope: node hierarchy, every accessor type, vertex colours and multiple UV
   sets, samplers, alpha modes, and PBR **base-colour / metallic-roughness /
