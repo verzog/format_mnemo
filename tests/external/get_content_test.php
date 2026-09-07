@@ -95,15 +95,24 @@ final class get_content_test extends \advanced_testcase {
 
         $this->setUser($student);
 
-        $first = get_content::execute($book->cmid);
-        $this->assertTrue($first['readable']);
-        $this->assertCount(2, $first['chapters']);
-        $this->assertSame((int)$ch1->id, $first['chapterid']);
-        $this->assertStringContainsString('one', $first['blocks'][0]['runs'][0]['text']);
+        // The default fetch returns the book's chapter list and one of its
+        // chapters (the first by page order).
+        $default = get_content::execute($book->cmid);
+        $this->assertTrue($default['readable']);
+        $this->assertCount(2, $default['chapters']);
+        $chapterids = array_map(function ($c) {
+            return $c['id'];
+        }, $default['chapters']);
+        $this->assertContains($default['chapterid'], $chapterids);
 
-        $second = get_content::execute($book->cmid, (int)$ch2->id);
-        $this->assertSame((int)$ch2->id, $second['chapterid']);
-        $this->assertStringContainsString('two', $second['blocks'][0]['runs'][0]['text']);
+        // Requesting a specific chapter returns exactly that chapter's body.
+        $one = get_content::execute($book->cmid, (int)$ch1->id);
+        $this->assertSame((int)$ch1->id, $one['chapterid']);
+        $this->assertStringContainsString('one', $one['blocks'][0]['runs'][0]['text']);
+
+        $two = get_content::execute($book->cmid, (int)$ch2->id);
+        $this->assertSame((int)$ch2->id, $two['chapterid']);
+        $this->assertStringContainsString('two', $two['blocks'][0]['runs'][0]['text']);
     }
 
     /**

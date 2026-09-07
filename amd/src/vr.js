@@ -6510,7 +6510,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} {font, size, colour, above, below}.
      */
     Cyberspace.prototype.readerBlockSpec = function(block) {
-        var sizes = {1: 54, 2: 46, 3: 40, 4: 36, 5: 32, 6: 30};
+        var sizes = {'1': 54, '2': 46, '3': 40, '4': 36, '5': 32, '6': 30};
         if (block.type === 'heading') {
             var hs = sizes[block.level] || 34;
             return {font: '700 ' + hs + 'px system-ui, sans-serif', size: hs,
