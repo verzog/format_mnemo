@@ -739,6 +739,62 @@ const scenarios = [
             const found = hits.length ? CS.prototype.editableFor.call({}, hits[0].object) : null;
             return {pass: hits.length > 0 && found === ed, detail: `hits=${hits.length} cmid=${found && found.cmid}`};
         }
+    },
+    {
+        name: 'scene-obj: slotKey gives stable per-type keys',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {slotCounters: {}};
+            const a = CS.prototype.slotKey.call(self, 'lamp');
+            const b = CS.prototype.slotKey.call(self, 'lamp');
+            const c = CS.prototype.slotKey.call(self, 'kiosk');
+            return {pass: a === 'lamp:0' && b === 'lamp:1' && c === 'kiosk:0', detail: `${a},${b},${c}`};
+        }
+    },
+    {
+        name: 'scene-obj: applyBrightness scales emissive from a captured base',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const emat = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 0, 0)});
+            emat.emissiveIntensity = 0.5;
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
+            const ed = {group: g, transform: {brightness: 2}};
+            CS.prototype.applyBrightness.call({}, ed);
+            const up = Math.abs(emat.emissiveIntensity - 1.0) < 1e-6;
+            // Re-apply relative to the same captured base (0.5), not the last value.
+            ed.transform.brightness = 0.5;
+            CS.prototype.applyBrightness.call({}, ed);
+            const down = Math.abs(emat.emissiveIntensity - 0.25) < 1e-6;
+            return {pass: up && down, detail: `emis=${emat.emissiveIntensity}`};
+        }
+    },
+    {
+        name: 'scene-obj: registerSceneEditable applies a stored override and registers',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const emat = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 1, 1)});
+            emat.emissiveIntensity = 1;
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
+            const self = {
+                THREE, editables: [], selBox: null, renderer: null,
+                config: {canedit: true},
+                sceneObjects: {'lamp:0': {scale: 2, x: 1, y: 0, z: 0, rot: 0, brightness: 3}},
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform,
+                applyBrightness: CS.prototype.applyBrightness
+            };
+            self.registerSceneEditable('lamp:0', 'Street lamp', g, 5, 0, 5, true);
+            const ed = self.editables[0];
+            const pass = ed.objkey === 'lamp:0' && ed.cmid === null &&
+                Math.abs(g.position.x - 6) < 1e-6 && Math.abs(g.scale.x - 2) < 1e-6 &&
+                Math.abs(emat.emissiveIntensity - 3) < 1e-6 &&
+                g.userData.mnemoEditable === ed;
+            return {pass, detail: `objkey=${ed.objkey} posx=${g.position.x} emis=${emat.emissiveIntensity}`};
+        }
     }
 ];
 

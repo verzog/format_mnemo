@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="course/format/mnemo/db" VERSION="20260907" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
+<XMLDB PATH="course/format/mnemo/db" VERSION="20260908" COMMENT="Database tables for the Mnemo (VR cyberspace) course format."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd"
 >
@@ -21,6 +21,26 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="cmid" UNIQUE="true" FIELDS="cmid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="format_mnemo_sceneobj" COMMENT="Per-course in-view transforms for non-activity scene objects (props, gates, pylons).">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The course the scene object belongs to."/>
+        <FIELD NAME="objkey" TYPE="char" LENGTH="64" NOTNULL="true" SEQUENCE="false" COMMENT="A stable per-course slot key, e.g. lamp:3, kiosk:1, gate:0."/>
+        <FIELD NAME="scale" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view uniform scale multiplier."/>
+        <FIELD NAME="offsetx" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-x offset from the default position."/>
+        <FIELD NAME="offsety" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-y offset from the default position."/>
+        <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the default position."/>
+        <FIELD NAME="rotation" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view extra rotation about the vertical axis, in degrees."/>
+        <FIELD NAME="brightness" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view brightness multiplier for light-emitting objects."/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the override was last set."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="courseid-objkey" UNIQUE="true" FIELDS="courseid, objkey"/>
       </INDEXES>
     </TABLE>
   </TABLES>

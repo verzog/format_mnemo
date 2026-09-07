@@ -96,4 +96,38 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
             $DB->insert_record('format_mnemo_building', $data);
         }
     }
+
+    /**
+     * Define the course-level path element for the per-course scene objects.
+     *
+     * @return restore_path_element[] the paths handled by this plugin
+     */
+    protected function define_course_plugin_structure() {
+        return [
+            new restore_path_element('mnemosceneobj', $this->get_pathfor('/sceneobjs/sceneobj')),
+        ];
+    }
+
+    /**
+     * Restore a non-activity scene object's transform for the restored course.
+     * Slot keys are per-course-relative, so only the course id is remapped.
+     *
+     * @param array $data the element data
+     * @return void
+     */
+    public function process_mnemosceneobj($data) {
+        global $DB;
+
+        $data = (object)$data;
+        $data->courseid = $this->task->get_courseid();
+        unset($data->id);
+        if (
+            !$DB->record_exists(
+                'format_mnemo_sceneobj',
+                ['courseid' => $data->courseid, 'objkey' => $data->objkey]
+            )
+        ) {
+            $DB->insert_record('format_mnemo_sceneobj', $data);
+        }
+    }
 }

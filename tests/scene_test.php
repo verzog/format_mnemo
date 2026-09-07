@@ -536,4 +536,35 @@ final class scene_test extends \advanced_testcase {
         $this->assertEqualsWithDelta(-2.0, $transform['z'], 1e-6);
         $this->assertEqualsWithDelta(90.0, $transform['rot'], 1e-6);
     }
+
+    /**
+     * Per-course scene-object overrides (props/gates/pylons) are exposed in the
+     * scene config, keyed by their slot key.
+     */
+    public function test_scene_config_scene_objects(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $DB->insert_record('format_mnemo_sceneobj', (object)[
+            'courseid' => $course->id, 'objkey' => 'lamp:1', 'scale' => 2.0,
+            'offsetx' => 1.0, 'offsety' => 0.0, 'offsetz' => 0.0,
+            'rotation' => 45.0, 'brightness' => 2.0, 'timemodified' => time(),
+        ]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertArrayHasKey('lamp:1', $config['sceneobjects']);
+        $obj = $config['sceneobjects']['lamp:1'];
+        $this->assertEqualsWithDelta(2.0, $obj['scale'], 1e-6);
+        $this->assertEqualsWithDelta(1.0, $obj['x'], 1e-6);
+        $this->assertEqualsWithDelta(45.0, $obj['rot'], 1e-6);
+        $this->assertEqualsWithDelta(2.0, $obj['brightness'], 1e-6);
+    }
 }
