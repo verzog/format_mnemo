@@ -3727,10 +3727,8 @@ define('format_mnemo/vr', [], function() {
         saveBtn.disabled = true;
         status.textContent = s.editsaving || 'Saving…';
         var t = editable.transform;
-        var done = function(text) {
-            status.textContent = text;
-            saveBtn.disabled = false;
-        };
+        var savedText = s.editsaved || 'Saved';
+        var errorText = s.editsaveerror || 'Could not save';
         window.require(['core/ajax'], function(ajax) {
             ajax.call([{
                 methodname: 'format_mnemo_set_transform',
@@ -3739,10 +3737,12 @@ define('format_mnemo/vr', [], function() {
                     offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
                 }
             }])[0].then(function() {
-                done(s.editsaved || 'Saved');
+                status.textContent = savedText;
+                saveBtn.disabled = false;
                 return null;
             }).catch(function() {
-                done(s.editsaveerror || 'Could not save');
+                status.textContent = errorText;
+                saveBtn.disabled = false;
             });
         });
     };

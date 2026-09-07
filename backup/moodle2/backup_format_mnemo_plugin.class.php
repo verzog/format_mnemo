@@ -75,7 +75,7 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
         ]);
         $pluginwrapper->add_child($building);
 
-        $building->set_source_table('format_mnemo_building', ['cmid' => backup::VAR_MODULEID]);
+        $building->set_source_table('format_mnemo_building', ['cmid' => backup::VAR_MODID]);
 
         return $plugin;
     }
