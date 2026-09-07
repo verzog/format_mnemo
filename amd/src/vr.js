@@ -3734,6 +3734,10 @@ define('format_mnemo/vr', [], function() {
                 toggle.addEventListener('click', function() {
                     if (container.classList.contains('format-mnemo--listview')) {
                         self.pauseVideos();
+                        // The activity panel lives inside the stage, which the
+                        // list view hides; close it so its iframe stops running
+                        // (and does not reappear when 3D view is restored).
+                        self.closeActivityOverlay();
                     }
                 });
             }
@@ -5362,8 +5366,41 @@ define('format_mnemo/vr', [], function() {
         overlay.frame.src = url;
         overlay.full.href = url;
         overlay.el.hidden = false;
+        this.setOverlayInert(true);
         this.pauseVideos();
         overlay.close.focus();
+    };
+
+    /**
+     * Make the rest of the page inert while the activity panel is open (or
+     * revert it), so keyboard focus and clicks cannot reach the covered stage
+     * controls or the surrounding course page - `aria-modal` alone does not do
+     * this. Every sibling of the panel (inside the stage, and the bar/fallback
+     * outside it) is toggled; the panel itself stays interactive. `inert` is a
+     * no-op in browsers that lack it, which degrades safely.
+     *
+     * @param {Boolean} on Whether the background should be inert.
+     */
+    Cyberspace.prototype.setOverlayInert = function(on) {
+        var overlay = this.activityOverlay;
+        if (!overlay) {
+            return;
+        }
+        var root = this.root;
+        var mark = function(parent, skip) {
+            if (!parent) {
+                return;
+            }
+            for (var i = 0; i < parent.children.length; i++) {
+                if (parent.children[i] !== skip) {
+                    parent.children[i].inert = on;
+                }
+            }
+        };
+        // Inside the stage, everything except the panel; then the stage's
+        // siblings (the toggle bar and the fallback list) in the container.
+        mark(root, overlay.el);
+        mark(root.closest ? root.closest('.format-mnemo') : null, root);
     };
 
     /**
@@ -5405,6 +5442,26 @@ define('format_mnemo/vr', [], function() {
 
         var frame = document.createElement('iframe');
         frame.className = 'format-mnemo__overlay-frame';
+        // Escape should close the panel even when the learner is interacting
+        // with the activity, whose keystrokes go to the nested document and do
+        // not bubble out. The activity is same-origin (a Moodle page on this
+        // site), so hook Escape on the framed document each time it loads; a
+        // cross-origin document (e.g. an external tool) simply throws and is
+        // left to the outer bar's own Escape handler below.
+        frame.addEventListener('load', function() {
+            try {
+                var doc = frame.contentDocument;
+                if (doc) {
+                    doc.addEventListener('keydown', function(e) {
+                        if (e.key === 'Escape') {
+                            self.closeActivityOverlay();
+                        }
+                    });
+                }
+            } catch (e) {
+                // Cross-origin framed document; its keys are not observable.
+            }
+        });
 
         bar.appendChild(title);
         bar.appendChild(full);
@@ -5434,6 +5491,7 @@ define('format_mnemo/vr', [], function() {
         }
         overlay.el.hidden = true;
         overlay.frame.src = 'about:blank';
+        this.setOverlayInert(false);
         if (this.overlayReturnFocus && this.overlayReturnFocus.focus) {
             this.overlayReturnFocus.focus();
         }

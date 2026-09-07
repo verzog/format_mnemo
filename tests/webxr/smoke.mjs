@@ -1234,6 +1234,7 @@ const scenarios = [
                 openActivity: CS.prototype.openActivity,
                 showActivityOverlay: CS.prototype.showActivityOverlay,
                 buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
                 pauseVideos: CS.prototype.pauseVideos
             };
             document.body.appendChild(self.root);
@@ -1279,6 +1280,7 @@ const scenarios = [
                 showActivityOverlay: CS.prototype.showActivityOverlay,
                 buildActivityOverlay: CS.prototype.buildActivityOverlay,
                 closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
                 pauseVideos: CS.prototype.pauseVideos
             };
             document.body.appendChild(self.root);
@@ -1288,6 +1290,38 @@ const scenarios = [
             const pass = o.el.hidden === true && /about:blank$/.test(o.frame.getAttribute('src'));
             document.body.removeChild(self.root);
             return {pass, detail: `hidden=${o.el.hidden} src=${o.frame.getAttribute('src')}`};
+        }
+    },
+    {
+        name: 'activity: overlay makes the background inert and reverts on close',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const container = document.createElement('div');
+            container.className = 'format-mnemo';
+            const bar = document.createElement('div'); // A sibling of the stage.
+            const root = document.createElement('div'); // The stage.
+            const canvas = document.createElement('canvas'); // A stage child.
+            root.appendChild(canvas);
+            container.appendChild(bar);
+            container.appendChild(root);
+            document.body.appendChild(container);
+            const self = {
+                renderer: {xr: {isPresenting: false}},
+                config: {strings: {}}, root: root, videos: [], activityOverlay: null,
+                openActivity: CS.prototype.openActivity,
+                showActivityOverlay: CS.prototype.showActivityOverlay,
+                buildActivityOverlay: CS.prototype.buildActivityOverlay,
+                closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                setOverlayInert: CS.prototype.setOverlayInert,
+                pauseVideos: CS.prototype.pauseVideos
+            };
+            self.openActivity('https://moodle.example/x', 'X');
+            const openInert = canvas.inert === true && bar.inert === true &&
+                self.activityOverlay.el.inert !== true;
+            self.closeActivityOverlay();
+            const reverted = canvas.inert === false && bar.inert === false;
+            document.body.removeChild(container);
+            return {pass: openInert && reverted, detail: `open=${openInert} reverted=${reverted}`};
         }
     },
     {
