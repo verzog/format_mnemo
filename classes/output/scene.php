@@ -498,6 +498,11 @@ class scene implements renderable, templatable {
             'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
             'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
             'sidewalktextureurl' => $this->resolve_asset_url('sidewalktextureurl', 'sidewalktexture'),
+            // Void backdrop: an optional equirectangular sky/starfield image,
+            // and up to nine planet-surface maps (in upload order). The client
+            // only uses these in the void environment.
+            'spacetextureurl' => $this->resolve_asset_url('spacetextureurl', 'spacetexture'),
+            'planettextureurls' => $this->stored_asset_urls('planettextures', 9),
             // Texture tiling scale (world units per tile) and the size of the
             // ground patch laid around each building, with sensible defaults.
             'roadtexturescale' => $this->int_config('roadtexturescale', 8),
@@ -704,6 +709,37 @@ class scene implements renderable, templatable {
             '/',
             $stored->get_filename()
         )->out(false);
+    }
+
+    /**
+     * The pluginfile URLs for the files uploaded into a multi-file system-context
+     * area, ordered by filename and capped at $max, or an empty array when none
+     * are uploaded. Each file's own modified time is embedded as a cache-busting
+     * revision. Used for the planet-surface maps (up to nine).
+     *
+     * @param string $filearea The system-context file area.
+     * @param int $max Maximum number of URLs to return.
+     * @return array The list of pluginfile URLs.
+     */
+    protected function stored_asset_urls(string $filearea, int $max): array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+        $urls = [];
+        foreach ($files as $file) {
+            $urls[] = moodle_url::make_pluginfile_url(
+                $context->id,
+                'format_mnemo',
+                $filearea,
+                (int)$file->get_timemodified(),
+                '/',
+                $file->get_filename()
+            )->out(false);
+            if (count($urls) >= $max) {
+                break;
+            }
+        }
+        return $urls;
     }
 
     /**

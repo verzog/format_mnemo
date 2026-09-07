@@ -1470,6 +1470,72 @@ const scenarios = [
                 keys.indexOf('lamp:1') === -1 && self.lampLights === 2;
             return {pass, detail: `keys=${keys.join(',')} lights=${self.lampLights}`};
         }
+    },
+    {
+        name: 'space: makePlanet uses an uploaded map, else a procedural surface',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const added = [];
+            const self = {THREE, scene: {add: (o) => added.push(o)},
+                newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet};
+            const tex = new THREE.Texture();
+            self.makePlanet(20, {x: 0, y: 0, z: -100}, [0x888888, 0x333333], false, tex);
+            self.makePlanet(20, {x: 40, y: 0, z: -100}, [0x888888, 0x333333], false);
+            const withTex = added[0];
+            const proc = added[1];
+            const pass = withTex.material.map === tex &&
+                withTex.material.emissiveMap === tex &&
+                proc.material.map && proc.material.map !== tex;
+            return {pass, detail: `mapIsTex=${withTex.material.map === tex} procHasOwn=${!!proc.material.map}`};
+        }
+    },
+    {
+        name: 'space: buildPlanets draws one planet per texture (capped), else three',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const countSpheres = (arr) => arr.filter((o) =>
+                o.geometry && o.geometry.type === 'SphereGeometry').length;
+            const mk = (textures) => {
+                const added = [];
+                const self = {THREE, scene: {add: (o) => added.push(o)}, planetTextures: textures,
+                    newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
+                    buildPlanets: CS.prototype.buildPlanets};
+                self.buildPlanets();
+                return countSpheres(added);
+            };
+            const none = mk([]);
+            const two = mk([new THREE.Texture(), new THREE.Texture()]);
+            const many = mk(Array.from({length: 12}, () => new THREE.Texture()));
+            const pass = none === 3 && two === 2 && many === 9; // Capped at nine.
+            return {pass, detail: `none=${none} two=${two} many=${many}`};
+        }
+    },
+    {
+        name: 'space: buildSpace uses an uploaded sky, else the procedural starfield',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (spaceTexture) => {
+                let starfield = 0;
+                const self = {
+                    THREE, scene: {background: null, add: () => {}},
+                    spaceTexture,
+                    buildStarfield: () => { starfield++; },
+                    buildPlanets: () => {},
+                    buildSpace: CS.prototype.buildSpace
+                };
+                self.buildSpace();
+                return {bg: self.scene.background, starfield};
+            };
+            const tex = new THREE.Texture();
+            const withSky = mk(tex);
+            const without = mk(null);
+            const pass = withSky.bg === tex && withSky.starfield === 0 &&
+                without.starfield === 1;
+            return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
     }
 ];
 

@@ -224,6 +224,37 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
+    // Void backdrop: an equirectangular (2:1 lat-long) sky/starfield image that
+    // replaces the procedural stars in the Void environment. Left blank, the
+    // Void keeps its generated starfield and nebulae. URL, or upload below.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/spacetextureurl',
+        get_string('setting_spacetextureurl', 'format_mnemo'),
+        get_string('setting_spacetextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/spacetexture',
+        get_string('setting_spacetexture', 'format_mnemo'),
+        get_string('setting_spacetexture_desc', 'format_mnemo'),
+        'spacetexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Planet surface maps for the Void: upload up to nine equirectangular (2:1
+    // lat-long) images and each is applied to one of the Void's planets, in
+    // filename order. With none uploaded, the Void keeps its procedural planets.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/planettextures',
+        get_string('setting_planettextures', 'format_mnemo'),
+        get_string('setting_planettextures_desc', 'format_mnemo'),
+        'planettextures',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 9, 'accepted_types' => ['web_image']]
+    ));
+
     // Texture tiling scale (world units per tile) for the road, ground and
     // sidewalk textures. Larger values stretch the texture over more ground
     // (fewer, more spread-out tiles); smaller values repeat it more densely.

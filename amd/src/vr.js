@@ -59,6 +59,22 @@ define('format_mnemo/vr', [], function() {
     // under them, and so surface-snapping rests objects on the right level.
     var SIDEWALK_HEIGHT = 0.18;
 
+    // Fixed positions for the Void's planets, spread across the far sky so they
+    // do not overlap. The first three match the original hand-placed trio (so
+    // the default look is unchanged); the rest extend it to a maximum of nine,
+    // used when that many planet textures are uploaded. `ring` adds a ring.
+    var PLANET_SLOTS = [
+        {r: 72, x: -195, y: 110, z: -340, ring: true, band: [0xc9975f, 0x7d5a37]},
+        {r: 54, x: 205, y: 150, z: -430, ring: false, band: [0x5680bb, 0x223b63]},
+        {r: 24, x: 150, y: 66, z: -270, ring: false, band: [0x9aa0a8, 0x4b5058]},
+        {r: 40, x: -260, y: 60, z: -300, ring: false, band: [0xb06a4a, 0x5c2f22]},
+        {r: 90, x: 60, y: 190, z: -540, ring: true, band: [0x6fae8c, 0x2f5a49]},
+        {r: 30, x: 300, y: 44, z: -360, ring: false, band: [0x8f8fb8, 0x3d3d63]},
+        {r: 48, x: -120, y: 205, z: -470, ring: false, band: [0xc0b070, 0x615636]},
+        {r: 20, x: -40, y: 92, z: -235, ring: false, band: [0x9a9aa2, 0x4b4b52]},
+        {r: 64, x: 250, y: 120, z: -510, ring: true, band: [0xb5734f, 0x5a3626]}
+    ];
+
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
@@ -242,6 +258,12 @@ define('format_mnemo/vr', [], function() {
         this.roadTexture = assets.roadTexture || null;
         this.groundTexture = assets.groundTexture || null;
         this.sidewalkTexture = assets.sidewalkTexture || null;
+        // Void backdrop: an optional equirectangular sky/starfield that replaces
+        // the procedural stars, and up to nine planet-surface maps applied to
+        // the planets (each an equirectangular lat-long image). Only loaded for
+        // the void environment. Empty/absent keeps the procedural look.
+        this.spaceTexture = assets.spaceTexture || null;
+        this.planetTextures = assets.planetTextures || [];
         // Tiling scales (world units per tile) and the size of the ground patch
         // laid around each building. Admin-configurable.
         this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
@@ -586,7 +608,6 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSpace = function() {
         var THREE = this.THREE;
-        this.scene.background = new THREE.Color(0x03040a);
 
         // A cold key light from the distant star, plus a dim fill so the far
         // side of buildings and planets is not pure black.
@@ -595,6 +616,30 @@ define('format_mnemo/vr', [], function() {
         key.position.copy(starDir).multiplyScalar(300);
         this.scene.add(key);
         this.scene.add(new THREE.HemisphereLight(0x223046, 0x05060c, 0.35));
+
+        // An uploaded equirectangular sky replaces the procedural starfield,
+        // nebulae and star sprite; otherwise the bundled procedural backdrop is
+        // built. Planets are drawn either way.
+        if (this.spaceTexture) {
+            this.spaceTexture.mapping = THREE.EquirectangularReflectionMapping;
+            this.scene.background = this.spaceTexture;
+        } else {
+            this.buildStarfield(starDir);
+        }
+
+        this.buildPlanets();
+    };
+
+    /**
+     * Build the procedural Void backdrop used when no sky image is uploaded: a
+     * near-black sky, a dense starfield on a far shell, palette-tinted nebulae
+     * and a bright star halo.
+     *
+     * @param {Object} starDir The unit direction to the star.
+     */
+    Cyberspace.prototype.buildStarfield = function(starDir) {
+        var THREE = this.THREE;
+        this.scene.background = new THREE.Color(0x03040a);
 
         // Dense starfield on a fixed far shell.
         var count = 2600;
@@ -639,12 +684,21 @@ define('format_mnemo/vr', [], function() {
         star.scale.set(70, 70, 1);
         star.position.copy(starDir).multiplyScalar(520);
         this.scene.add(star);
+    };
 
-        // A handful of planets, spread out, lit by the star and gently
-        // self-illuminated so they read as distant worlds rather than holes.
-        this.makePlanet(72, {x: -195, y: 110, z: -340}, [0xc9975f, 0x7d5a37], true);
-        this.makePlanet(54, {x: 205, y: 150, z: -430}, [0x5680bb, 0x223b63], false);
-        this.makePlanet(24, {x: 150, y: 66, z: -270}, [0x9aa0a8, 0x4b5058], false);
+    /**
+     * Place the Void's planets. With planet textures uploaded, one planet per
+     * texture (up to nine) takes its surface from the matching map; otherwise
+     * the original three procedurally-banded planets are drawn. All are lit by
+     * the star and gently self-illuminated so they read as distant worlds.
+     */
+    Cyberspace.prototype.buildPlanets = function() {
+        var texs = this.planetTextures || [];
+        var count = texs.length > 0 ? Math.min(texs.length, PLANET_SLOTS.length) : 3;
+        for (var i = 0; i < count; i++) {
+            var s = PLANET_SLOTS[i];
+            this.makePlanet(s.r, {x: s.x, y: s.y, z: s.z}, s.band, s.ring, texs[i] || null);
+        }
     };
 
     /**
@@ -676,25 +730,31 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Number} radius Planet radius.
      * @param {Object} at Position {x, y, z}.
-     * @param {Array} colours [band A, band B] hex ints.
+     * @param {Array} colours [band A, band B] hex ints (procedural fallback).
      * @param {Boolean} ringed Whether to add a ring.
+     * @param {Object} texture Optional equirectangular surface map; when given
+     *     it is used instead of the procedural banded texture.
      */
-    Cyberspace.prototype.makePlanet = function(radius, at, colours, ringed) {
+    Cyberspace.prototype.makePlanet = function(radius, at, colours, ringed, texture) {
         var THREE = this.THREE;
-        var ctx = this.newCanvasCtx(256);
-        var a = new THREE.Color(colours[0]);
-        var b = new THREE.Color(colours[1]);
-        ctx.fillStyle = '#' + a.getHexString();
-        ctx.fillRect(0, 0, 256, 256);
-        // Horizontal bands with a little turbulence.
-        for (var y = 0; y < 256; y += 4) {
-            var t = 0.5 + 0.5 * Math.sin(y * 0.05 + Math.random() * 0.4);
-            ctx.fillStyle = '#' + a.clone().lerp(b, t).getHexString();
-            ctx.fillRect(0, y, 256, 4 + Math.random() * 3);
-        }
-        var tex = new THREE.CanvasTexture(ctx.canvas);
-        if (tex.colorSpace !== undefined) {
-            tex.colorSpace = THREE.SRGBColorSpace;
+        var tex = texture;
+        if (!tex) {
+            // No uploaded map: paint a procedural banded surface.
+            var ctx = this.newCanvasCtx(256);
+            var a = new THREE.Color(colours[0]);
+            var b = new THREE.Color(colours[1]);
+            ctx.fillStyle = '#' + a.getHexString();
+            ctx.fillRect(0, 0, 256, 256);
+            // Horizontal bands with a little turbulence.
+            for (var y = 0; y < 256; y += 4) {
+                var t = 0.5 + 0.5 * Math.sin(y * 0.05 + Math.random() * 0.4);
+                ctx.fillStyle = '#' + a.clone().lerp(b, t).getHexString();
+                ctx.fillRect(0, y, 256, 4 + Math.random() * 3);
+            }
+            tex = new THREE.CanvasTexture(ctx.canvas);
+            if (tex.colorSpace !== undefined) {
+                tex.colorSpace = THREE.SRGBColorSpace;
+            }
         }
         var planet = new THREE.Mesh(
             new THREE.SphereGeometry(radius, 32, 24),
@@ -6686,7 +6746,8 @@ define('format_mnemo/vr', [], function() {
     function loadSceneAssets(config, THREE) {
         var assets = {
             signFontFamily: null, signTexture: null,
-            roadTexture: null, groundTexture: null, sidewalkTexture: null
+            roadTexture: null, groundTexture: null, sidewalkTexture: null,
+            spaceTexture: null, planetTextures: []
         };
         var jobs = [];
 
@@ -6731,6 +6792,24 @@ define('format_mnemo/vr', [], function() {
             jobs.push(loadBoundedTexture(config.sidewalktextureurl, THREE, true, function(tex) {
                 assets.sidewalkTexture = tex;
             }));
+        }
+
+        // The Void's optional sky and planet maps (equirectangular). Only loaded
+        // for the void environment, since nothing else uses them. Planet maps
+        // keep their upload order so a given slot stays on the same planet.
+        if (config.environment === 'void') {
+            if (config.spacetextureurl) {
+                jobs.push(loadBoundedTexture(config.spacetextureurl, THREE, false, function(tex) {
+                    assets.spaceTexture = tex;
+                }));
+            }
+            var planeturls = config.planettextureurls || [];
+            planeturls.forEach(function(url, index) {
+                assets.planetTextures[index] = null;
+                jobs.push(loadBoundedTexture(url, THREE, false, function(tex) {
+                    assets.planetTextures[index] = tex;
+                }));
+            });
         }
 
         // Never block scene construction on a hung asset request: an external

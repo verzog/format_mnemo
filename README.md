@@ -262,9 +262,20 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
 - **Ground patch size** — the size (world units) of the textured patch laid
   around each building. Set to `0` to disable the patches even when a ground
   texture is configured.
+- **Space background URL** / **Upload space background** — wrap the **Void**
+  environment in your own sky. Supply an **equirectangular (2:1 lat-long)** sky
+  or starfield image (URL or upload; the URL wins). **Leave both blank** to keep
+  the procedural starfield and nebulae. Only used in the Void.
+- **Upload planet textures** — upload up to **nine** equirectangular (2:1
+  lat-long) images to use as the surfaces of the Void's planets; each is applied
+  to one planet in filename order (so the Void shows as many planets as you
+  upload, up to nine). **Leave empty** to keep the procedural banded planets.
+  Only used in the Void.
 
-Road and ground textures are downscaled to a bounded size before reaching the
-GPU (like the sign texture), and tile best with a **seamless / tileable** image.
+All uploaded textures — road, ground, sidewalk, planet and sky — are downscaled
+to a bounded size before reaching the GPU (like the sign texture). The road,
+ground and sidewalk textures tile best with a **seamless / tileable** image; the
+planet and sky images should be **equirectangular (2:1 lat-long)** maps.
 
 ### Preparing a compressed asset pack
 
