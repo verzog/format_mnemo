@@ -1044,10 +1044,11 @@ const scenarios = [
                 THREE, scene: {add: (o) => added.push(o), remove: () => {}},
                 editables: [], sceneObjects: {}, placedObjects: [],
                 config: {canedit: true, strings: {}}, propTemplates: {lamp: tpl},
-                selBox: null, renderer: null,
+                selBox: null, renderer: null, lampLights: 0, palette: {primary: 0x00e5ff},
                 placedBaseY: CS.prototype.placedBaseY,
                 propLabel: CS.prototype.propLabel,
                 setShadow: CS.prototype.setShadow,
+                addLampLight: CS.prototype.addLampLight,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
@@ -1057,7 +1058,7 @@ const scenarios = [
             const ed = self.editables[0];
             const g = ed && ed.group;
             const pass = self.placedObjects.length === 1 && self.placedObjects[0].id === 7 &&
-                ed && ed.objkey === 'placed:7' && ed.emits === true &&
+                ed && ed.objkey === 'placed:7' && ed.emits === true && self.lampLights === 1 &&
                 added.indexOf(g) !== -1 &&
                 Math.abs(g.position.x - 4) < 1e-6 && Math.abs(g.position.z + 6) < 1e-6;
             return {pass, detail: `objkey=${ed && ed.objkey} placed=${self.placedObjects.length}`};
@@ -1188,6 +1189,28 @@ const scenarios = [
                 Math.abs(ed.transform.scale - 2) < 1e-6 && self.sidewalkMeshes.length === 1 &&
                 mesh.userData.mnemoEditable === ed && mesh.material.map.repeat.y === 10;
             return {pass, detail: `key=${ed.objkey} rep=${mesh.material.map.repeat.y}`};
+        }
+    },
+    {
+        name: 'lighting: addLampLight adds a capped point light to a lamp group',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, lampLights: 0, palette: {primary: 0x00e5ff},
+                addLampLight: CS.prototype.addLampLight};
+            const g = new THREE.Group();
+            self.addLampLight(g);
+            const light = g.children.filter(function(c) {
+                return c.isLight;
+            })[0];
+            const added = !!light && light.isPointLight && self.lampLights === 1 &&
+                Math.abs(light.position.y - 3.4) < 1e-6 && light.castShadow === false;
+            // At the cap, no further light is attached.
+            const g2 = new THREE.Group();
+            self.lampLights = 24;
+            self.addLampLight(g2);
+            const capped = g2.children.length === 0 && self.lampLights === 24;
+            return {pass: added && capped, detail: `added=${added} capped=${capped}`};
         }
     }
 ];

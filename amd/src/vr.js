@@ -118,6 +118,9 @@ define('format_mnemo/vr', [], function() {
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
+        // Number of real point lights attached to street lamps so far, capped
+        // so a very long avenue does not spawn an unbounded number of lights.
+        this.lampLights = 0;
         // In-view object editor state (only wired up when config.canedit): the
         // editable objects (buildings and video screens), the current selection,
         // and whether edit mode is on.
@@ -2195,6 +2198,9 @@ define('format_mnemo/vr', [], function() {
             }
             var m = tpl.clone();
             m.position.set(p.x, y, p.z);
+            if (type === 'lamp') {
+                this.addLampLight(m);
+            }
             this.setShadow(m, true);
             this.scene.add(m);
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
@@ -2229,6 +2235,29 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} tpl The model template group.
      * @param {String} kind "lamp" or "barrier".
      */
+    /**
+     * Attach a real point light to a street lamp so it actually illuminates the
+     * reflective road, ground and sidewalks around it (a warm pool with a
+     * specular glint), rather than only glowing at the bulb. The light is a
+     * child of the lamp group, so the editor's brightness slider dims it too.
+     * No shadows (kept cheap), and capped so a long avenue stays performant.
+     *
+     * @param {Object} group The lamp's group.
+     */
+    Cyberspace.prototype.addLampLight = function(group) {
+        if (this.lampLights >= 24) {
+            return;
+        }
+        this.lampLights++;
+        var THREE = this.THREE;
+        // Tie the pool to the course's neon palette so it matches the signage;
+        // physically-based falloff (decay 2) keeps it local to the lamp.
+        var light = new THREE.PointLight(this.palette.primary, 14, 18, 2);
+        light.position.set(0, 3.4, 0);
+        light.castShadow = false;
+        group.add(light);
+    };
+
     Cyberspace.prototype.scatterStreetProps = function(tpl, kind) {
         var road = this.roads[0];
         if (!road) {
@@ -2258,6 +2287,9 @@ define('format_mnemo/vr', [], function() {
                 m.position.set(px, 0, pz);
                 if (s < 0 && kind === 'lamp') {
                     m.rotation.y = Math.PI; // Arm faces the road on both sides.
+                }
+                if (kind === 'lamp') {
+                    this.addLampLight(m);
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
@@ -4509,6 +4541,9 @@ define('format_mnemo/vr', [], function() {
         var y = this.placedBaseY(type);
         var m = tpl.clone();
         m.position.set(x, y, z);
+        if (type === 'lamp') {
+            this.addLampLight(m);
+        }
         this.setShadow(m, true);
         this.scene.add(m);
         this.placedObjects.push({id: id, type: type, x: x, z: z});
