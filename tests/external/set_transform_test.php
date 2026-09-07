@@ -55,6 +55,35 @@ final class set_transform_test extends \advanced_testcase {
     }
 
     /**
+     * The per-axis width/height/depth multipliers are stored (and default to 1
+     * when a caller omits them).
+     */
+    public function test_axis_scales_saved(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $page = $this->getDataGenerator()->create_module('page', ['course' => $course->id]);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        // Positional order matches execute(): cmid, scale, offsets, rotation,
+        // then scalex/scaley/scalez.
+        set_transform::execute($page->cmid, 1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.5, 3.0);
+
+        $row = $DB->get_record('format_mnemo_building', ['cmid' => $page->cmid], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(2.0, (float)$row->scalex, 1e-6);
+        $this->assertEqualsWithDelta(0.5, (float)$row->scaley, 1e-6);
+        $this->assertEqualsWithDelta(3.0, (float)$row->scalez, 1e-6);
+
+        // A call that omits them leaves the default of 1.
+        $page2 = $this->getDataGenerator()->create_module('page', ['course' => $course->id]);
+        set_transform::execute($page2->cmid, 1.0, 0.0, 0.0, 0.0, 0.0);
+        $row2 = $DB->get_record('format_mnemo_building', ['cmid' => $page2->cmid], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(1.0, (float)$row2->scalex, 1e-6);
+    }
+
+    /**
      * Out-of-range values are clamped, and the rotation is normalised.
      */
     public function test_values_are_clamped(): void {

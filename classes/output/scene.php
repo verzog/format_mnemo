@@ -223,6 +223,9 @@ class scene implements renderable, templatable {
         foreach ($rows as $row) {
             $map[$row->objkey] = [
                 'scale' => (float)$row->scale,
+                'sx' => isset($row->scalex) ? (float)$row->scalex : 1.0,
+                'sy' => isset($row->scaley) ? (float)$row->scaley : 1.0,
+                'sz' => isset($row->scalez) ? (float)$row->scalez : 1.0,
                 'x' => (float)$row->offsetx,
                 'y' => (float)$row->offsety,
                 'z' => (float)$row->offsetz,
@@ -274,21 +277,28 @@ class scene implements renderable, templatable {
      * it is the default (so the scene payload stays small).
      *
      * @param stdClass|null $row A preload_building_rows() row, or null.
-     * @return array{scale: float, x: float, y: float, z: float, rot: float}|null
+     * @return array{scale: float, sx: float, sy: float, sz: float, x: float, y: float, z: float, rot: float}|null
      */
     protected function row_transform(?stdClass $row): ?array {
         if ($row === null) {
             return null;
         }
         $scale = (float)$row->scale;
+        $sx = isset($row->scalex) ? (float)$row->scalex : 1.0;
+        $sy = isset($row->scaley) ? (float)$row->scaley : 1.0;
+        $sz = isset($row->scalez) ? (float)$row->scalez : 1.0;
         $x = (float)$row->offsetx;
         $y = (float)$row->offsety;
         $z = (float)$row->offsetz;
         $rot = (float)$row->rotation;
-        if ($scale == 1.0 && $x == 0.0 && $y == 0.0 && $z == 0.0 && $rot == 0.0) {
+        if (
+            $scale == 1.0 && $sx == 1.0 && $sy == 1.0 && $sz == 1.0 &&
+                $x == 0.0 && $y == 0.0 && $z == 0.0 && $rot == 0.0
+        ) {
             return null;
         }
-        return ['scale' => $scale, 'x' => $x, 'y' => $y, 'z' => $z, 'rot' => $rot];
+        return ['scale' => $scale, 'sx' => $sx, 'sy' => $sy, 'sz' => $sz,
+            'x' => $x, 'y' => $y, 'z' => $z, 'rot' => $rot];
     }
 
     /**
@@ -480,10 +490,12 @@ class scene implements renderable, templatable {
             'signtextureurl' => $this->resolve_asset_url('signtextureurl', 'signtexture'),
             'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
             'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
+            'sidewalktextureurl' => $this->resolve_asset_url('sidewalktextureurl', 'sidewalktexture'),
             // Texture tiling scale (world units per tile) and the size of the
             // ground patch laid around each building, with sensible defaults.
             'roadtexturescale' => $this->int_config('roadtexturescale', 8),
             'groundtexturescale' => $this->int_config('groundtexturescale', 8),
+            'sidewalktexturescale' => $this->int_config('sidewalktexturescale', 4),
             'groundpatchsize' => $this->int_config('groundpatchsize', 14),
             'strings' => [
                 'entervr' => get_string('entervr', 'format_mnemo'),
@@ -513,7 +525,11 @@ class scene implements renderable, templatable {
                 'placevehicle' => get_string('placevehicle', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
+                'editsidewalksurface' => get_string('editsidewalksurface', 'format_mnemo'),
                 'editscale' => get_string('editscale', 'format_mnemo'),
+                'editwidth' => get_string('editwidth', 'format_mnemo'),
+                'editheight' => get_string('editheight', 'format_mnemo'),
+                'editdepth' => get_string('editdepth', 'format_mnemo'),
                 'editmove' => get_string('editmove', 'format_mnemo'),
                 'editrotate' => get_string('editrotate', 'format_mnemo'),
                 'editsave' => get_string('editsave', 'format_mnemo'),

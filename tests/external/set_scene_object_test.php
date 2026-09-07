@@ -57,6 +57,31 @@ final class set_scene_object_test extends \advanced_testcase {
     }
 
     /**
+     * The per-axis width/height/depth multipliers are stored for a scene object.
+     */
+    public function test_axis_scales_saved(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        // Positional order matches execute(): ... brightness, then scalex/y/z.
+        set_scene_object::execute($course->id, 'lamp:1', 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.5, 2.0, 0.5);
+
+        $row = $DB->get_record(
+            'format_mnemo_sceneobj',
+            ['courseid' => $course->id, 'objkey' => 'lamp:1'],
+            '*',
+            MUST_EXIST
+        );
+        $this->assertEqualsWithDelta(1.5, (float)$row->scalex, 1e-6);
+        $this->assertEqualsWithDelta(2.0, (float)$row->scaley, 1e-6);
+        $this->assertEqualsWithDelta(0.5, (float)$row->scalez, 1e-6);
+    }
+
+    /**
      * A second save for the same slot key updates the row rather than duplicating.
      */
     public function test_save_upserts_by_slot_key(): void {
