@@ -236,6 +236,13 @@ define('format_mnemo/vr', [], function() {
         // Bumped on each live state refresh so a slower earlier response cannot
         // overwrite a newer one (overlays closed in quick succession).
         this.stateRefreshSeq = 0;
+        // The native in-headset reader panel (built lazily); readerOpen gates
+        // thumbstick scrolling and locomotion while it is up.
+        this.reader = null;
+        this.readerOpen = false;
+        // Bumped on each reader fetch so a late response for a closed or
+        // superseded reader is dropped.
+        this.readerSeq = 0;
         this.ads = []; // Holographic billboards that flicker.
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
@@ -3362,6 +3369,8 @@ define('format_mnemo/vr', [], function() {
             width: Math.min(w * 0.92, 3.4),
             height: 1.4,
             url: act.url,
+            cmid: act.id,
+            reader: act.reader,
             post: false
         });
         sign.group.position.set(0, Math.min(h - 1.1, 2.6), d / 2 + 0.12);
@@ -3752,6 +3761,8 @@ define('format_mnemo/vr', [], function() {
             panel.userData = {
                 url: opts.url,
                 name: opts.text,
+                cmid: opts.cmid || null,
+                reader: !!opts.reader,
                 material: frameMat,
                 baseColour: opts.colour,
                 interactive: true
@@ -3951,12 +3962,14 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var ud = target.userData;
-        if (ud.videoToggle) {
+        if (ud.readerAction) {
+            this.readerControl(ud.readerAction);
+        } else if (ud.videoToggle) {
             this.toggleVideo(ud.videoToggle);
         } else if (ud.videoSrc) {
             this.startVideo(target);
         } else if (ud.url) {
-            this.openActivity(ud.url, ud.name);
+            this.openActivity(ud.url, ud.name, {cmid: ud.cmid, reader: ud.reader});
         }
     };
 
@@ -4291,7 +4304,16 @@ define('format_mnemo/vr', [], function() {
         var hit = this.intersectController(controller);
         var target = (hit && hit.object) || controller.userData.onNode;
         controller.userData.onNode = null;
-        if (target && target.userData && (target.userData.url || target.userData.videoToggle)) {
+        // A click on the reader's content plane maps to the link under the ray.
+        if (hit && hit.object.userData && hit.object.userData.readerContent) {
+            if (this.gestures) {
+                this.gestures.pulse(controller.userData.handedness, 0.5, 30);
+            }
+            this.readerHitLink(hit.uv);
+            return;
+        }
+        if (target && target.userData &&
+                (target.userData.url || target.userData.videoToggle || target.userData.readerAction)) {
             // A firm confirmation buzz before acting on the node.
             if (this.gestures) {
                 this.gestures.pulse(controller.userData.handedness, 0.6, 40);
@@ -5296,7 +5318,12 @@ define('format_mnemo/vr', [], function() {
         this.raycaster.setFromCamera(this.pointerNdc, this.camera);
         var hits = this.raycaster.intersectObjects(this.interactive, false);
         if (hits.length) {
-            this.activate(hits[0].object);
+            var obj = hits[0].object;
+            if (obj.userData && obj.userData.readerContent) {
+                this.readerHitLink(hits[0].uv);
+            } else {
+                this.activate(obj);
+            }
         }
     };
 
@@ -5855,12 +5882,22 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {String} url The activity view URL.
      * @param {String} name The activity name (panel heading).
+     * @param {Object} opts Optional {cmid, reader}: a readable activity opens
+     *     the native 3D reader inside a headset instead of navigating away.
      */
-    Cyberspace.prototype.openActivity = function(url, name) {
+    Cyberspace.prototype.openActivity = function(url, name, opts) {
         if (!url) {
             return;
         }
+        opts = opts || {};
         if (this.renderer.xr.isPresenting) {
+            // The page DOM is invisible in an immersive session. A readable
+            // activity is shown on the native reader panel; anything else falls
+            // back to navigating (which ends the session).
+            if (opts.reader && opts.cmid) {
+                this.openReader(opts.cmid, name, url);
+                return;
+            }
             this.open(url);
             return;
         }
@@ -6018,6 +6055,871 @@ define('format_mnemo/vr', [], function() {
         // refresh the scene's states (sign colours and completion ticks) so the
         // learner sees it without reloading the page.
         this.refreshActivityStates();
+    };
+
+    /**
+     * Fetch a readable activity's content and show it on the native 3D reader
+     * panel (used inside an immersive session, where the page DOM is invisible).
+     * Records the module view so completion-on-view fires as opening the page
+     * would; on a fetch failure it falls back to navigating to the activity.
+     *
+     * @param {Number} cmid The course-module id.
+     * @param {String} name The activity name (reader heading).
+     * @param {String} url The activity view URL (view ping and fallback).
+     * @param {Number} chapterid Optional book chapter id (0 for the first).
+     */
+    Cyberspace.prototype.openReader = function(cmid, name, url, chapterid) {
+        var self = this;
+        if (!window.require || !cmid) {
+            this.open(url);
+            return;
+        }
+        var seq = ++this.readerSeq;
+        var request = {
+            methodname: 'format_mnemo_get_content',
+            args: {cmid: cmid, chapterid: chapterid || 0}
+        };
+        this.recordView(url);
+        window.require(['core/ajax'], function(ajax) {
+            ajax.call([request])[0].then(function(res) {
+                // Drop a response for a reader that was closed or superseded.
+                if (self.readerSeq !== seq) {
+                    return null;
+                }
+                self.showReader(res, name, url, cmid);
+                return null;
+            }).catch(function() {
+                // Could not fetch the content; navigate to the activity instead
+                // - but only if this request is still the current one (the user
+                // may have closed the reader or opened another chapter).
+                if (self.readerSeq === seq) {
+                    self.open(url);
+                }
+            });
+        });
+    };
+
+    /**
+     * Show fetched content on the reader panel: store it, lay it out, render the
+     * first window, place the panel in front of the viewer and make its controls
+     * clickable.
+     *
+     * @param {Object} res The get_content response.
+     * @param {String} name The activity name.
+     * @param {String} url The activity view URL.
+     * @param {Number} cmid The course-module id.
+     */
+    Cyberspace.prototype.showReader = function(res, name, url, cmid) {
+        var r = this.reader || this.buildReaderPanel();
+        r.cmid = cmid;
+        r.url = url;
+        r.name = name;
+        r.blocks = (res && res.blocks) || [];
+        r.chapters = (res && res.chapters) || [];
+        r.chapterid = (res && res.chapterid) || 0;
+        r.scroll = 0;
+        this.setReaderTitle((res && res.title) || name || '');
+        this.updateChapterControls();
+        this.layoutReader();
+        this.renderReaderCanvas();
+        this.positionReaderInFront();
+        r.group.visible = true;
+        this.readerOpen = true;
+        this.addReaderInteractive();
+    };
+
+    /**
+     * Build the reader panel once: a dark backing board, a title strip, the
+     * content plane (a canvas texture the layout renders into), and the control
+     * buttons (close, scroll, chapter navigation). Reused by later opens.
+     *
+     * @return {Object} The reader record.
+     */
+    Cyberspace.prototype.buildReaderPanel = function() {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        group.visible = false;
+        group.renderOrder = 20;
+
+        var W = 1000;
+        var H = 1360;
+        // World size in metres (portrait), keeping the canvas aspect.
+        var worldW = 1.5;
+        var worldH = worldW * (H / W);
+
+        // Backing board, a touch larger than the content, with the title strip.
+        var board = new THREE.Mesh(
+            new THREE.PlaneGeometry(worldW + 0.12, worldH + 0.28),
+            new THREE.MeshBasicMaterial({color: 0x05070d, transparent: true, opacity: 0.94})
+        );
+        board.position.z = -0.01;
+        group.add(board);
+
+        var titleCanvas = document.createElement('canvas');
+        titleCanvas.width = W;
+        titleCanvas.height = 90;
+        var titleTex = new THREE.CanvasTexture(titleCanvas);
+        if (titleTex.colorSpace !== undefined) {
+            titleTex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var titleMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(worldW, worldW * (90 / W)),
+            new THREE.MeshBasicMaterial({map: titleTex, transparent: true})
+        );
+        titleMesh.position.set(0, worldH / 2 + 0.09, 0.001);
+        group.add(titleMesh);
+
+        var canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        var tex = new THREE.CanvasTexture(canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var content = new THREE.Mesh(
+            new THREE.PlaneGeometry(worldW, worldH),
+            new THREE.MeshBasicMaterial({map: tex, transparent: true})
+        );
+        content.position.set(0, 0, 0.001);
+        // The content plane is a raycast target so a click on a rendered link
+        // can be mapped (via the hit uv) to the link under it.
+        content.userData = {readerContent: true, interactive: true};
+        group.add(content);
+
+        this.reader = {
+            group: group, board: board, content: content,
+            canvas: canvas, ctx: canvas.getContext('2d'), tex: tex,
+            titleCanvas: titleCanvas, titleCtx: titleCanvas.getContext('2d'), titleTex: titleTex,
+            W: W, H: H, margin: 56, worldW: worldW, worldH: worldH,
+            blocks: [], items: [], images: {}, links: [], contentHeight: 0, scroll: 0,
+            chapters: [], chapterid: 0, cmid: null, url: null, name: null,
+            buttons: {}, inInteractive: false
+        };
+        this.buildReaderButtons(worldW, worldH);
+        if (this.scene) {
+            this.scene.add(group);
+        }
+        return this.reader;
+    };
+
+    /**
+     * Build the reader's control buttons (close, scroll up/down, previous/next
+     * chapter) as glyph planes carrying a readerAction, positioned around the
+     * panel. Chapter buttons start hidden until a book is shown.
+     *
+     * @param {Number} worldW The content width in metres.
+     * @param {Number} worldH The content height in metres.
+     */
+    Cyberspace.prototype.buildReaderButtons = function(worldW, worldH) {
+        var half = worldW / 2;
+        var edge = worldH / 2;
+        var defs = [
+            {action: 'close', glyph: '✕', x: half + 0.02, y: edge + 0.09},
+            // Open the real activity page (leaves the immersive session): the
+            // only way to start a quiz attempt or make a submission, and a full
+            // fallback for pages and books.
+            {action: 'open', glyph: '↗', x: -half - 0.02, y: edge + 0.09},
+            {action: 'scrollup', glyph: '▲', x: half + 0.02, y: 0.24},
+            {action: 'scrolldown', glyph: '▼', x: half + 0.02, y: -0.24},
+            {action: 'prevchapter', glyph: '❮', x: -0.28, y: -edge - 0.12},
+            {action: 'nextchapter', glyph: '❯', x: 0.28, y: -edge - 0.12}
+        ];
+        for (var i = 0; i < defs.length; i++) {
+            var btn = this.makeReaderButton(defs[i].glyph, defs[i].action);
+            btn.position.set(defs[i].x, defs[i].y, 0.004);
+            this.reader.group.add(btn);
+            this.reader.buttons[defs[i].action] = btn;
+        }
+    };
+
+    /**
+     * A single reader control button: a small rounded glyph plane whose userData
+     * carries the action the picker dispatches to readerControl.
+     *
+     * @param {String} glyph The button glyph.
+     * @param {String} action The reader action id.
+     * @return {Object} A Three.Mesh.
+     */
+    Cyberspace.prototype.makeReaderButton = function(glyph, action) {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        var ctx = canvas.getContext('2d');
+        var accent = this.readerAccent();
+        ctx.fillStyle = 'rgba(10,16,26,0.92)';
+        this.roundRect(ctx, 6, 6, 116, 116, 22);
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = accent;
+        this.roundRect(ctx, 6, 6, 116, 116, 22);
+        ctx.stroke();
+        ctx.fillStyle = accent;
+        ctx.font = '600 66px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, 64, 70);
+        var tex = new THREE.CanvasTexture(canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.16, 0.16),
+            new THREE.MeshBasicMaterial({map: tex, transparent: true})
+        );
+        mesh.userData = {readerAction: action, material: mesh.material, baseColour: 0xffffff, interactive: true};
+        return mesh;
+    };
+
+    /**
+     * The reader's accent colour (the course neon primary) as a CSS hex string.
+     *
+     * @return {String} A #rrggbb colour.
+     */
+    Cyberspace.prototype.readerAccent = function() {
+        var c = (this.palette && this.palette.primary) || 0x39d0ff;
+        return '#' + ('000000' + c.toString(16)).slice(-6);
+    };
+
+    /**
+     * Draw a rounded rectangle path on a 2D context (path only; the caller fills
+     * or strokes it).
+     *
+     * @param {Object} ctx The 2D context.
+     * @param {Number} x Left.
+     * @param {Number} y Top.
+     * @param {Number} w Width.
+     * @param {Number} h Height.
+     * @param {Number} rad Corner radius.
+     */
+    Cyberspace.prototype.roundRect = function(ctx, x, y, w, h, rad) {
+        var rr = Math.min(rad, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+    };
+
+    /**
+     * Show or hide the chapter navigation buttons: only a book with more than
+     * one chapter needs them.
+     */
+    Cyberspace.prototype.updateChapterControls = function() {
+        var r = this.reader;
+        var many = r.chapters && r.chapters.length > 1;
+        if (r.buttons.prevchapter) {
+            r.buttons.prevchapter.visible = many;
+        }
+        if (r.buttons.nextchapter) {
+            r.buttons.nextchapter.visible = many;
+        }
+    };
+
+    /**
+     * Draw the reader's title strip.
+     *
+     * @param {String} title The activity (or chapter) title.
+     */
+    Cyberspace.prototype.setReaderTitle = function(title) {
+        var r = this.reader;
+        var ctx = r.titleCtx;
+        ctx.clearRect(0, 0, r.W, 90);
+        ctx.fillStyle = this.readerAccent();
+        ctx.font = '600 46px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        var text = title || '';
+        // Trim an over-long title to the strip width.
+        while (text && ctx.measureText(text).width > r.W - 40) {
+            text = text.slice(0, -2);
+        }
+        if (text !== (title || '')) {
+            text += '…';
+        }
+        ctx.fillText(text, r.margin, 50);
+        r.titleTex.needsUpdate = true;
+    };
+
+    /**
+     * Place the reader panel about two metres in front of the viewer, at eye
+     * level, facing them - so it is comfortable to read and does not follow the
+     * head (which would be nauseating).
+     */
+    Cyberspace.prototype.positionReaderInFront = function() {
+        var THREE = this.THREE;
+        var r = this.reader;
+        var camPos = this.camera.getWorldPosition(new THREE.Vector3());
+        var dir = this.camera.getWorldDirection(new THREE.Vector3());
+        dir.y = 0;
+        if (dir.lengthSq() < 1e-6) {
+            dir.set(0, 0, -1);
+        }
+        dir.normalize();
+        var pos = camPos.clone().add(dir.multiplyScalar(2.2));
+        pos.y = camPos.y - 0.05;
+        r.group.position.copy(pos);
+        r.group.lookAt(camPos.x, pos.y, camPos.z);
+    };
+
+    /**
+     * Add the reader's control buttons to the interactive set so the pointer and
+     * XR controllers can click them (once; guarded against duplicates).
+     */
+    Cyberspace.prototype.addReaderInteractive = function() {
+        var r = this.reader;
+        if (r.inInteractive) {
+            return;
+        }
+        this.interactive.push(r.content);
+        for (var key in r.buttons) {
+            if (Object.prototype.hasOwnProperty.call(r.buttons, key)) {
+                this.interactive.push(r.buttons[key]);
+            }
+        }
+        r.inInteractive = true;
+    };
+
+    /**
+     * Remove the reader's control buttons from the interactive set.
+     */
+    Cyberspace.prototype.removeReaderInteractive = function() {
+        var r = this.reader;
+        if (!r || !r.inInteractive) {
+            return;
+        }
+        var remove = function(list, obj) {
+            var idx = list.indexOf(obj);
+            if (idx !== -1) {
+                list.splice(idx, 1);
+            }
+        };
+        remove(this.interactive, r.content);
+        for (var key in r.buttons) {
+            if (Object.prototype.hasOwnProperty.call(r.buttons, key)) {
+                remove(this.interactive, r.buttons[key]);
+            }
+        }
+        r.inInteractive = false;
+    };
+
+    /**
+     * Dispatch a reader control action (from a clicked button).
+     *
+     * @param {String} action One of close, scrollup, scrolldown, prevchapter,
+     *     nextchapter.
+     */
+    Cyberspace.prototype.readerControl = function(action) {
+        if (action === 'close') {
+            this.closeReader();
+        } else if (action === 'open') {
+            // Leave the reader and navigate to the full activity page.
+            var url = this.reader && this.reader.url;
+            this.readerSeq++;
+            this.readerOpen = false;
+            if (url) {
+                this.open(url);
+            }
+        } else if (action === 'scrollup') {
+            this.scrollReader(-this.readerPageStep());
+        } else if (action === 'scrolldown') {
+            this.scrollReader(this.readerPageStep());
+        } else if (action === 'prevchapter') {
+            this.stepChapter(-1);
+        } else if (action === 'nextchapter') {
+            this.stepChapter(1);
+        }
+    };
+
+    /**
+     * Map a click on the content plane (by its hit uv) to a rendered link, and
+     * open that link's target (leaving the immersive session, like the open
+     * control). A click that falls on no link does nothing.
+     *
+     * @param {Object} uv The hit's texture coordinate ({x, y} in 0..1), or null.
+     */
+    Cyberspace.prototype.readerHitLink = function(uv) {
+        var r = this.reader;
+        if (!uv || !r) {
+            return;
+        }
+        // The texture's v axis runs bottom-to-top, the canvas y top-to-bottom.
+        var px = uv.x * r.W;
+        var py = (1 - uv.y) * r.H + r.scroll;
+        for (var i = 0; i < r.links.length; i++) {
+            var link = r.links[i];
+            if (px >= link.x && px <= link.x + link.w && py >= link.y && py <= link.y + link.h) {
+                this.readerSeq++;
+                this.readerOpen = false;
+                this.open(link.href);
+                return;
+            }
+        }
+    };
+
+    /**
+     * The scroll distance for one page button press (most of a screenful).
+     *
+     * @return {Number} Pixels.
+     */
+    Cyberspace.prototype.readerPageStep = function() {
+        return this.reader ? this.reader.H * 0.85 : 0;
+    };
+
+    /**
+     * Scroll the reader content by a pixel delta, clamped to the document, and
+     * re-render the visible window.
+     *
+     * @param {Number} deltaPx The scroll delta in canvas pixels.
+     */
+    Cyberspace.prototype.scrollReader = function(deltaPx) {
+        var r = this.reader;
+        if (!r) {
+            return;
+        }
+        var max = Math.max(0, r.contentHeight - r.H);
+        r.scroll = Math.max(0, Math.min(max, r.scroll + deltaPx));
+        this.renderReaderCanvas();
+    };
+
+    /**
+     * Move to an adjacent book chapter (by fetching it), if one exists.
+     *
+     * @param {Number} dir -1 for the previous chapter, +1 for the next.
+     */
+    Cyberspace.prototype.stepChapter = function(dir) {
+        var r = this.reader;
+        if (!r || !r.chapters || r.chapters.length < 2) {
+            return;
+        }
+        var idx = -1;
+        for (var i = 0; i < r.chapters.length; i++) {
+            if (r.chapters[i].id === r.chapterid) {
+                idx = i;
+                break;
+            }
+        }
+        var target = idx + dir;
+        if (target < 0 || target >= r.chapters.length) {
+            return;
+        }
+        this.openReader(r.cmid, r.name, r.url, r.chapters[target].id);
+    };
+
+    /**
+     * Hide the reader, release its controls and refresh the scene's activity
+     * states (reading may have satisfied completion-on-view).
+     */
+    Cyberspace.prototype.closeReader = function() {
+        if (!this.reader) {
+            return;
+        }
+        // Invalidate any in-flight fetch so a late response cannot reopen the
+        // panel (success) or navigate away (failure) after the user closed it.
+        this.readerSeq++;
+        this.reader.group.visible = false;
+        this.readerOpen = false;
+        this.removeReaderInteractive();
+        this.refreshActivityStates();
+    };
+
+    /**
+     * Lay the content blocks out top to bottom into positioned items (with
+     * pre-measured, wrapped lines), recording the total document height. Called
+     * on load and whenever an image finishes loading and changes the flow.
+     */
+    Cyberspace.prototype.layoutReader = function() {
+        var r = this.reader;
+        var ctx = r.ctx;
+        var maxW = r.W - r.margin * 2;
+        var y = r.margin;
+        r.items = [];
+        r.links = [];
+        for (var i = 0; i < r.blocks.length; i++) {
+            y = this.layoutBlock(ctx, r.blocks[i], y, maxW);
+        }
+        r.contentHeight = y + r.margin;
+    };
+
+    /**
+     * Lay out one block, appending its item(s) and returning the next y.
+     *
+     * @param {Object} ctx The measuring context.
+     * @param {Object} block The content block.
+     * @param {Number} y The current y (top of this block).
+     * @param {Number} maxW The wrap width.
+     * @return {Number} The y below this block.
+     */
+    Cyberspace.prototype.layoutBlock = function(ctx, block, y, maxW) {
+        if (block.type === 'image') {
+            return this.layoutImage(block, y, maxW);
+        }
+        var spec = this.readerBlockSpec(block);
+        ctx.font = spec.font;
+        var indent = block.type === 'listitem' ? 44 : 0;
+        var prefix = this.listPrefix(block);
+        // A preformatted block keeps its own line breaks and spacing; everything
+        // else is wrapped from a whitespace-collapsed word stream.
+        var lines = block.pre ? this.preLines(ctx, block)
+            : this.wrapReaderWords(ctx, this.readerWords(block), maxW - indent);
+        var lineH = Math.round(spec.size * 1.34);
+        var itemx = this.reader.margin + indent;
+        var itemy = y + spec.above;
+        this.reader.items.push({
+            kind: 'text', block: block, spec: spec, prefix: prefix,
+            x: itemx, y: itemy, lines: lines, lineH: lineH
+        });
+        this.collectReaderLinks(ctx, lines, itemx, itemy, lineH, spec.size);
+        return y + spec.above + lines.length * lineH + spec.below;
+    };
+
+    /**
+     * Split a preformatted block into physical lines (preserving spacing), each
+     * a single unwrapped run, so code and other whitespace-sensitive content is
+     * not reflowed.
+     *
+     * @param {Object} ctx The measuring context (font already set).
+     * @param {Object} block The preformatted block.
+     * @return {Array} Lines, each an array with one {text, href, w}.
+     */
+    Cyberspace.prototype.preLines = function(ctx, block) {
+        var runs = block.runs || [];
+        var text = '';
+        for (var i = 0; i < runs.length; i++) {
+            text += runs[i].text;
+        }
+        var raw = text.replace(/\t/g, '    ').split('\n');
+        var lines = [];
+        for (var l = 0; l < raw.length; l++) {
+            lines.push([{text: raw[l], href: null, w: ctx.measureText(raw[l]).width}]);
+        }
+        return lines.length ? lines : [[]];
+    };
+
+    /**
+     * Record the document-space hit rectangle of every linked word in a laid-out
+     * text item, so a click on the content plane can be mapped to a link.
+     *
+     * @param {Object} ctx The measuring context (font already set).
+     * @param {Array} lines The item's wrapped lines.
+     * @param {Number} x0 The item's left x.
+     * @param {Number} y0 The item's top y (document space).
+     * @param {Number} lineH The line height.
+     * @param {Number} size The font size (link box height).
+     */
+    Cyberspace.prototype.collectReaderLinks = function(ctx, lines, x0, y0, lineH, size) {
+        var space = ctx.measureText(' ').width;
+        for (var l = 0; l < lines.length; l++) {
+            var x = x0;
+            var line = lines[l];
+            for (var w = 0; w < line.length; w++) {
+                if (line[w].href) {
+                    this.reader.links.push({
+                        x: x, y: y0 + l * lineH, w: line[w].w, h: size, href: line[w].href
+                    });
+                }
+                x += line[w].w + space;
+            }
+        }
+    };
+
+    /**
+     * The font, size and vertical spacing for a text block by its type/level.
+     *
+     * @param {Object} block The content block.
+     * @return {Object} {font, size, colour, above, below}.
+     */
+    Cyberspace.prototype.readerBlockSpec = function(block) {
+        var sizes = {'1': 54, '2': 46, '3': 40, '4': 36, '5': 32, '6': 30};
+        if (block.type === 'heading') {
+            var hs = sizes[block.level] || 34;
+            return {font: '700 ' + hs + 'px system-ui, sans-serif', size: hs,
+                colour: '#ffffff', above: Math.round(hs * 0.5), below: Math.round(hs * 0.28)};
+        }
+        if (block.pre) {
+            return {font: '26px ui-monospace, monospace', size: 26,
+                colour: '#c7d4e0', above: 12, below: 16};
+        }
+        if (block.quote || block.caption) {
+            return {font: 'italic 28px system-ui, sans-serif', size: 28,
+                colour: '#aebccb', above: 10, below: 16};
+        }
+        return {font: '30px system-ui, sans-serif', size: 30,
+            colour: '#e6edf3', above: block.type === 'listitem' ? 6 : 12,
+            below: block.type === 'listitem' ? 6 : 16};
+    };
+
+    /**
+     * The bullet or number prefix for a list item.
+     *
+     * @param {Object} block The content block.
+     * @return {String} The prefix (empty for non-list items).
+     */
+    Cyberspace.prototype.listPrefix = function(block) {
+        if (block.type !== 'listitem') {
+            return '';
+        }
+        return block.ordered ? (block.index || 1) + '.' : '•';
+    };
+
+    /**
+     * Flatten a block's runs (or text) into a word stream, each word carrying
+     * any link href so it can be styled.
+     *
+     * @param {Object} block The content block.
+     * @return {Array} Words as {text, href}.
+     */
+    Cyberspace.prototype.readerWords = function(block) {
+        var words = [];
+        var runs = block.runs || (block.text ? [{text: block.text}] : []);
+        for (var i = 0; i < runs.length; i++) {
+            var parts = String(runs[i].text).split(/\s+/);
+            for (var p = 0; p < parts.length; p++) {
+                if (parts[p] !== '') {
+                    words.push({text: parts[p], href: runs[i].href || null});
+                }
+            }
+        }
+        return words;
+    };
+
+    /**
+     * Greedily wrap a word stream to a maximum width, pre-measuring each word so
+     * rendering does not measure again.
+     *
+     * @param {Object} ctx The measuring context (font already set).
+     * @param {Array} words Words as {text, href}.
+     * @param {Number} maxW The wrap width.
+     * @return {Array} Lines, each an array of {text, href, w}.
+     */
+    Cyberspace.prototype.wrapReaderWords = function(ctx, words, maxW) {
+        var lines = [];
+        var line = [];
+        var width = 0;
+        var space = ctx.measureText(' ').width;
+        for (var i = 0; i < words.length; i++) {
+            var w = ctx.measureText(words[i].text).width;
+            var add = (line.length ? space : 0) + w;
+            if (line.length && width + add > maxW) {
+                lines.push(line);
+                line = [];
+                width = 0;
+                add = w;
+            }
+            line.push({text: words[i].text, href: words[i].href, w: w});
+            width += add;
+        }
+        if (line.length) {
+            lines.push(line);
+        }
+        return lines.length ? lines : [[]];
+    };
+
+    /**
+     * Lay out an image block, reserving its (aspect-correct) height and kicking
+     * off the load when the pixels are not cached yet.
+     *
+     * @param {Object} block The image block.
+     * @param {Number} y The current y.
+     * @param {Number} maxW The available width.
+     * @return {Number} The y below the image.
+     */
+    Cyberspace.prototype.layoutImage = function(block, y, maxW) {
+        var cache = this.reader.images[block.src];
+        var iw = maxW;
+        var ih;
+        if (cache && cache.ready) {
+            var nat = cache.img;
+            var scale = nat.naturalWidth > maxW ? maxW / nat.naturalWidth : 1;
+            iw = Math.round(nat.naturalWidth * scale);
+            ih = Math.round(nat.naturalHeight * scale);
+        } else {
+            var ratio = (block.width > 0 && block.height > 0) ? block.height / block.width : 0.6;
+            ih = Math.round(maxW * ratio);
+            this.loadReaderImage(block.src);
+        }
+        ih = Math.min(ih, 900);
+        this.reader.items.push({
+            kind: 'image', src: block.src, alt: block.alt || '',
+            x: this.reader.margin + Math.round((maxW - iw) / 2), y: y + 10, w: iw, h: ih
+        });
+        return y + 10 + ih + 20;
+    };
+
+    /**
+     * Load an inline image once, then re-layout and re-render so it flows in at
+     * its true size. A same-origin image (a Moodle pluginfile) loads with the
+     * session cookie and does not taint the canvas; a cross-origin image is
+     * requested anonymously (CORS) so drawing it cannot taint the canvas - if
+     * the remote host sends no CORS headers the load simply fails and a
+     * placeholder is shown instead.
+     *
+     * @param {String} src The image URL.
+     */
+    Cyberspace.prototype.loadReaderImage = function(src) {
+        var self = this;
+        if (!src || this.reader.images[src]) {
+            return;
+        }
+        var entry = {img: null, ready: false};
+        this.reader.images[src] = entry;
+        if (typeof Image === 'undefined') {
+            return;
+        }
+        var img = new Image();
+        entry.img = img;
+        if (this.isCrossOrigin(src)) {
+            img.crossOrigin = 'anonymous';
+        }
+        img.onload = function() {
+            entry.ready = true;
+            if (self.readerOpen) {
+                self.layoutReader();
+                // A loaded image's true height can differ from the reserved
+                // placeholder, so clamp the scroll to the new document bounds
+                // before rendering (avoids a gap past the end).
+                var max = Math.max(0, self.reader.contentHeight - self.reader.H);
+                self.reader.scroll = Math.min(self.reader.scroll, max);
+                self.renderReaderCanvas();
+            }
+        };
+        img.onerror = function() {
+            // Leave a placeholder in the flow if the image cannot be loaded.
+        };
+        img.src = src;
+    };
+
+    /**
+     * Whether a URL points to a different origin than the page (so it must be
+     * loaded with CORS to avoid tainting the canvas).
+     *
+     * @param {String} src The URL.
+     * @return {Boolean} True when cross-origin.
+     */
+    Cyberspace.prototype.isCrossOrigin = function(src) {
+        if (/^data:/i.test(src)) {
+            return false;
+        }
+        try {
+            return new URL(src, window.location.href).origin !== window.location.origin;
+        } catch (e) {
+            // A URL that will not parse is treated as cross-origin (safer).
+            return true;
+        }
+    };
+
+    /**
+     * Render the visible window of the laid-out document into the content canvas
+     * and flag the texture for upload, plus a slim scroll indicator.
+     */
+    Cyberspace.prototype.renderReaderCanvas = function() {
+        var r = this.reader;
+        var ctx = r.ctx;
+        ctx.fillStyle = '#0b1018';
+        ctx.fillRect(0, 0, r.W, r.H);
+        var top = r.scroll;
+        var bottom = top + r.H;
+        for (var i = 0; i < r.items.length; i++) {
+            var item = r.items[i];
+            var h = item.kind === 'image' ? item.h : item.lines.length * item.lineH;
+            if (item.y + h < top || item.y > bottom) {
+                continue;
+            }
+            if (item.kind === 'image') {
+                this.drawReaderImage(ctx, item, top);
+            } else {
+                this.drawReaderText(ctx, item, top);
+            }
+        }
+        this.drawReaderScrollbar(ctx);
+        r.tex.needsUpdate = true;
+    };
+
+    /**
+     * Draw one text item's wrapped lines, styling linked words with the accent
+     * colour and an underline.
+     *
+     * @param {Object} ctx The 2D context.
+     * @param {Object} item The laid-out text item.
+     * @param {Number} top The scroll offset (document y at the canvas top).
+     */
+    Cyberspace.prototype.drawReaderText = function(ctx, item, top) {
+        ctx.font = item.spec.font;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        var accent = this.readerAccent();
+        var space = ctx.measureText(' ').width;
+        for (var l = 0; l < item.lines.length; l++) {
+            var ly = item.y + l * item.lineH - top;
+            var x = item.x;
+            if (l === 0 && item.prefix) {
+                ctx.fillStyle = '#8aa0b4';
+                ctx.fillText(item.prefix, item.x - 40, ly);
+            }
+            var line = item.lines[l];
+            for (var wi = 0; wi < line.length; wi++) {
+                var word = line[wi];
+                ctx.fillStyle = word.href ? accent : item.spec.colour;
+                ctx.fillText(word.text, x, ly);
+                if (word.href) {
+                    var uy = ly + item.spec.size + 2;
+                    ctx.fillRect(x, uy, word.w, 2);
+                }
+                x += word.w + space;
+            }
+        }
+    };
+
+    /**
+     * Draw one image item (or a labelled placeholder while it loads or if it
+     * failed).
+     *
+     * @param {Object} ctx The 2D context.
+     * @param {Object} item The laid-out image item.
+     * @param {Number} top The scroll offset.
+     */
+    Cyberspace.prototype.drawReaderImage = function(ctx, item, top) {
+        var cache = this.reader.images[item.src];
+        var y = item.y - top;
+        if (cache && cache.ready && cache.img) {
+            try {
+                ctx.drawImage(cache.img, item.x, y, item.w, item.h);
+                return;
+            } catch (e) {
+                // Fall through to the placeholder if the draw fails.
+            }
+        }
+        ctx.fillStyle = '#111a26';
+        ctx.fillRect(item.x, y, item.w, item.h);
+        ctx.fillStyle = '#6d8298';
+        ctx.font = 'italic 26px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.alt || 'Image', item.x + item.w / 2, y + item.h / 2);
+    };
+
+    /**
+     * Draw a slim scroll indicator down the right edge when the document is
+     * taller than one screen.
+     *
+     * @param {Object} ctx The 2D context.
+     */
+    Cyberspace.prototype.drawReaderScrollbar = function(ctx) {
+        var r = this.reader;
+        if (r.contentHeight <= r.H) {
+            return;
+        }
+        var trackX = r.W - 14;
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(trackX, 8, 6, r.H - 16);
+        var frac = r.H / r.contentHeight;
+        var thumbH = Math.max(40, (r.H - 16) * frac);
+        var maxScroll = r.contentHeight - r.H;
+        var thumbY = 8 + (r.H - 16 - thumbH) * (maxScroll ? r.scroll / maxScroll : 0);
+        ctx.fillStyle = this.readerAccent();
+        ctx.fillRect(trackX, thumbY, 6, thumbH);
     };
 
     /**
@@ -6336,6 +7238,11 @@ define('format_mnemo/vr', [], function() {
             // An open palm this frame is an explicit stop; hold position.
             return;
         }
+        if (this.readerOpen) {
+            // While the reader is up, a held trigger interacts with the panel;
+            // it must never fly the viewer (the panel body is not interactive).
+            return;
+        }
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {
@@ -6421,14 +7328,18 @@ define('format_mnemo/vr', [], function() {
         if (this.hovered === mesh) {
             return;
         }
-        if (this.hovered) {
+        if (this.hovered && this.hovered.userData.material) {
             this.hovered.scale.setScalar(1);
             this.hovered.userData.material.color.setHex(this.hovered.userData.baseColour);
         }
         this.hovered = mesh;
         if (mesh) {
-            mesh.scale.setScalar(1.12);
-            mesh.userData.material.color.setHex(0xffffff);
+            // The large reader content plane is interactive (for link hits) but
+            // must not be scaled or tinted like a small node/button.
+            if (mesh.userData.material) {
+                mesh.scale.setScalar(1.12);
+                mesh.userData.material.color.setHex(0xffffff);
+            }
             this.renderer.domElement.style.cursor = 'pointer';
             // A light tick when a node first lights up under the pointer/ray.
             if (this.gestures && this.renderer.xr.isPresenting) {
@@ -6488,6 +7399,7 @@ define('format_mnemo/vr', [], function() {
         this.snapAngle = Math.PI / 6; // 30 degrees per snap.
         this.snapThreshold = 0.7; // Stick X magnitude that triggers a snap.
         this.snapRelease = 0.3; // Fall back below this to re-arm the snap.
+        this.readerScrollSpeed = 1400; // Reader scroll, canvas px per second at full stick.
         this.pinchDist = 0.025; // Not used directly (pinch = select event).
         this.fistDist = 0.075; // Fingertip-to-wrist under this reads as a fist.
         this.palmDist = 0.13; // Fingertip-to-wrist over this reads as open.
@@ -6583,6 +7495,15 @@ define('format_mnemo/vr', [], function() {
         if (this.cs.brake) {
             // Braking cancels translation this frame; a fresh grab must re-anchor.
             this.grabbing = false;
+            return;
+        }
+
+        if (this.cs.readerOpen) {
+            // While the reader is up, a thumbstick scrolls it instead of moving
+            // the viewer (pushing forward scrolls down through the page).
+            if (Math.abs(ctrl.glideZ) > this.deadzone) {
+                this.cs.scrollReader(-ctrl.glideZ * this.readerScrollSpeed * dt);
+            }
             return;
         }
 

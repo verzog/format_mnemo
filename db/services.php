@@ -72,4 +72,11 @@ $functions = [
         'type'        => 'read',
         'ajax'        => true,
     ],
+    'format_mnemo_get_content' => [
+        'classname'   => 'format_mnemo\\external\\get_content',
+        'methodname'  => 'execute',
+        'description' => 'Get a readable activity\'s content as structured blocks for the in-headset reader.',
+        'type'        => 'read',
+        'ajax'        => true,
+    ],
 ];
