@@ -951,6 +951,49 @@ const scenarios = [
             const pass = self.selLabel === null && removed[0] === stale;
             return {pass, detail: `cleared=${self.selLabel === null} removed=${removed.length}`};
         }
+    },
+    {
+        name: 'editor: applyTransform counter-rotates the sign to keep it street-facing',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const sign = new THREE.Group();
+            g.add(sign);
+            const self = {THREE, selBox: null, selLabel: null, selected: null, renderer: null};
+            const ed = {
+                group: g, sign: sign, baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 1, x: 0, y: 0, z: 0, rot: 90}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // Group turns +90°, the sign's own rotation cancels it, so the sign's
+            // world orientation stays at 0 (the street it was placed to face).
+            const worldRot = g.rotation.y + sign.rotation.y;
+            const pass = Math.abs(g.rotation.y - Math.PI / 2) < 1e-6 &&
+                Math.abs(worldRot) < 1e-6;
+            return {pass, detail: `group=${g.rotation.y.toFixed(3)} sign=${sign.rotation.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'editor: snapValue aligns absolute position, rotation and scale',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const ed = {baseX: 12.37, baseY: 0, baseZ: -4.8};
+            const on = {snap: true, gridStep: 1, snapValue: CS.prototype.snapValue};
+            const off = {snap: false, gridStep: 1, snapValue: CS.prototype.snapValue};
+            // Absolute x = base + offset snaps to the 1-unit grid: 12.37 + 0.9
+            // = 13.27 -> 13, so the stored offset becomes 13 - 12.37 = 0.63.
+            const x = on.snapValue('x', 0.9, ed);
+            const absX = ed.baseX + x;
+            const rot = on.snapValue('rot', 52, ed);   // -> 45
+            const scale = on.snapValue('scale', 1.11, ed); // -> 1.0
+            const passthru = off.snapValue('x', 0.9, ed); // snap off: unchanged
+            const bright = on.snapValue('brightness', 1.37, ed); // never snapped
+            const pass = Math.abs(absX - 13) < 1e-6 && rot === 45 &&
+                Math.abs(scale - 1.0) < 1e-6 && passthru === 0.9 &&
+                Math.abs(bright - 1.37) < 1e-6;
+            return {pass, detail: `absX=${absX} rot=${rot} scale=${scale} off=${passthru}`};
+        }
     }
 ];
 

@@ -46,6 +46,7 @@ $string['editsaving'] = 'Saving…';
 $string['editscale'] = 'Scale';
 $string['editsection'] = 'Edit node';
 $string['editsectionname'] = 'Edit node name';
+$string['editsnap'] = 'Snap to grid';
 $string['edittexsize'] = 'Texture size';
 $string['emptynode'] = 'This node has no activities yet.';
 $string['entervr'] = 'Enter VR';

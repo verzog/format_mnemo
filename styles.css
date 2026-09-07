@@ -232,6 +232,14 @@
     text-align: right;
 }
 
+.format-mnemo__editor-snap {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.35rem;
+    cursor: pointer;
+}
+
 .format-mnemo__editor-actions {
     display: flex;
     gap: 0.4rem;

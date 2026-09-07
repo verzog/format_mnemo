@@ -139,6 +139,16 @@ define('format_mnemo/vr', [], function() {
         this.selBox = null; // BoxHelper around the current selection.
         this.selLabel = null; // Floating name label over the current selection.
         this.editMode = false;
+        // Snap-to-grid for the editor: when on, absolute positions snap to a
+        // 1-unit grid, rotations to 15 degrees and scale to 0.25 steps, so
+        // objects align consistently. Remembered per viewer (best-effort).
+        this.gridStep = 1;
+        this.snap = false;
+        try {
+            this.snap = window.localStorage.getItem('format_mnemo_snap') === '1';
+        } catch (e) {
+            this.snap = false;
+        }
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
@@ -2386,7 +2396,9 @@ define('format_mnemo/vr', [], function() {
             self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0), built.w * ts, built.d * ts);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
-            self.registerEditable(act, built.group, bx, 0, bz);
+            // Pass the signboard so it can be kept facing the street even when
+            // the teacher rotates the building in the editor.
+            self.registerEditable(act, built.group, bx, 0, bz, built.sign);
         });
     };
 
@@ -3766,6 +3778,10 @@ define('format_mnemo/vr', [], function() {
             field('rot', s.editrotate || 'Rotate', 0, 360, 1) +
             field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05) +
             field('texsize', s.edittexsize || 'Texture size', 0.25, 4, 0.05) +
+            '<label class="format-mnemo__editor-snap" data-mnemo-ed-snaprow>' +
+            '<input type="checkbox" data-mnemo-ed-snap>' +
+            '<span>' + (s.editsnap || 'Snap to grid') + '</span>' +
+            '</label>' +
             '<div class="format-mnemo__editor-actions">' +
             '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
             '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
@@ -3792,7 +3808,9 @@ define('format_mnemo/vr', [], function() {
                     self.syncEditorOutputs();
                     return;
                 }
-                self.selected.transform[key] = parseFloat(input.value);
+                var value = self.snapValue(key, parseFloat(input.value), self.selected);
+                input.value = value;
+                self.selected.transform[key] = value;
                 if (key === 'brightness') {
                     self.applyBrightness(self.selected);
                 } else {
@@ -3800,6 +3818,19 @@ define('format_mnemo/vr', [], function() {
                 }
                 self.syncEditorOutputs();
             });
+        });
+
+        // Snap-to-grid toggle: remembered per viewer and applied on the next
+        // slider move (so it aligns objects without disturbing the current one).
+        var snapBox = panel.querySelector('[data-mnemo-ed-snap]');
+        snapBox.checked = this.snap;
+        snapBox.addEventListener('change', function() {
+            self.snap = snapBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_snap', self.snap ? '1' : '0');
+            } catch (e) {
+                // Ignore storage being unavailable; the toggle still works.
+            }
         });
 
         panel.querySelector('[data-mnemo-ed-act="save"]').addEventListener('click', function() {
@@ -4178,14 +4209,17 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} baseX Default world x.
      * @param {Number} baseY Default world y.
      * @param {Number} baseZ Default world z.
+     * @param {Object} sign Optional signboard group to keep street-facing when
+     *     the building is rotated (counter-rotated against the group).
      */
-    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ) {
+    Cyberspace.prototype.registerEditable = function(act, group, baseX, baseY, baseZ, sign) {
         var t = act.transform || {};
         var editable = {
             cmid: act.id,
             objkey: null,
             name: act.name,
             group: group,
+            sign: sign || null,
             baseX: baseX, baseY: baseY, baseZ: baseZ,
             baseRotY: group.rotation.y,
             emits: false,
@@ -4220,6 +4254,12 @@ define('format_mnemo/vr', [], function() {
         g.position.set(editable.baseX + t.x, editable.baseY + t.y, editable.baseZ + t.z);
         g.rotation.y = editable.baseRotY + t.rot * Math.PI / 180;
         g.scale.setScalar(t.scale);
+        // Keep the signboard facing the street: counter-rotate it against the
+        // building's editor rotation so its world orientation stays where it was
+        // placed (the street centreline), even as the building turns.
+        if (editable.sign) {
+            editable.sign.rotation.y = -t.rot * Math.PI / 180;
+        }
         if (this.selBox) {
             this.selBox.update();
         }
@@ -4230,6 +4270,37 @@ define('format_mnemo/vr', [], function() {
         if (this.renderer && this.renderer.shadowMap) {
             this.renderer.shadowMap.needsUpdate = true;
         }
+    };
+
+    /**
+     * Snap an edited slider value to the grid when snap-to-grid is on, so
+     * objects align consistently. Positions snap on their absolute world
+     * coordinate (base + offset) to a 1-unit lattice — objects with different
+     * defaults still line up — rotation to 15 degrees and scale to 0.25 steps.
+     * Other controls (brightness, texture size) and the off state pass through.
+     *
+     * @param {String} key The transform field being edited.
+     * @param {Number} raw The raw slider value.
+     * @param {Object} editable The selected editable (for its base placement).
+     * @return {Number} The snapped value.
+     */
+    Cyberspace.prototype.snapValue = function(key, raw, editable) {
+        if (!this.snap || isNaN(raw)) {
+            return raw;
+        }
+        var g = this.gridStep;
+        if (key === 'x' || key === 'y' || key === 'z') {
+            var base = key === 'x' ? editable.baseX :
+                (key === 'y' ? editable.baseY : editable.baseZ);
+            return Math.round((base + raw) / g) * g - base;
+        }
+        if (key === 'rot') {
+            return Math.round(raw / 15) * 15;
+        }
+        if (key === 'scale') {
+            return Math.round(raw / 0.25) * 0.25;
+        }
+        return raw;
     };
 
     /**

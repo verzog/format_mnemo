@@ -475,6 +475,7 @@ class scene implements renderable, templatable {
                 'editbrightness' => get_string('editbrightness', 'format_mnemo'),
                 'editediting' => get_string('editediting', 'format_mnemo'),
                 'edittexsize' => get_string('edittexsize', 'format_mnemo'),
+                'editsnap' => get_string('editsnap', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editscale' => get_string('editscale', 'format_mnemo'),
