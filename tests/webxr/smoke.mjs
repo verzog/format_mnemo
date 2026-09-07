@@ -707,8 +707,10 @@ const scenarios = [
             const g = new THREE.Group();
             g.rotation.y = 0.5;
             const self = {
-                THREE, editables: [], selBox: null, renderer: null,
+                THREE, editables: [], selBox: null, renderer: null, activities: {},
                 registerEditable: CS.prototype.registerEditable,
+                registerActivity: CS.prototype.registerActivity,
+                makeTick: CS.prototype.makeTick, newCanvasCtx: CS.prototype.newCanvasCtx,
                 applyTransform: CS.prototype.applyTransform
             };
             self.registerEditable(
@@ -1280,6 +1282,7 @@ const scenarios = [
                 showActivityOverlay: CS.prototype.showActivityOverlay,
                 buildActivityOverlay: CS.prototype.buildActivityOverlay,
                 closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                refreshActivityStates: CS.prototype.refreshActivityStates,
                 setOverlayInert: CS.prototype.setOverlayInert,
                 pauseVideos: CS.prototype.pauseVideos
             };
@@ -1312,6 +1315,7 @@ const scenarios = [
                 showActivityOverlay: CS.prototype.showActivityOverlay,
                 buildActivityOverlay: CS.prototype.buildActivityOverlay,
                 closeActivityOverlay: CS.prototype.closeActivityOverlay,
+                refreshActivityStates: CS.prototype.refreshActivityStates,
                 setOverlayInert: CS.prototype.setOverlayInert,
                 pauseVideos: CS.prototype.pauseVideos
             };
@@ -1637,6 +1641,90 @@ const scenarios = [
             const pass = !!(o && o.hidden === true) && removed.indexOf(group) !== -1 &&
                 self.editables.length === 0 && deselected === 1 && !self.placedCalled;
             return {pass, detail: `hidden=${o && o.hidden} removed=${removed.length} eds=${self.editables.length}`};
+        }
+    },
+    {
+        name: 'completion: makeTick builds a green on-top sprite',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, newCanvasCtx: CS.prototype.newCanvasCtx, makeTick: CS.prototype.makeTick};
+            const t = self.makeTick();
+            const pass = !!t.isSprite && !!t.material.map && t.material.depthTest === false &&
+                t.renderOrder === 6;
+            return {pass, detail: `sprite=${!!t.isSprite} depthTest=${t.material.depthTest} order=${t.renderOrder}`};
+        }
+    },
+    {
+        name: 'completion: registerActivity records a tick shown only when complete',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = () => ({THREE, activities: {}, newCanvasCtx: CS.prototype.newCanvasCtx,
+                makeTick: CS.prototype.makeTick, registerActivity: CS.prototype.registerActivity});
+            const done = mk();
+            const group = new THREE.Group();
+            const sign = new THREE.Group();
+            sign.position.set(0, 2, 1);
+            sign.userData = {frameMat: new THREE.MeshBasicMaterial()};
+            done.registerActivity({group}, {id: 7, state: 'complete'}, sign);
+            const rec = done.activities[7];
+            // The tick is parented to the sign (so it follows a depth edit).
+            const inSign = sign.children.some((c) => c.isSprite);
+            // A video screen has no sign: the frame material comes from the
+            // interactive panel instead, and the tick sits on the group.
+            const vid = mk();
+            const vgroup = new THREE.Group();
+            const vmat = new THREE.MeshBasicMaterial();
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial());
+            screen.userData = {material: vmat, baseColour: 0x111111};
+            vid.registerActivity({group: vgroup}, {id: 9, state: 'available'}, null, screen);
+            const vrec = vid.activities[9];
+            const notdone = mk();
+            notdone.registerActivity({group: new THREE.Group()}, {id: 8, state: 'available'}, null);
+            const pass = !!rec && rec.tick.visible === true && rec.frameMat === sign.userData.frameMat &&
+                inSign && notdone.activities[8].tick.visible === false &&
+                vrec.frameMat === vmat && vrec.panel === screen &&
+                vgroup.children.some((c) => c.isSprite);
+            return {pass, detail: `done=${rec && rec.tick.visible} inSign=${inSign} ` +
+                `vidMat=${vrec.frameMat === vmat} open=${notdone.activities[8].tick.visible}`};
+        }
+    },
+    {
+        name: 'completion: applyStates toggles ticks and recolours signs',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tick11 = {visible: false};
+            const tick12 = {visible: true};
+            const tick13 = {visible: false};
+            const frameMat = new THREE.MeshBasicMaterial({color: 0x123456});
+            const panel11 = {userData: {baseColour: 0x123456}};
+            const frame13 = new THREE.MeshBasicMaterial({color: 0x39ff14});
+            const self = {
+                renderer: null, applyStates: CS.prototype.applyStates,
+                activities: {
+                    11: {tick: tick11, frameMat: frameMat, panel: panel11, state: 'available'},
+                    12: {tick: tick12, frameMat: null, state: 'complete'},
+                    // Present at build, omitted by the refresh: became unavailable.
+                    13: {tick: tick13, frameMat: frame13, state: 'complete'}
+                }
+            };
+            self.applyStates([
+                {cmid: 11, state: 'complete'},
+                {cmid: 12, state: 'available'},
+                {cmid: 99, state: 'complete'} // Unknown cmid: ignored.
+            ]);
+            const pass = tick11.visible === true && self.activities[11].state === 'complete' &&
+                frameMat.color.getHex() === 0x39ff14 &&
+                // Hover-restore colour tracks the refreshed state.
+                panel11.userData.baseColour === 0x39ff14 &&
+                tick12.visible === false &&
+                // The omitted activity is invalidated to restricted, red, no tick.
+                self.activities[13].state === 'restricted' && tick13.visible === false &&
+                frame13.color.getHex() === 0xff3b6b;
+            return {pass, detail: `t11=${tick11.visible} hex=${frameMat.color.getHex().toString(16)} ` +
+                `base=${panel11.userData.baseColour.toString(16)} a13=${self.activities[13].state}`};
         }
     }
 ];

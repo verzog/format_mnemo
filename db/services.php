@@ -65,4 +65,11 @@ $functions = [
         'ajax'        => true,
         'capabilities' => 'moodle/course:manageactivities',
     ],
+    'format_mnemo_get_states' => [
+        'classname'   => 'format_mnemo\\external\\get_states',
+        'methodname'  => 'execute',
+        'description' => 'Get the current per-activity scene states for a course.',
+        'type'        => 'read',
+        'ajax'        => true,
+    ],
 ];
