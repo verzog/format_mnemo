@@ -1126,6 +1126,106 @@ const scenarios = [
         }
     },
     {
+        name: 'placer: palette is built from config.placerprops (uploaded props included)',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const root = document.createElement('div');
+            const self = {
+                root,
+                placeType: 'lamp',
+                config: {strings: {}, placerprops: [
+                    {key: 'lamp', label: 'Street lamp'},
+                    {key: 'spaceship', label: 'spaceship'}
+                ]},
+                buildPlacer: CS.prototype.buildPlacer
+            };
+            self.buildPlacer();
+            const buttons = root.querySelectorAll('[data-mnemo-place]');
+            const keys = Array.prototype.map.call(buttons, (b) => b.getAttribute('data-mnemo-place'));
+            const pass = keys.length === 2 && keys[0] === 'lamp' && keys[1] === 'spaceship' &&
+                buttons[1].textContent === 'spaceship';
+            return {pass, detail: `keys=${keys.join(',')}`};
+        }
+    },
+    {
+        name: 'placer: an uploaded prop label is set as text, never parsed as markup',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const root = document.createElement('div');
+            const evil = '<img src=x onerror=1>';
+            const self = {
+                root,
+                placeType: 'lamp',
+                config: {strings: {}, placerprops: [{key: 'lamp', label: evil}]},
+                buildPlacer: CS.prototype.buildPlacer
+            };
+            self.buildPlacer();
+            const btn = root.querySelector('[data-mnemo-place="lamp"]');
+            // textContent round-trips the raw string; no <img> element is created.
+            const pass = btn.textContent === evil && btn.querySelector('img') === null;
+            return {pass, detail: `text=${btn.textContent} imgs=${btn.querySelectorAll('img').length}`};
+        }
+    },
+    {
+        name: 'placer: placeType falls back to the first offered prop when lamp is absent',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const root = document.createElement('div');
+            const self = {
+                root,
+                placeType: 'lamp',
+                config: {strings: {}, placerprops: [
+                    {key: 'drone', label: 'drone'},
+                    {key: 'pylon', label: 'pylon'}
+                ]},
+                buildPlacer: CS.prototype.buildPlacer
+            };
+            self.buildPlacer();
+            return {pass: self.placeType === 'drone', detail: `placeType=${self.placeType}`};
+        }
+    },
+    {
+        name: 'placer: propLabel resolves an uploaded prop from config.placerprops',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                config: {strings: {}, placerprops: [{key: 'spaceship', label: 'spaceship'}]},
+                propLabel: CS.prototype.propLabel
+            };
+            const pass = self.propLabel('spaceship') === 'spaceship' &&
+                self.propLabel('unknown') === 'unknown';
+            return {pass, detail: `label=${self.propLabel('spaceship')}`};
+        }
+    },
+    {
+        name: 'placer: ensurePropTemplate lazily loads a palette model exactly once',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            let calls = 0;
+            const built = [];
+            const self = {
+                propTemplates: {},
+                loadProp: (name) => {
+                    calls++;
+                    return Promise.resolve(tpl);
+                },
+                buildPlacedObjectsOfType: (name) => built.push(name),
+                ensurePropTemplate: CS.prototype.ensurePropTemplate
+            };
+            self.ensurePropTemplate('drone');
+            self.ensurePropTemplate('drone'); // In flight: must not load twice.
+            await Promise.resolve();
+            await Promise.resolve();
+            self.ensurePropTemplate('drone'); // Cached: must not load again.
+            self.ensurePropTemplate(''); // Empty name: no-op.
+            const pass = calls === 1 && self.propTemplates.drone === tpl &&
+                built.length === 1 && built[0] === 'drone';
+            return {pass, detail: `calls=${calls} built=${built.join(',')}`};
+        }
+    },
+    {
         name: 'editor: applyTransform applies non-uniform width/height/depth',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

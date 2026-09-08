@@ -30,16 +30,16 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use context_course;
 use invalid_parameter_exception;
+use format_mnemo\output\asset_gallery;
 
 /**
- * Place one decorative prop (lamp, barrier, kiosk or vehicle) at a grid-snapped
- * position with the in-view object placer, stored per course. Guarded by the
- * activity-editing capability on the course.
+ * Place one decorative prop at a grid-snapped position with the in-view object
+ * placer, stored per course. The prop may be any bundled prop or uploaded
+ * asset-pack model that is not a named building; the accepted set is resolved
+ * by {@see asset_gallery::placer_prop_names()} so it always matches the palette
+ * the scene offers. Guarded by the activity-editing capability on the course.
  */
 class add_placed_object extends external_api {
-    /** @var string[] Prop model names the placer may drop. */
-    const ALLOWED_TYPES = ['lamp', 'barrier', 'kiosk', 'av'];
-
     /** @var float Grid cell size the placement snaps to (world units). */
     const GRID = 2.0;
 
@@ -54,7 +54,11 @@ class add_placed_object extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'courseid' => new external_value(PARAM_INT, 'Course id'),
-            'type' => new external_value(PARAM_ALPHA, 'Prop type: lamp, barrier, kiosk or av'),
+            // Accept the raw name and gate it on the placeable-prop whitelist
+            // below: an uploaded model's base name may contain spaces, dots or
+            // Unicode that a restricted param type would reject even though the
+            // palette advertises it.
+            'type' => new external_value(PARAM_RAW, 'Prop model base name (a placeable prop, not a named building)'),
             'x' => new external_value(PARAM_FLOAT, 'World-x where the prop is placed'),
             'z' => new external_value(PARAM_FLOAT, 'World-z where the prop is placed'),
         ]);
@@ -79,7 +83,7 @@ class add_placed_object extends external_api {
             'z' => $z,
         ]);
 
-        if (!in_array($params['type'], self::ALLOWED_TYPES, true)) {
+        if (!in_array($params['type'], asset_gallery::placer_prop_names(), true)) {
             throw new invalid_parameter_exception('Unknown prop type');
         }
 
@@ -121,7 +125,7 @@ class add_placed_object extends external_api {
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'id' => new external_value(PARAM_INT, 'The new placed-object id'),
-            'type' => new external_value(PARAM_ALPHA, 'Prop type'),
+            'type' => new external_value(PARAM_RAW, 'Prop model base name'),
             'x' => new external_value(PARAM_FLOAT, 'Grid-snapped world-x'),
             'z' => new external_value(PARAM_FLOAT, 'Grid-snapped world-z'),
         ]);

@@ -146,4 +146,48 @@ final class asset_gallery_test extends \advanced_testcase {
             $this->assertStringStartsWith('https://cdn.example.org/pack/', $model['url']);
         }
     }
+
+    /**
+     * The placer offers the bundled props plus any uploaded model, but never a
+     * named building model.
+     */
+    public function test_placer_prop_names(): void {
+        $this->resetAfterTest();
+
+        // The bundled props are offered out of the box; building-quiz.glb is a
+        // named building and is excluded.
+        $names = asset_gallery::placer_prop_names();
+        $this->assertContains('lamp', $names);
+        $this->assertContains('av', $names);
+        $this->assertNotContains('building-quiz', $names);
+
+        // An uploaded prop joins the list; an uploaded building model does not.
+        // A numeric base name (123.glb) must survive as the string "123", not
+        // an int, so the web service's strict comparison still matches it.
+        $this->make_file('assetpack', 'spaceship.glb');
+        $this->make_file('assetpack', 'building-forum.glb');
+        $this->make_file('assetpack', '123.glb');
+        $names = asset_gallery::placer_prop_names();
+        $this->assertContains('spaceship', $names);
+        $this->assertNotContains('building-forum', $names);
+        $this->assertTrue(in_array('123', $names, true), 'numeric names must be strings');
+        foreach ($names as $name) {
+            $this->assertIsString($name);
+        }
+        // The list is sorted and free of duplicates.
+        $sorted = $names;
+        sort($sorted, SORT_STRING);
+        $this->assertSame($sorted, $names);
+        $this->assertSame(array_values(array_unique($names)), $names);
+
+        // With an external asset-pack URL configured, uploaded-only names are
+        // dropped (the scene loads from the pack, falling back only to bundled
+        // models, so an uploaded-only prop could never load); bundled props
+        // remain.
+        set_config('assetbaseurl', 'https://cdn.example.org/pack/', 'format_mnemo');
+        $names = asset_gallery::placer_prop_names();
+        $this->assertContains('lamp', $names);
+        $this->assertNotContains('spaceship', $names);
+        $this->assertNotContains('123', $names);
+    }
 }

@@ -321,12 +321,28 @@ if ($ADMIN->fulltree) {
     ));
 }
 
-// The asset viewer: a gallery of the uploaded/bundled textures and prop models.
-// Registered outside the fulltree guard so its URL always resolves in the admin
-// tree, and gated by site config like the settings page itself.
-$ADMIN->add('formatsettings', new admin_externalpage(
+// Nest the plugin's pages under a single "Mnemo" category in the course-format
+// list, rather than leaving the asset viewer as a separate sibling entry. The
+// category holds the settings page core built for us (populated above) and the
+// asset viewer. This block runs whether or not $ADMIN->fulltree is set, so the
+// tree resolves for navigation and search as well as on the settings page.
+$mnemocategory = new admin_category('format_mnemo', new lang_string('pluginname', 'format_mnemo'));
+$ADMIN->add('formatsettings', $mnemocategory);
+
+// Re-parent the auto-created settings page under the category. Its section name
+// ('formatsettingmnemo') is unchanged, so the "Settings" links elsewhere in the
+// admin UI still resolve to it.
+$ADMIN->add('format_mnemo', $settings);
+
+// The asset viewer: a gallery of the uploaded/bundled textures and prop models,
+// gated by site config like the settings page itself.
+$ADMIN->add('format_mnemo', new admin_externalpage(
     'format_mnemo_preview',
     get_string('preview_title', 'format_mnemo'),
     new moodle_url('/course/format/mnemo/preview.php'),
     'moodle/site:config'
 ));
+
+// We have added the settings page to our own category, so tell core not to add
+// it again under the default course-format parent.
+$settings = null;

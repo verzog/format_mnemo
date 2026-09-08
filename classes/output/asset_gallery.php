@@ -161,6 +161,56 @@ class asset_gallery {
     }
 
     /**
+     * The prop model base names the in-view object placer may drop: the union
+     * of the plugin's bundled models and any uploaded asset-pack .glb file,
+     * minus the named building models (building-*), which are bound to
+     * activities and are not free-standing props. Sorted, with names too long
+     * for the placed-object type column dropped. This is the single source of
+     * truth shared by the scene payload (the palette it offers) and the
+     * add_placed_object web service (the names it accepts).
+     *
+     * @return string[] The placeable prop base names.
+     */
+    public static function placer_prop_names(): array {
+        $names = [];
+        foreach (array_keys(self::bundled_model_names()) as $name) {
+            $names[$name] = true;
+        }
+        // Uploaded models are only loadable when no external asset-pack URL is
+        // configured: with a pack URL set, the scene loads from that pack and
+        // falls back only to the bundled models (see scene::models_base_url()
+        // and the client's loadProp()), so an uploaded-only name could never
+        // load. Follow the same precedence here so the palette never offers a
+        // prop whose model cannot be fetched.
+        if (empty(get_config('format_mnemo', 'assetbaseurl'))) {
+            foreach (array_keys(self::uploaded_pack_names()) as $filename) {
+                $filename = (string)$filename;
+                if (substr($filename, -4) === '.glb') {
+                    $names[basename($filename, '.glb')] = true;
+                }
+            }
+        }
+        $out = [];
+        foreach (array_keys($names) as $name) {
+            // A base name that looks numeric (e.g. "123" from 123.glb) comes
+            // back from array_keys() as an int; keep the contract's string[] so
+            // the web service's strict in_array() match still works.
+            $name = (string)$name;
+            // Named building models are activity-bound, not free-standing props.
+            if (strpos($name, 'building-') === 0) {
+                continue;
+            }
+            // Keep within the format_mnemo_placedobj.type column width.
+            if ($name === '' || \core_text::strlen($name) > 32) {
+                continue;
+            }
+            $out[] = $name;
+        }
+        sort($out, SORT_STRING);
+        return $out;
+    }
+
+    /**
      * The base names of the models bundled with the plugin, as a lookup set.
      *
      * @return array<string, bool> Map of model name => true.

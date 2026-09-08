@@ -25,6 +25,7 @@
  */
 
 require(__DIR__ . '/../../../config.php');
+require_once($CFG->libdir . '/adminlib.php');
 
 use format_mnemo\output\asset_gallery;
 
