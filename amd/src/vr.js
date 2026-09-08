@@ -2874,7 +2874,12 @@ define('format_mnemo/vr', [], function() {
         car.rotation.y = Math.atan2(vx, vz);
         // Landing cars descend toward a low altitude (the ground, or a rooftop
         // band) and climb back; cruising cars keep a gentle bob at height.
-        var low = ct.land === 'ground' ? 2 : (ct.land === 'rooftop' ? 10 : height);
+        var low = height;
+        if (ct.land === 'ground') {
+            low = 2;
+        } else if (ct.land === 'rooftop') {
+            low = 10;
+        }
         return {
             mesh: car, vx: vx, vz: vz, box: box,
             height: height, low: low, land: ct.land || 'none',
