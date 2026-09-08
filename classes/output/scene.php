@@ -544,6 +544,11 @@ class scene implements renderable, templatable {
             // only uses these in the void environment.
             'spacetextureurl' => $this->resolve_asset_url('spacetextureurl', 'spacetexture'),
             'planettextureurls' => $this->stored_asset_urls('planettextures', 9),
+            // Per-planet ring flags (aligned with planettextureurls): a planet
+            // whose uploaded filename contains the word "ring" gets a ring.
+            'planetrings' => $this->planet_ring_flags('planettextures', 9),
+            // Optional ring image (a radial strip) that skins ringed planets.
+            'ringtextureurl' => $this->resolve_asset_url('ringtextureurl', 'ringtexture'),
             // Texture tiling scale (world units per tile) and the size of the
             // ground patch laid around each building, with sensible defaults.
             'roadtexturescale' => $this->int_config('roadtexturescale', 8),
@@ -781,6 +786,31 @@ class scene implements renderable, templatable {
             }
         }
         return $urls;
+    }
+
+    /**
+     * A ring flag per uploaded file in a multi-file area (aligned with
+     * stored_asset_urls, same order and cap): true when the filename marks the
+     * planet as ringed. The marker is the word "ring" delimited by the start or
+     * end of the base name or a non-letter (so "saturn-ring.png", "ring2.jpg"
+     * and "ice_ring.webp" match, but "spring.png" does not).
+     *
+     * @param string $filearea The system-context file area.
+     * @param int $max Maximum number of flags to return.
+     * @return bool[] The per-file ring flags.
+     */
+    protected function planet_ring_flags(string $filearea, int $max): array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+        $flags = [];
+        foreach ($files as $file) {
+            $flags[] = (bool)preg_match('/(?:^|[^a-z])ring(?:[^a-z]|$)/i', $file->get_filename());
+            if (count($flags) >= $max) {
+                break;
+            }
+        }
+        return $flags;
     }
 
     /**

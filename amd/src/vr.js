@@ -80,6 +80,10 @@ define('format_mnemo/vr', [], function() {
     // the planets drift slowly in and out of view.
     var PLANET_SPIN = (2 * Math.PI) / 3600;
 
+    // Each planet also turns on its own axis, roughly one revolution every two
+    // minutes, so a textured world visibly rotates.
+    var PLANET_SELF_SPIN = (2 * Math.PI) / 120;
+
     // The four Night-City architectural movements, each a small material recipe.
     //   entropism      - poverty/survival: weathered, rusted, outdated, patched.
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
@@ -229,6 +233,7 @@ define('format_mnemo/vr', [], function() {
         this.gestures = null; // XR gesture manager (built after the renderer).
 
         this.spinners = []; // Rooftop holo elements that rotate.
+        this.planets = []; // The Void's planet spheres, each self-rotating.
         // Activities keyed by course-module id, each with its group, sign,
         // completion tick and sign frame material, so their state can be
         // refreshed live (colour + tick) when the learner finishes one.
@@ -284,6 +289,11 @@ define('format_mnemo/vr', [], function() {
         // the void environment. Empty/absent keeps the procedural look.
         this.spaceTexture = assets.spaceTexture || null;
         this.planetTextures = assets.planetTextures || [];
+        // Which uploaded planets are ringed (by filename marker), and an optional
+        // ring image (a radial strip) that skins the rings in place of the flat
+        // procedural band.
+        this.planetRings = config.planetrings || [];
+        this.ringTexture = assets.ringTexture || null;
         // Tiling scales (world units per tile) and the size of the ground patch
         // laid around each building. Admin-configurable.
         this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
@@ -720,6 +730,8 @@ define('format_mnemo/vr', [], function() {
         // to it rather than straight to the scene.
         this.planetField = new this.THREE.Group();
         this.scene.add(this.planetField);
+        this.planets = [];
+        var textured = texs.length > 0;
         for (var i = 0; i < count; i++) {
             var s = PLANET_SLOTS[i];
             // Spread the planets evenly around the full sky by index, so only
@@ -731,7 +743,11 @@ define('format_mnemo/vr', [], function() {
                 y: s.y,
                 z: -s.dist * Math.cos(az)
             };
-            this.makePlanet(s.r, at, s.band, s.ring, texs[i] || null);
+            // With uploaded planets, a ring is chosen per texture by its filename
+            // (planetRings, from the server); the procedural default keeps the
+            // slot's own ring flag.
+            var ringed = textured ? !!this.planetRings[i] : s.ring;
+            this.makePlanet(s.r, at, s.band, ringed, texs[i] || null);
         }
     };
 
@@ -742,8 +758,13 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.spinPlanets = function(dt) {
-        if (this.planetField) {
-            this.planetField.rotation.y += PLANET_SPIN * dt;
+        if (!this.planetField) {
+            return;
+        }
+        this.planetField.rotation.y += PLANET_SPIN * dt;
+        // Each planet also turns on its own axis (the ring, a sibling, stays put).
+        for (var i = 0; i < this.planets.length; i++) {
+            this.planets[i].rotation.y += PLANET_SELF_SPIN * dt;
         }
     };
 
@@ -814,19 +835,63 @@ define('format_mnemo/vr', [], function() {
         // drifts with it; otherwise straight to the scene.
         var parent = this.planetField || this.scene;
         parent.add(planet);
+        // Track the sphere so it can turn on its own axis (see spinPlanets).
+        this.planets.push(planet);
 
         if (ringed) {
             var ring = new THREE.Mesh(
-                new THREE.RingGeometry(radius * 1.4, radius * 2.1, 48),
-                new THREE.MeshBasicMaterial({
-                    color: 0xcbb78a, transparent: true, opacity: 0.5,
-                    side: THREE.DoubleSide, depthWrite: false, fog: false
-                })
+                this.ringGeometry(radius * 1.4, radius * 2.1),
+                this.ringMaterial()
             );
             ring.rotation.x = Math.PI / 2.6;
             ring.position.copy(planet.position);
             parent.add(ring);
         }
+    };
+
+    /**
+     * A ring geometry whose UVs map the radius (inner to outer edge) across the
+     * texture's horizontal axis and the angle once around its vertical axis, so
+     * a radial-strip ring image reads as concentric bands.
+     *
+     * @param {Number} inner Inner radius.
+     * @param {Number} outer Outer radius.
+     * @return {Object} A Three.RingGeometry with radial UVs.
+     */
+    Cyberspace.prototype.ringGeometry = function(inner, outer) {
+        var THREE = this.THREE;
+        var geo = new THREE.RingGeometry(inner, outer, 64, 1);
+        var pos = geo.attributes.position;
+        var uv = geo.attributes.uv;
+        var span = outer - inner || 1;
+        for (var i = 0; i < pos.count; i++) {
+            var x = pos.getX(i);
+            var y = pos.getY(i);
+            var r = Math.sqrt(x * x + y * y);
+            var theta = Math.atan2(y, x);
+            uv.setXY(i, (r - inner) / span, (theta + Math.PI) / (2 * Math.PI));
+        }
+        uv.needsUpdate = true;
+        return geo;
+    };
+
+    /**
+     * The material for a planet ring: the uploaded ring image (a radial strip)
+     * when one is set, otherwise the flat procedural sandy band.
+     *
+     * @return {Object} A Three.MeshBasicMaterial.
+     */
+    Cyberspace.prototype.ringMaterial = function() {
+        var THREE = this.THREE;
+        var opts = {side: THREE.DoubleSide, transparent: true, depthWrite: false, fog: false};
+        if (this.ringTexture) {
+            opts.map = this.ringTexture;
+            opts.opacity = 0.92;
+        } else {
+            opts.color = 0xcbb78a;
+            opts.opacity = 0.5;
+        }
+        return new THREE.MeshBasicMaterial(opts);
     };
 
     // A window module is roughly this many metres, so repeat counts keep the
@@ -8023,7 +8088,7 @@ define('format_mnemo/vr', [], function() {
         var assets = {
             signFontFamily: null, signTexture: null,
             roadTexture: null, groundTexture: null, sidewalkTexture: null,
-            spaceTexture: null, planetTextures: []
+            spaceTexture: null, planetTextures: [], ringTexture: null
         };
         var jobs = [];
 
@@ -8086,6 +8151,12 @@ define('format_mnemo/vr', [], function() {
                     assets.planetTextures[index] = tex;
                 }));
             });
+            // Optional ring image (a radial strip) shared by every ringed planet.
+            if (config.ringtextureurl) {
+                jobs.push(loadBoundedTexture(config.ringtextureurl, THREE, false, function(tex) {
+                    assets.ringTexture = tex;
+                }));
+            }
         }
 
         // Never block scene construction on a hung asset request: an external
