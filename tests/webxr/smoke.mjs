@@ -1226,6 +1226,107 @@ const scenarios = [
         }
     },
     {
+        name: 'traffic: makeTrafficCar sets velocity, heading and altitude per path',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -100, zMax: 12, avHalfX: 20};
+            const self = {makeTrafficCar: CS.prototype.makeTrafficCar};
+            const av = new THREE.Group();
+            const avrec = self.makeTrafficCar(av, {path: 'avenue', speed: 12, height: 20, land: 'none'}, 1, box);
+            const cross = new THREE.Group();
+            const crec = self.makeTrafficCar(cross, {path: 'cross', speed: 8, height: 26, land: 'rooftop'}, -1, box);
+            // Avenue: travels along +Z at yaw 0; cross: along -X at yaw -pi/2.
+            const avok = avrec.vz === 12 && avrec.vx === 0 && Math.abs(av.rotation.y) < 1e-9 &&
+                av.position.y === 20 && avrec.land === 'none';
+            const crossok = crec.vx === -8 && crec.vz === 0 &&
+                Math.abs(cross.rotation.y + Math.PI / 2) < 1e-9 &&
+                cross.position.y === 26 && crec.low === 10;
+            return {pass: avok && crossok, detail: `avYaw=${av.rotation.y} crossYaw=${cross.rotation.y} low=${crec.low}`};
+        }
+    },
+    {
+        name: 'traffic: trafficLandingY cruises, holds low, and climbs back',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {trafficLandingY: CS.prototype.trafficLandingY};
+            const cruise = self.trafficLandingY(0.1, 20, 2);
+            const hold = self.trafficLandingY(0.75, 20, 2);
+            const end = self.trafficLandingY(0.99, 20, 2);
+            const mid = self.trafficLandingY(0.625, 20, 2); // Half-way down.
+            const pass = cruise === 20 && hold === 2 && end === 20 &&
+                mid < 20 && mid > 2;
+            return {pass, detail: `cruise=${cruise} hold=${hold} end=${end} mid=${mid.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'traffic: updateTraffic advances and wraps within the box',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -100, zMax: 12, avHalfX: 20};
+            const zcar = new THREE.Group();
+            zcar.position.set(0, 20, 0);
+            const xcar = new THREE.Group();
+            xcar.position.set(49, 26, 0);
+            const self = {
+                time: 0,
+                traffic: [
+                    {mesh: zcar, vx: 0, vz: 20, box: box, height: 20, low: 20, land: 'none', bob: 0},
+                    {mesh: xcar, vx: 20, vz: 0, box: box, height: 26, low: 2, land: 'ground',
+                        bob: 0, landPhase: 0, landPeriod: 20}
+                ],
+                trafficLandingY: CS.prototype.trafficLandingY,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(1);
+            // z-car: 0+20 = 20 > zMax 12 -> wraps to zMin -100; cruise y stays ~20.
+            const zok = Math.abs(zcar.position.z + 100) < 1e-6 && Math.abs(zcar.position.y - 20) < 0.5;
+            // x-car: 49+20 = 69 > xMax 50 -> wraps to xMin -50.
+            const xok = Math.abs(xcar.position.x + 50) < 1e-6;
+            return {pass: zok && xok, detail: `z=${zcar.position.z} x=${xcar.position.x} y=${zcar.position.y.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'traffic: allocateTrafficCounts shares the cap deterministically in order',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {allocateTrafficCounts: CS.prototype.allocateTrafficCounts};
+            // Per-type clamp to 16, and the global cap of 32 filled in order.
+            const a = self.allocateTrafficCounts([{count: 20}, {count: 20}, {count: 5}]);
+            // Defaults and clamping: missing count -> 4.
+            const b = self.allocateTrafficCounts([{}, {count: 100}]);
+            const pass = a[0] === 16 && a[1] === 16 && a[2] === 0 &&
+                b[0] === 4 && b[1] === 16;
+            return {pass, detail: `a=${a.join(',')} b=${b.join(',')}`};
+        }
+    },
+    {
+        name: 'traffic: spawnTrafficType clamps count and respects the global cap',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -100, zMax: 12, avHalfX: 20};
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
+            const mk = (pre) => ({
+                THREE, traffic: pre, scene: {add: () => {}},
+                trafficBounds: () => box,
+                setShadow: CS.prototype.setShadow,
+                makeTrafficCar: CS.prototype.makeTrafficCar,
+                spawnTrafficType: CS.prototype.spawnTrafficType
+            });
+            // A count above the per-type limit is clamped to 16.
+            const a = mk([]);
+            a.spawnTrafficType(tpl, {path: 'avenue', speed: 10, height: 20, land: 'none', count: 100});
+            // With the traffic list near the global cap, only the remainder spawn.
+            const b = mk(new Array(30).fill(0).map(() => ({})));
+            b.spawnTrafficType(tpl, {path: 'avenue', speed: 10, height: 20, land: 'none', count: 10});
+            const pass = a.traffic.length === 16 && b.traffic.length === 32;
+            return {pass, detail: `perType=${a.traffic.length} capped=${b.traffic.length}`};
+        }
+    },
+    {
         name: 'editor: applyTransform applies non-uniform width/height/depth',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

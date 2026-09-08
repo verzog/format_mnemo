@@ -567,4 +567,59 @@ final class scene_test extends \advanced_testcase {
         $this->assertEqualsWithDelta(45.0, $obj['rot'], 1e-6);
         $this->assertEqualsWithDelta(2.0, $obj['brightness'], 1e-6);
     }
+
+    /**
+     * The flying-car types setting is parsed into the scene config: valid lines
+     * become car types (numeric fields clamped), and comment/blank/malformed
+     * lines and unknown models are skipped.
+     */
+    public function test_scene_config_parses_car_types(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        set_config('cartypes', implode("\n", [
+            '# a comment',
+            '',
+            'av | avenue | 14 | 20 | none | 8',
+            'av | cross | 999 | 26 | rooftop', // Speed clamped to 60; default count.
+            'nope | avenue | 10 | 20 | none', // Unknown model: skipped.
+            'av | spiral | 10 | 20 | none', // Bad path: skipped.
+            'av | diagonal | 10 | 20 | orbit', // Bad land: skipped.
+            'av | avenue | fast | high | none', // Non-numeric speed/height: skipped.
+            'av | avenue | 10', // Too few fields: skipped.
+        ]), 'format_mnemo');
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $cars = $config['cartypes'];
+        $this->assertCount(2, $cars);
+        $this->assertSame('avenue', $cars[0]['path']);
+        $this->assertEqualsWithDelta(14.0, $cars[0]['speed'], 1e-6);
+        $this->assertSame(8, $cars[0]['count']);
+        $this->assertSame('cross', $cars[1]['path']);
+        $this->assertEqualsWithDelta(60.0, $cars[1]['speed'], 1e-6); // Clamped.
+        $this->assertSame('rooftop', $cars[1]['land']);
+        $this->assertSame(4, $cars[1]['count']); // Default.
+    }
+
+    /**
+     * With no car types configured, the scene exposes an empty list (the client
+     * then falls back to its single default avenue vehicle).
+     */
+    public function test_scene_config_car_types_default_empty(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertSame([], $config['cartypes']);
+    }
 }

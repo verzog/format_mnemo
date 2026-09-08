@@ -106,6 +106,22 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
     ));
 
+    // Flying-car traffic types. One car type per line, in the form
+    // "model | path | speed | height | land [| count]",
+    // where model is a placeable prop name (bundled or uploaded, e.g. "av"),
+    // path is avenue|cross|diagonal, speed and height are world units, land is
+    // none|ground|rooftop, and the optional count is how many of that car to
+    // spawn. Blank lines and lines starting with "#" are ignored; unknown
+    // models or bad values are skipped. Left blank, a single avenue vehicle
+    // flies as before. See setting_cartypes_desc for the worked example.
+    $settings->add(new admin_setting_configtextarea(
+        'format_mnemo/cartypes',
+        get_string('setting_cartypes', 'format_mnemo'),
+        get_string('setting_cartypes_desc', 'format_mnemo'),
+        '',
+        PARAM_RAW
+    ));
+
     // Neon sign webfont. Left blank, sign and label text is drawn in the
     // bundled "Courier New"/monospace stack. Point this at a hosted webfont file
     // (.woff2/.woff/.ttf/.otf) to give every neon sign a custom typeface. The
