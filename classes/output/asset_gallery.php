@@ -106,37 +106,49 @@ class asset_gallery {
     }
 
     /**
-     * The glTF prop/building models bundled with the plugin, each resolved to
-     * the uploaded asset-pack file when one overrides it, otherwise the bundled
-     * model. External URL packs cannot be enumerated, so a configured asset base
-     * URL is reported per model as a URL-pack source pointing at the same name.
+     * The glTF prop/building models the scene may use, each resolved to its
+     * effective URL and source with the same precedence as the scene renderer:
+     * an external asset-pack URL first, then an uploaded asset-pack file, then
+     * the bundled model. The name set is the union of the bundled models and any
+     * uploaded pack files, so an uploaded-only model (e.g. building-forum.glb
+     * with no bundled counterpart) still gets a card.
      *
      * @return array[] The model entries.
      */
     public static function models(): array {
         global $CFG;
-        $dir = $CFG->dirroot . '/course/format/mnemo/models';
         $names = [];
-        foreach (glob($dir . '/*.glb') ?: [] as $path) {
-            $names[] = basename($path, '.glb');
+        foreach (glob($CFG->dirroot . '/course/format/mnemo/models/*.glb') ?: [] as $path) {
+            $names[basename($path, '.glb')] = true;
         }
+        $uploaded = self::uploaded_pack_names();
+        foreach (array_keys($uploaded) as $filename) {
+            if (substr($filename, -4) === '.glb') {
+                $names[basename($filename, '.glb')] = true;
+            }
+        }
+        $names = array_keys($names);
         sort($names);
 
         $packbase = get_config('format_mnemo', 'assetbaseurl');
-        $uploaded = self::uploaded_pack_names();
+        $bundled = self::bundled_model_names();
 
         $out = [];
         foreach ($names as $name) {
             $filename = $name . '.glb';
-            if (isset($uploaded[$filename])) {
-                $url = self::file_url('assetpack', $uploaded[$filename]);
-                $source = 'uploaded';
-            } else if (!empty($packbase)) {
+            // Match models_base_url(): the external URL pack wins, then an
+            // uploaded file, then the bundled model.
+            if (!empty($packbase)) {
                 $url = rtrim($packbase, '/') . '/' . $filename;
                 $source = 'url';
-            } else {
+            } else if (isset($uploaded[$filename])) {
+                $url = self::file_url('assetpack', $uploaded[$filename]);
+                $source = 'uploaded';
+            } else if (isset($bundled[$name])) {
                 $url = (new moodle_url('/course/format/mnemo/models/' . $filename))->out(false);
                 $source = 'bundled';
+            } else {
+                continue;
             }
             $out[] = [
                 'key' => $name,
@@ -146,6 +158,20 @@ class asset_gallery {
             ];
         }
         return $out;
+    }
+
+    /**
+     * The base names of the models bundled with the plugin, as a lookup set.
+     *
+     * @return array<string, bool> Map of model name => true.
+     */
+    protected static function bundled_model_names(): array {
+        global $CFG;
+        $set = [];
+        foreach (glob($CFG->dirroot . '/course/format/mnemo/models/*.glb') ?: [] as $path) {
+            $set[basename($path, '.glb')] = true;
+        }
+        return $set;
     }
 
     /**

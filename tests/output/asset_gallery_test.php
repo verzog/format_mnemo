@@ -124,13 +124,26 @@ final class asset_gallery_test extends \advanced_testcase {
             $this->assertSame('bundled', $model['source']);
         }
 
-        // Upload a replacement lamp into the asset pack.
+        // Upload a replacement lamp, and an uploaded-only building model with no
+        // bundled counterpart: the lamp flips to uploaded and the building model
+        // gains its own card.
         $this->make_file('assetpack', 'lamp.glb');
+        $this->make_file('assetpack', 'building-forum.glb');
+        $models = asset_gallery::models();
+        $bykey = [];
+        foreach ($models as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame('uploaded', $bykey['lamp']['source']);
+        $this->assertStringContainsString('lamp.glb', $bykey['lamp']['url']);
+        $this->assertArrayHasKey('building-forum', $bykey);
+        $this->assertSame('uploaded', $bykey['building-forum']['source']);
+
+        // A configured external pack URL wins over uploads (matching the scene).
+        set_config('assetbaseurl', 'https://cdn.example.org/pack/', 'format_mnemo');
         foreach (asset_gallery::models() as $model) {
-            if ($model['key'] === 'lamp') {
-                $this->assertSame('uploaded', $model['source']);
-                $this->assertStringContainsString('lamp.glb', $model['url']);
-            }
+            $this->assertSame('url', $model['source']);
+            $this->assertStringStartsWith('https://cdn.example.org/pack/', $model['url']);
         }
     }
 }

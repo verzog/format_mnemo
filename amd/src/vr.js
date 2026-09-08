@@ -8276,8 +8276,13 @@ define('format_mnemo/vr', [], function() {
             entries.push(entry);
             loader.loadAsync(m.url).then(function(gltf) {
                 framePreviewModel(THREE, gltf.scene, cam);
-                scene.add(gltf.scene);
-                entry.model = gltf.scene;
+                // Spin a centred pivot, not the translated model: rotating the
+                // model directly would orbit its original local origin (off the
+                // camera target) for a model whose root is not centred.
+                var pivot = new THREE.Group();
+                pivot.add(gltf.scene);
+                scene.add(pivot);
+                entry.model = pivot;
                 return null;
             }).catch(function() {
                 // Leave this card's canvas blank if the model cannot be loaded.
