@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Version details for the Mnemo (VR cyberspace) course format.
+ * Cache definitions for the Mnemo (VR cyberspace) course format.
  *
  * @package    format_mnemo
  * @copyright  2026 Vernon Spain
@@ -24,9 +24,15 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2026091019;
-$plugin->requires  = 2025041400; // Moodle 5.0.
-$plugin->supported = [500, 502]; // Moodle 5.0 - 5.2.
-$plugin->component = 'format_mnemo';
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = 'v0.1.0';
+$definitions = [
+    // Asset metadata (copyright, generator) read from prop model GLBs for the
+    // admin asset viewer, keyed by a hash of the model source and URL. A TTL so
+    // an updated external asset pack is eventually re-read; local models are
+    // keyed by a cache-busting URL (or purged on plugin upgrade).
+    'modelmeta' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'simpledata' => true,
+        'ttl' => 86400,
+    ],
+];

@@ -150,14 +150,144 @@ class asset_gallery {
             } else {
                 continue;
             }
+            $meta = self::model_metadata(
+                $source,
+                $url,
+                $source === 'bundled' ? $CFG->dirroot . '/course/format/mnemo/models/' . $filename : null,
+                $source === 'uploaded' ? ($uploaded[$filename] ?? null) : null
+            );
             $out[] = [
                 'key' => $name,
                 'label' => $name,
                 'url' => $url,
                 'source' => $source,
+                'copyright' => $meta['copyright'],
+                'generator' => $meta['generator'],
             ];
         }
         return $out;
+    }
+
+    /**
+     * The glTF asset metadata (copyright and generator) embedded in a model,
+     * read from its GLB header. Cached per source+URL so the gallery does not
+     * re-read local files or re-fetch remote packs on every view. Best-effort:
+     * anything unreadable (a truncated file, a remote fetch failure, a model
+     * with no such fields) yields nulls.
+     *
+     * @param string $source Where the model comes from: bundled, uploaded, url.
+     * @param string $url The model's effective URL (the cache key with source).
+     * @param string|null $path Local filesystem path, for a bundled model.
+     * @param \stored_file|null $file The stored file, for an uploaded model.
+     * @return array{copyright: ?string, generator: ?string}
+     */
+    protected static function model_metadata(string $source, string $url, ?string $path, ?\stored_file $file): array {
+        $cache = \cache::make('format_mnemo', 'modelmeta');
+        $cachekey = sha1($source . '|' . $url);
+        $cached = $cache->get($cachekey);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        $head = self::glb_head_bytes($source, $url, $path, $file);
+        $meta = self::parse_glb_asset($head);
+        $cache->set($cachekey, $meta);
+        return $meta;
+    }
+
+    /**
+     * Read enough of a GLB (the 12-byte header and the leading JSON chunk) to
+     * hold its asset metadata, from whichever source backs the model. Returns
+     * the empty string when the bytes cannot be obtained.
+     *
+     * @param string $source bundled, uploaded or url.
+     * @param string $url The remote URL (for the url source).
+     * @param string|null $path Local path (for the bundled source).
+     * @param \stored_file|null $file The stored file (for the uploaded source).
+     * @return string The leading bytes of the GLB (possibly empty).
+     */
+    protected static function glb_head_bytes(string $source, string $url, ?string $path, ?\stored_file $file): string {
+        // Cap on how much of the file to read: the JSON chunk sits right after
+        // the 12-byte header, so a few hundred KB covers any realistic model.
+        $cap = 1048576;
+        if ($source === 'bundled' && $path !== null && is_readable($path)) {
+            return (string)file_get_contents($path, false, null, 0, $cap);
+        }
+        if ($source === 'uploaded' && $file !== null) {
+            $fh = $file->get_content_file_handle();
+            if ($fh === false) {
+                return '';
+            }
+            $bytes = (string)fread($fh, $cap);
+            fclose($fh);
+            return $bytes;
+        }
+        if ($source === 'url') {
+            // Never make network calls under unit tests: they must stay
+            // hermetic and fast. Real admin views still fetch.
+            if (defined('PHPUNIT_TEST') && PHPUNIT_TEST) {
+                return '';
+            }
+            $curl = new \curl();
+            $bytes = $curl->get($url, [], [
+                'CURLOPT_RANGE' => '0-' . ($cap - 1),
+                'CURLOPT_TIMEOUT' => 6,
+                'CURLOPT_CONNECTTIMEOUT' => 4,
+                'CURLOPT_FOLLOWLOCATION' => 1,
+                'CURLOPT_MAXREDIRS' => 3,
+            ]);
+            if ($curl->get_errno() || !is_string($bytes)) {
+                return '';
+            }
+            // A server that ignores Range returns the whole file; keep only the
+            // capped head so parsing stays bounded.
+            return substr($bytes, 0, $cap);
+        }
+        return '';
+    }
+
+    /**
+     * Parse the glTF asset block (copyright, generator) out of the leading
+     * bytes of a GLB. Tolerant of anything malformed or truncated - it simply
+     * returns nulls rather than raising.
+     *
+     * @param string $bytes The leading bytes of a GLB (header + JSON chunk).
+     * @return array{copyright: ?string, generator: ?string}
+     */
+    protected static function parse_glb_asset(string $bytes): array {
+        $none = ['copyright' => null, 'generator' => null];
+        // 12-byte GLB header (magic, version, length) + 8-byte chunk header.
+        if (strlen($bytes) < 20 || substr($bytes, 0, 4) !== 'glTF') {
+            return $none;
+        }
+        $chunk = unpack('Vlength/Vtype', substr($bytes, 12, 8));
+        // The first chunk must be JSON (type 0x4E4F534A).
+        if (!$chunk || $chunk['type'] !== 0x4E4F534A) {
+            return $none;
+        }
+        $json = substr($bytes, 20, $chunk['length']);
+        // If the buffer was truncated before the whole JSON chunk (a ranged
+        // remote read), json_decode fails and we fall back to nulls.
+        $data = json_decode($json, true);
+        if (!is_array($data) || !isset($data['asset']) || !is_array($data['asset'])) {
+            return $none;
+        }
+        $asset = $data['asset'];
+        $clean = function ($value): ?string {
+            if (!is_string($value)) {
+                return null;
+            }
+            $value = trim($value);
+            if ($value === '') {
+                return null;
+            }
+            // Bound the stored/displayed length so a pathological file cannot
+            // bloat the cache or the page.
+            return \core_text::substr($value, 0, 500);
+        };
+        return [
+            'copyright' => $clean($asset['copyright'] ?? null),
+            'generator' => $clean($asset['generator'] ?? null),
+        ];
     }
 
     /**
