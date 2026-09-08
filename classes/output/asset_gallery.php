@@ -36,6 +36,13 @@ use moodle_url;
  */
 class asset_gallery {
     /**
+     * @var float|null Wall-clock deadline (epoch seconds) for remote model
+     * metadata reads in this request, or null before the first remote read.
+     * Bounds the total time the gallery spends fetching from external packs.
+     */
+    protected static $metafetchdeadline = null;
+
+    /**
      * The texture assets, each as an ordered map describing one card: its key,
      * label/usage string keys, effective URL (or null) and source. A URL setting
      * takes precedence over an uploaded file, matching the scene renderer.
@@ -206,6 +213,7 @@ class asset_gallery {
      * @return string The leading bytes of the GLB (possibly empty).
      */
     protected static function glb_head_bytes(string $source, string $url, ?string $path, ?\stored_file $file): string {
+        global $CFG;
         // Cap on how much of the file to read: the JSON chunk sits right after
         // the 12-byte header, so a few hundred KB covers any realistic model.
         $cap = 1048576;
@@ -227,11 +235,29 @@ class asset_gallery {
             if (defined('PHPUNIT_TEST') && PHPUNIT_TEST) {
                 return '';
             }
+            // A whole-gallery wall-clock budget for cold remote reads, so a slow
+            // or unreachable external pack cannot hold the admin page open: once
+            // the budget is spent, remaining models get no metadata (cached
+            // results are still served, so a warm gallery is unaffected).
+            if (self::$metafetchdeadline === null) {
+                self::$metafetchdeadline = microtime(true) + 8.0;
+            }
+            if (microtime(true) >= self::$metafetchdeadline) {
+                return '';
+            }
+            // The global curl class lives in the legacy file API, which is not
+            // autoloaded and may not have been pulled in by the admin page.
+            require_once($CFG->libdir . '/filelib.php');
             $curl = new \curl();
             $bytes = $curl->get($url, [], [
+                // Request only the head - the JSON chunk is at the file start.
                 'CURLOPT_RANGE' => '0-' . ($cap - 1),
-                'CURLOPT_TIMEOUT' => 6,
-                'CURLOPT_CONNECTTIMEOUT' => 4,
+                // Refuse an over-cap body up front (when the server declares a
+                // length), and keep timeouts short so one slow host cannot
+                // dominate the gallery-wide budget above.
+                'CURLOPT_MAXFILESIZE' => $cap,
+                'CURLOPT_TIMEOUT' => 3,
+                'CURLOPT_CONNECTTIMEOUT' => 2,
                 'CURLOPT_FOLLOWLOCATION' => 1,
                 'CURLOPT_MAXREDIRS' => 3,
             ]);
