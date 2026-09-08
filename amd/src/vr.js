@@ -8553,6 +8553,46 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * A model loader for the admin previews, returning url -&gt; Promise&lt;Object3D&gt;.
+     * Uses the addon GLTFLoader when available (with the Draco/KTX2/meshopt
+     * decoders), otherwise the client's built-in uncompressed-glTF parser - so a
+     * strict CSP that blocks the addon import map still yields previews, exactly
+     * as the in-course scene does. Without this fallback a page where the addon
+     * loader does not resolve leaves every card blank.
+     *
+     * @param {Object} loaded The loaded Three.js + addon namespace.
+     * @param {Object} config The preview config (addonsbaseurl).
+     * @param {Object} renderer The shared WebGL renderer (for KTX2 support).
+     * @return {Function} url -&gt; Promise resolving with a Three.Object3D.
+     */
+    function previewModelLoader(loaded, config, renderer) {
+        var THREE = loaded.THREE;
+        var addon = buildPreviewLoader(loaded, config, renderer);
+        if (addon) {
+            return function(url) {
+                return addon.loadAsync(url).then(function(gltf) {
+                    return gltf.scene;
+                });
+            };
+        }
+        // Bundled fallback: the client's own parser needs only THREE, so back it
+        // with a bare object carrying the prototype's glb* helpers.
+        var parser = Object.create(Cyberspace.prototype);
+        parser.THREE = THREE;
+        return function(url) {
+            var base = url.replace(/[^/]*$/, '');
+            return fetch(url).then(function(res) {
+                if (!res.ok) {
+                    throw new Error('model fetch failed: ' + res.status);
+                }
+                return res.arrayBuffer();
+            }).then(function(buffer) {
+                return parser.parseGlb(buffer, base);
+            });
+        };
+    }
+
+    /**
      * Render the admin asset viewer's model previews: load each model, frame it,
      * and spin them all in one animation loop through a single shared WebGL
      * renderer whose output is copied into each card's 2D canvas (so the gallery
@@ -8568,13 +8608,14 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var size = 240;
-        var renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+        // Keep the drawing buffer so the WebGL frame is still readable when it
+        // is copied into each card's 2D canvas with drawImage() below; without
+        // preserveDrawingBuffer the copy can come back blank (black) on many
+        // browsers.
+        var renderer = new THREE.WebGLRenderer({antialias: true, alpha: true, preserveDrawingBuffer: true});
         renderer.setPixelRatio(1);
         renderer.setSize(size, size, false);
-        var loader = buildPreviewLoader(loaded, config, renderer);
-        if (!loader) {
-            return;
-        }
+        var load = previewModelLoader(loaded, config, renderer);
         var entries = [];
         models.forEach(function(m) {
             var canvas = document.getElementById(m.canvasid);
@@ -8589,18 +8630,21 @@ define('format_mnemo/vr', [], function() {
             var cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
             var entry = {ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null};
             entries.push(entry);
-            loader.loadAsync(m.url).then(function(gltf) {
-                framePreviewModel(THREE, gltf.scene, cam);
+            load(m.url).then(function(object) {
+                framePreviewModel(THREE, object, cam);
                 // Spin a centred pivot, not the translated model: rotating the
                 // model directly would orbit its original local origin (off the
                 // camera target) for a model whose root is not centred.
                 var pivot = new THREE.Group();
-                pivot.add(gltf.scene);
+                pivot.add(object);
                 scene.add(pivot);
                 entry.model = pivot;
                 return null;
-            }).catch(function() {
+            }).catch(function(e) {
                 // Leave this card's canvas blank if the model cannot be loaded.
+                if (window.console) {
+                    window.console.warn('format_mnemo: preview model failed: ' + m.url, e);
+                }
             });
         });
         if (!entries.length) {
@@ -8630,6 +8674,7 @@ define('format_mnemo/vr', [], function() {
         _GestureManager: GestureManager,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
+        _previewModelLoader: previewModelLoader,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.

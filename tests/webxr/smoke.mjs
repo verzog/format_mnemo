@@ -2281,6 +2281,37 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: model loader uses the addon loader when present',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            const fakeScene = new THREE.Group();
+            const loaded = {
+                THREE,
+                GLTFLoader: function() {
+                    this.setDRACOLoader = () => this;
+                    this.setKTX2Loader = () => this;
+                    this.setMeshoptDecoder = () => this;
+                    this.loadAsync = () => Promise.resolve({scene: fakeScene});
+                }
+            };
+            const load = M._previewModelLoader(loaded, {addonsbaseurl: ''}, null);
+            const obj = await load('any.glb');
+            return {pass: typeof load === 'function' && obj === fakeScene, detail: `obj===scene:${obj === fakeScene}`};
+        }
+    },
+    {
+        name: 'preview: model loader falls back to a loader when no addon is present',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            // No GLTFLoader on the namespace: must still return a usable loader
+            // (the built-in parser path) rather than null, so cards are not blank.
+            const load = M._previewModelLoader({THREE}, {addonsbaseurl: ''}, null);
+            return {pass: typeof load === 'function', detail: `type=${typeof load}`};
+        }
+    },
+    {
         name: 'reader: XR trigger locomotion is suppressed while reading',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
