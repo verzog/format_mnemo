@@ -1487,7 +1487,7 @@ const scenarios = [
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const added = [];
-            const self = {THREE, scene: {add: (o) => added.push(o)},
+            const self = {THREE, scene: {add: (o) => added.push(o)}, planets: [],
                 newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet};
             const tex = new THREE.Texture();
             self.makePlanet(20, {x: 0, y: 0, z: -100}, [0x888888, 0x333333], false, tex);
@@ -1507,9 +1507,10 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const mk = (textures) => {
                 const self = {THREE, scene: {add: () => {}}, planetTextures: textures,
-                    planetField: null,
+                    planetField: null, planets: [], planetRings: [], ringTexture: null,
                     newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
-                    buildPlanets: CS.prototype.buildPlanets};
+                    buildPlanets: CS.prototype.buildPlanets,
+                    ringGeometry: CS.prototype.ringGeometry, ringMaterial: CS.prototype.ringMaterial};
                 self.buildPlanets();
                 // Planets live under the revolving field group now.
                 let spheres = 0;
@@ -1537,12 +1538,80 @@ const scenarios = [
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const field = new THREE.Group();
-            const self = {planetField: field, spinPlanets: CS.prototype.spinPlanets};
+            const self = {planetField: field, planets: [], spinPlanets: CS.prototype.spinPlanets};
             self.spinPlanets(3600); // One hour -> one full turn.
             const full = Math.abs(field.rotation.y - Math.PI * 2) < 1e-3;
             // With no field it is a no-op and must not throw.
-            ({planetField: null, spinPlanets: CS.prototype.spinPlanets}).spinPlanets(1);
+            ({planetField: null, planets: [], spinPlanets: CS.prototype.spinPlanets}).spinPlanets(1);
             return {pass: full, detail: `y=${field.rotation.y.toFixed(4)}`};
+        }
+    },
+    {
+        name: 'space: spinPlanets turns each planet on its own axis',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const p1 = new THREE.Object3D();
+            const p2 = new THREE.Object3D();
+            const self = {planetField: new THREE.Group(), planets: [p1, p2],
+                spinPlanets: CS.prototype.spinPlanets};
+            self.spinPlanets(120); // Two minutes -> one self-rotation.
+            const oneTurn = Math.abs(p1.rotation.y - Math.PI * 2) < 1e-3 &&
+                Math.abs(p2.rotation.y - Math.PI * 2) < 1e-3;
+            return {pass: oneTurn, detail: `y=${p1.rotation.y.toFixed(4)}`};
+        }
+    },
+    {
+        name: 'space: a planet is ringed by its filename flag, else not',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (rings) => {
+                const added = [];
+                const self = {THREE, scene: {add: (o) => added.push(o)},
+                    planetTextures: [new THREE.Texture(), new THREE.Texture()],
+                    planetField: null, planets: [], planetRings: rings, ringTexture: null,
+                    newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
+                    buildPlanets: CS.prototype.buildPlanets,
+                    ringGeometry: CS.prototype.ringGeometry, ringMaterial: CS.prototype.ringMaterial};
+                self.buildPlanets();
+                let rings2 = 0;
+                self.planetField.traverse((o) => {
+                    if (o.geometry && o.geometry.type === 'RingGeometry') {
+                        rings2++;
+                    }
+                });
+                return rings2;
+            };
+            // Second planet flagged -> exactly one ring; none flagged -> no rings.
+            const pass = mk([false, true]) === 1 && mk([false, false]) === 0;
+            return {pass, detail: `flagged=${mk([false, true])} none=${mk([false, false])}`};
+        }
+    },
+    {
+        name: 'space: a ring texture skins the ring with radial UVs',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const ringTex = new THREE.Texture();
+            const added = [];
+            const self = {THREE, scene: {add: (o) => added.push(o)}, planets: [],
+                planetField: null, ringTexture: ringTex,
+                newCanvasCtx: CS.prototype.newCanvasCtx, makePlanet: CS.prototype.makePlanet,
+                ringGeometry: CS.prototype.ringGeometry, ringMaterial: CS.prototype.ringMaterial};
+            self.makePlanet(20, {x: 0, y: 0, z: -100}, [0x888888, 0x333333], true, new THREE.Texture());
+            const ring = added.find((o) => o.geometry && o.geometry.type === 'RingGeometry');
+            // The ring carries the uploaded image, and its UVs span 0..1 radially.
+            const uv = ring.geometry.attributes.uv;
+            let minU = 1;
+            let maxU = 0;
+            for (let i = 0; i < uv.count; i++) {
+                minU = Math.min(minU, uv.getX(i));
+                maxU = Math.max(maxU, uv.getX(i));
+            }
+            const pass = !!ring && ring.material.map === ringTex &&
+                minU < 0.01 && maxU > 0.99;
+            return {pass, detail: `map=${ring && ring.material.map === ringTex} u=${minU.toFixed(2)}..${maxU.toFixed(2)}`};
         }
     },
     {

@@ -255,6 +255,27 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 9, 'accepted_types' => ['web_image']]
     ));
 
+    // Ring image for the Void's ringed planets: a radial strip read from the
+    // inner edge (left) to the outer edge (right) and wrapped once around the
+    // ring, so it reads as concentric bands. A planet is ringed when its planet
+    // texture's filename contains "ring". Left blank, rings use a flat band.
+    // URL, or upload below.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/ringtextureurl',
+        get_string('setting_ringtextureurl', 'format_mnemo'),
+        get_string('setting_ringtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/ringtexture',
+        get_string('setting_ringtexture', 'format_mnemo'),
+        get_string('setting_ringtexture_desc', 'format_mnemo'),
+        'ringtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
     // Texture tiling scale (world units per tile) for the road, ground and
     // sidewalk textures. Larger values stretch the texture over more ground
     // (fewer, more spread-out tiles); smaller values repeat it more densely.
