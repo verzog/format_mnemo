@@ -56,10 +56,13 @@ class asset_gallery {
             $out[] = self::single_texture($def['key'], $def['urlsetting'], $def['filearea']);
         }
         // The planet maps are a multi-file area: one card per uploaded map.
-        foreach (self::stored_files('planettextures') as $index => $file) {
+        // get_area_files() keys by pathname hash, so count with our own index.
+        $n = 0;
+        foreach (self::stored_files('planettextures') as $file) {
+            $n++;
             $out[] = [
                 'key' => 'planettexture',
-                'label' => get_string('preview_tex_planet', 'format_mnemo', $index + 1),
+                'label' => get_string('preview_tex_planet', 'format_mnemo', $n),
                 'usagekey' => 'preview_use_planet',
                 'url' => self::file_url('planettextures', $file),
                 'source' => 'uploaded',
