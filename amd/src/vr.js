@@ -2117,7 +2117,11 @@ define('format_mnemo/vr', [], function() {
             strength = ext.emissiveStrength;
         }
         var glows = emMax > 0 || !!m.emissiveMap;
-        m.emissiveIntensity = glows ? (0.7 + this.day.night) * strength : 0;
+        // The day/night state is set on a live scene; a standalone parser (e.g.
+        // the admin preview) has none, so fall back to a mid glow rather than
+        // dereferencing an absent this.day.
+        var night = (this.day && typeof this.day.night === 'number') ? this.day.night : 0.5;
+        m.emissiveIntensity = glows ? (0.7 + night) * strength : 0;
     };
 
     /**
@@ -8575,10 +8579,12 @@ define('format_mnemo/vr', [], function() {
                 });
             };
         }
-        // Bundled fallback: the client's own parser needs only THREE, so back it
-        // with a bare object carrying the prototype's glb* helpers.
+        // Bundled fallback: the client's own parser, backed by a bare object
+        // carrying the prototype's glb* helpers. It needs THREE and a day/night
+        // state (only used to scale emissive glow); a mid value suits a preview.
         var parser = Object.create(Cyberspace.prototype);
         parser.THREE = THREE;
+        parser.day = {night: 0.5};
         return function(url) {
             var base = url.replace(/[^/]*$/, '');
             return fetch(url).then(function(res) {
