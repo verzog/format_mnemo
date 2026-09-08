@@ -161,6 +161,43 @@ class asset_gallery {
     }
 
     /**
+     * The prop model base names the in-view object placer may drop: the union
+     * of the plugin's bundled models and any uploaded asset-pack .glb file,
+     * minus the named building models (building-*), which are bound to
+     * activities and are not free-standing props. Sorted, with names too long
+     * for the placed-object type column dropped. This is the single source of
+     * truth shared by the scene payload (the palette it offers) and the
+     * add_placed_object web service (the names it accepts).
+     *
+     * @return string[] The placeable prop base names.
+     */
+    public static function placer_prop_names(): array {
+        $names = [];
+        foreach (array_keys(self::bundled_model_names()) as $name) {
+            $names[$name] = true;
+        }
+        foreach (array_keys(self::uploaded_pack_names()) as $filename) {
+            if (substr($filename, -4) === '.glb') {
+                $names[basename($filename, '.glb')] = true;
+            }
+        }
+        $out = [];
+        foreach (array_keys($names) as $name) {
+            // Named building models are activity-bound, not free-standing props.
+            if (strpos($name, 'building-') === 0) {
+                continue;
+            }
+            // Keep within the format_mnemo_placedobj.type column width.
+            if ($name === '' || \core_text::strlen($name) > 32) {
+                continue;
+            }
+            $out[] = $name;
+        }
+        sort($out);
+        return $out;
+    }
+
+    /**
      * The base names of the models bundled with the plugin, as a lookup set.
      *
      * @return array<string, bool> Map of model name => true.

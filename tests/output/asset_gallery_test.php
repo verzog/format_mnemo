@@ -146,4 +146,31 @@ final class asset_gallery_test extends \advanced_testcase {
             $this->assertStringStartsWith('https://cdn.example.org/pack/', $model['url']);
         }
     }
+
+    /**
+     * The placer offers the bundled props plus any uploaded model, but never a
+     * named building model.
+     */
+    public function test_placer_prop_names(): void {
+        $this->resetAfterTest();
+
+        // The bundled props are offered out of the box; building-quiz.glb is a
+        // named building and is excluded.
+        $names = asset_gallery::placer_prop_names();
+        $this->assertContains('lamp', $names);
+        $this->assertContains('av', $names);
+        $this->assertNotContains('building-quiz', $names);
+
+        // An uploaded prop joins the list; an uploaded building model does not.
+        $this->make_file('assetpack', 'spaceship.glb');
+        $this->make_file('assetpack', 'building-forum.glb');
+        $names = asset_gallery::placer_prop_names();
+        $this->assertContains('spaceship', $names);
+        $this->assertNotContains('building-forum', $names);
+        // The list is sorted and free of duplicates.
+        $sorted = $names;
+        sort($sorted);
+        $this->assertSame($sorted, $names);
+        $this->assertSame(array_values(array_unique($names)), $names);
+    }
 }

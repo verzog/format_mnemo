@@ -2356,6 +2356,29 @@ define('format_mnemo/vr', [], function() {
         load('av', function(tpl) {
             self.spawnTraffic(tpl);
         });
+
+        // Load templates for any prop beyond the built-in four: every type
+        // already placed in this course (so all viewers see it), plus - for an
+        // editor - the whole placer palette (so a newly-picked prop can be
+        // dropped immediately). load() caches each template and builds any
+        // placed objects of that type.
+        var known = {lamp: true, barrier: true, kiosk: true, av: true};
+        var extra = {};
+        this.placedObjects.forEach(function(p) {
+            if (!known[p.type]) {
+                extra[p.type] = true;
+            }
+        });
+        if (this.config.canedit) {
+            (this.config.placerprops || []).forEach(function(p) {
+                if (!known[p.key]) {
+                    extra[p.key] = true;
+                }
+            });
+        }
+        Object.keys(extra).forEach(function(name) {
+            load(name, function() {});
+        });
     };
 
     /**
@@ -2384,7 +2407,17 @@ define('format_mnemo/vr', [], function() {
             kiosk: s.placekiosk || 'Kiosk',
             av: s.placevehicle || 'Vehicle'
         };
-        return labels[type] || type;
+        if (labels[type]) {
+            return labels[type];
+        }
+        // An uploaded prop is labelled by its file name (via the server palette).
+        var list = this.config.placerprops || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].key === type) {
+                return list[i].label;
+            }
+        }
+        return type;
     };
 
     /**
@@ -4639,21 +4672,47 @@ define('format_mnemo/vr', [], function() {
         var panel = document.createElement('div');
         panel.className = 'format-mnemo__placer';
         panel.hidden = true;
-        var types = [
-            {key: 'lamp', label: s.placelamp || 'Street lamp'},
-            {key: 'barrier', label: s.placebarrier || 'Barrier'},
-            {key: 'kiosk', label: s.placekiosk || 'Kiosk'},
-            {key: 'av', label: s.placevehicle || 'Vehicle'}
-        ];
-        var html = '<div class="format-mnemo__placer-types">';
-        types.forEach(function(t) {
-            html += '<button type="button" class="format-mnemo__placer-type" data-mnemo-place="' +
-                t.key + '">' + t.label + '</button>';
+        // The palette is server-provided (bundled props plus any uploaded
+        // asset-pack model that is not a named building), falling back to the
+        // built-in four if the config predates the feature.
+        var types = (this.config.placerprops && this.config.placerprops.length) ?
+            this.config.placerprops.map(function(p) {
+                return {key: p.key, label: p.label};
+            }) : [
+                {key: 'lamp', label: s.placelamp || 'Street lamp'},
+                {key: 'barrier', label: s.placebarrier || 'Barrier'},
+                {key: 'kiosk', label: s.placekiosk || 'Kiosk'},
+                {key: 'av', label: s.placevehicle || 'Vehicle'}
+            ];
+        // Keep the active prop type in the offered set (the default 'lamp' may
+        // not be present if the site removed the bundled models).
+        var hasType = types.some(function(t) {
+            return t.key === self.placeType;
         });
-        html += '</div><div class="format-mnemo__placer-hint">' +
-            (s.placehint || 'Pick an object, then click a grid square to place it.') +
-            '</div><div class="format-mnemo__editor-status" data-mnemo-place-status></div>';
-        panel.innerHTML = html;
+        if (!hasType && types.length) {
+            this.placeType = types[0].key;
+        }
+        // Build the type buttons as DOM nodes (not an HTML string) so an
+        // uploaded prop's file name can never inject markup through its label.
+        var typeWrap = document.createElement('div');
+        typeWrap.className = 'format-mnemo__placer-types';
+        types.forEach(function(t) {
+            var tb = document.createElement('button');
+            tb.type = 'button';
+            tb.className = 'format-mnemo__placer-type';
+            tb.setAttribute('data-mnemo-place', t.key);
+            tb.textContent = t.label;
+            typeWrap.appendChild(tb);
+        });
+        panel.appendChild(typeWrap);
+        var hint = document.createElement('div');
+        hint.className = 'format-mnemo__placer-hint';
+        hint.textContent = s.placehint || 'Pick an object, then click a grid square to place it.';
+        panel.appendChild(hint);
+        var pstatus = document.createElement('div');
+        pstatus.className = 'format-mnemo__editor-status';
+        pstatus.setAttribute('data-mnemo-place-status', '');
+        panel.appendChild(pstatus);
         this.root.appendChild(panel);
         this.placerPanel = panel;
 

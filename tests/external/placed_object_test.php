@@ -70,6 +70,56 @@ final class placed_object_test extends \advanced_testcase {
     }
 
     /**
+     * Store a one-byte model in the system-context asset-pack file area.
+     *
+     * @param string $filename The glTF file name.
+     */
+    protected function upload_pack_model(string $filename): void {
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'assetpack',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => $filename,
+        ], 'x');
+    }
+
+    /**
+     * An uploaded asset-pack prop (not a bundled one) can be placed.
+     */
+    public function test_uploaded_prop_can_be_placed(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $this->upload_pack_model('spaceship.glb');
+
+        $result = add_placed_object::execute($course->id, 'spaceship', 0.0, 0.0);
+        $this->assertSame('spaceship', $result['type']);
+        $this->assertSame('spaceship', $DB->get_field('format_mnemo_placedobj', 'type', ['id' => $result['id']]));
+    }
+
+    /**
+     * A named building model is never a placeable prop, even when uploaded.
+     */
+    public function test_building_model_is_not_placeable(): void {
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $this->upload_pack_model('building-forum.glb');
+
+        $this->expectException(\invalid_parameter_exception::class);
+        add_placed_object::execute($course->id, 'building-forum', 0.0, 0.0);
+    }
+
+    /**
      * Removing a prop also clears any transform it accumulated, and is scoped
      * to the course.
      */

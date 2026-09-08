@@ -301,6 +301,34 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The prop palette offered by the in-view object placer: one entry per
+     * placeable prop (the plugin's bundled props plus any uploaded asset-pack
+     * model that is not a named building), each with a display label. The
+     * built-in props keep their localised labels; an uploaded prop is labelled
+     * by its file name. The name set is resolved by
+     * {@see asset_gallery::placer_prop_names()} so the palette and the
+     * add_placed_object web service always agree on what may be placed.
+     *
+     * @return array<int, array{key: string, label: string}>
+     */
+    protected function placer_props(): array {
+        $labels = [
+            'lamp' => get_string('placelamp', 'format_mnemo'),
+            'barrier' => get_string('placebarrier', 'format_mnemo'),
+            'kiosk' => get_string('placekiosk', 'format_mnemo'),
+            'av' => get_string('placevehicle', 'format_mnemo'),
+        ];
+        $out = [];
+        foreach (\format_mnemo\output\asset_gallery::placer_prop_names() as $name) {
+            $out[] = [
+                'key' => $name,
+                'label' => $labels[$name] ?? $name,
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -501,6 +529,9 @@ class scene implements renderable, templatable {
             // Teacher-placed decorative props (in-view object placer), rebuilt
             // for every viewer and made selectable/removable for editors.
             'placedobjects' => $this->placed_objects((int)$course->id),
+            // The prop palette the in-view placer offers: the bundled props plus
+            // any uploaded asset-pack model that is not a named building.
+            'placerprops' => $this->placer_props(),
             // The grid the generated layout snaps to and the placer/editor use.
             'gridsize' => 2,
             'threeurl' => $threeurl,
