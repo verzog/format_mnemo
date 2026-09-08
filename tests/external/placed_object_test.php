@@ -104,6 +104,26 @@ final class placed_object_test extends \advanced_testcase {
     }
 
     /**
+     * An uploaded prop whose base name contains a space (which a restricted
+     * param type would reject) can still be placed: the raw name is gated on
+     * the placeable-prop whitelist.
+     */
+    public function test_uploaded_prop_with_space_can_be_placed(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $this->upload_pack_model('street light.glb');
+
+        $result = add_placed_object::execute($course->id, 'street light', 0.0, 0.0);
+        $this->assertSame('street light', $result['type']);
+        $this->assertSame('street light', $DB->get_field('format_mnemo_placedobj', 'type', ['id' => $result['id']]));
+    }
+
+    /**
      * A named building model is never a placeable prop, even when uploaded.
      */
     public function test_building_model_is_not_placeable(): void {

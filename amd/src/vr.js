@@ -2359,11 +2359,13 @@ define('format_mnemo/vr', [], function() {
             self.spawnTraffic(tpl);
         });
 
-        // Load templates for any prop beyond the built-in four: every type
-        // already placed in this course (so all viewers see it), plus - for an
-        // editor - the whole placer palette (so a newly-picked prop can be
-        // dropped immediately). load() caches each template and builds any
-        // placed objects of that type.
+        // Load templates for any prop beyond the built-in four that is already
+        // placed in this course, so every viewer sees it. load() caches each
+        // template and builds its placed objects. Palette-only props (that an
+        // editor might place but has not yet) are loaded lazily when their
+        // palette button is selected - see buildPlacer/ensurePropTemplate - so
+        // a large uploaded asset pack does not download and parse on every
+        // teacher page view.
         var known = {lamp: true, barrier: true, kiosk: true, av: true};
         var extra = {};
         this.placedObjects.forEach(function(p) {
@@ -2371,15 +2373,38 @@ define('format_mnemo/vr', [], function() {
                 extra[p.type] = true;
             }
         });
-        if (this.config.canedit) {
-            (this.config.placerprops || []).forEach(function(p) {
-                if (!known[p.key]) {
-                    extra[p.key] = true;
-                }
-            });
-        }
         Object.keys(extra).forEach(function(name) {
             load(name);
+        });
+    };
+
+    /**
+     * Ensure a prop's model template is loaded (for the in-view placer): load
+     * it once on demand, cache it, and build any already-placed objects of that
+     * type. A no-op when the template is already loaded or in flight. Used to
+     * lazily fetch a palette prop only when its button is selected, rather than
+     * downloading the whole palette up front.
+     *
+     * @param {String} name The prop model base name.
+     */
+    Cyberspace.prototype.ensurePropTemplate = function(name) {
+        var self = this;
+        if (!name || this.propTemplates[name]) {
+            return;
+        }
+        this.propLoading = this.propLoading || {};
+        if (this.propLoading[name]) {
+            return;
+        }
+        this.propLoading[name] = true;
+        this.loadProp(name).then(function(tpl) {
+            self.propTemplates[name] = tpl;
+            self.buildPlacedObjectsOfType(name, tpl);
+            return null;
+        }).catch(function(e) {
+            if (window.console) {
+                window.console.warn('format_mnemo: prop ' + name + ' unavailable', e);
+            }
         });
     };
 
@@ -4731,6 +4756,9 @@ define('format_mnemo/vr', [], function() {
             typeButtons[i].addEventListener('click', function() {
                 self.placeType = this.getAttribute('data-mnemo-place');
                 markActive();
+                // Fetch this prop's model now (if not already loaded) so it is
+                // ready by the time the teacher clicks a grid square.
+                self.ensurePropTemplate(self.placeType);
             });
         }
         markActive();
@@ -4757,6 +4785,11 @@ define('format_mnemo/vr', [], function() {
         }
         if (this.placerPanel) {
             this.placerPanel.hidden = !this.placeMode;
+        }
+        if (this.placeMode && this.ensurePropTemplate) {
+            // Opening the placer: make sure the currently-selected prop's model
+            // is loaded (the built-in default is already preloaded).
+            this.ensurePropTemplate(this.placeType);
         }
         this.showGroundGrid(this.placeMode || this.editMode);
         if (this.placeMode && this.editMode) {

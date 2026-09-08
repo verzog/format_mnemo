@@ -176,13 +176,26 @@ class asset_gallery {
         foreach (array_keys(self::bundled_model_names()) as $name) {
             $names[$name] = true;
         }
-        foreach (array_keys(self::uploaded_pack_names()) as $filename) {
-            if (substr($filename, -4) === '.glb') {
-                $names[basename($filename, '.glb')] = true;
+        // Uploaded models are only loadable when no external asset-pack URL is
+        // configured: with a pack URL set, the scene loads from that pack and
+        // falls back only to the bundled models (see scene::models_base_url()
+        // and the client's loadProp()), so an uploaded-only name could never
+        // load. Follow the same precedence here so the palette never offers a
+        // prop whose model cannot be fetched.
+        if (empty(get_config('format_mnemo', 'assetbaseurl'))) {
+            foreach (array_keys(self::uploaded_pack_names()) as $filename) {
+                $filename = (string)$filename;
+                if (substr($filename, -4) === '.glb') {
+                    $names[basename($filename, '.glb')] = true;
+                }
             }
         }
         $out = [];
         foreach (array_keys($names) as $name) {
+            // A base name that looks numeric (e.g. "123" from 123.glb) comes
+            // back from array_keys() as an int; keep the contract's string[] so
+            // the web service's strict in_array() match still works.
+            $name = (string)$name;
             // Named building models are activity-bound, not free-standing props.
             if (strpos($name, 'building-') === 0) {
                 continue;
@@ -193,7 +206,7 @@ class asset_gallery {
             }
             $out[] = $name;
         }
-        sort($out);
+        sort($out, SORT_STRING);
         return $out;
     }
 

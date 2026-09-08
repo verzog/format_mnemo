@@ -54,7 +54,11 @@ class add_placed_object extends external_api {
     public static function execute_parameters(): external_function_parameters {
         return new external_function_parameters([
             'courseid' => new external_value(PARAM_INT, 'Course id'),
-            'type' => new external_value(PARAM_ALPHANUMEXT, 'Prop model base name (a placeable prop, not a named building)'),
+            // Accept the raw name and gate it on the placeable-prop whitelist
+            // below: an uploaded model's base name may contain spaces, dots or
+            // Unicode that a restricted param type would reject even though the
+            // palette advertises it.
+            'type' => new external_value(PARAM_RAW, 'Prop model base name (a placeable prop, not a named building)'),
             'x' => new external_value(PARAM_FLOAT, 'World-x where the prop is placed'),
             'z' => new external_value(PARAM_FLOAT, 'World-z where the prop is placed'),
         ]);
@@ -121,7 +125,7 @@ class add_placed_object extends external_api {
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'id' => new external_value(PARAM_INT, 'The new placed-object id'),
-            'type' => new external_value(PARAM_ALPHANUMEXT, 'Prop model base name'),
+            'type' => new external_value(PARAM_RAW, 'Prop model base name'),
             'x' => new external_value(PARAM_FLOAT, 'Grid-snapped world-x'),
             'z' => new external_value(PARAM_FLOAT, 'Grid-snapped world-z'),
         ]);

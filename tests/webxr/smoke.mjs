@@ -1198,6 +1198,34 @@ const scenarios = [
         }
     },
     {
+        name: 'placer: ensurePropTemplate lazily loads a palette model exactly once',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            let calls = 0;
+            const built = [];
+            const self = {
+                propTemplates: {},
+                loadProp: (name) => {
+                    calls++;
+                    return Promise.resolve(tpl);
+                },
+                buildPlacedObjectsOfType: (name) => built.push(name),
+                ensurePropTemplate: CS.prototype.ensurePropTemplate
+            };
+            self.ensurePropTemplate('drone');
+            self.ensurePropTemplate('drone'); // In flight: must not load twice.
+            await Promise.resolve();
+            await Promise.resolve();
+            self.ensurePropTemplate('drone'); // Cached: must not load again.
+            self.ensurePropTemplate(''); // Empty name: no-op.
+            const pass = calls === 1 && self.propTemplates.drone === tpl &&
+                built.length === 1 && built[0] === 'drone';
+            return {pass, detail: `calls=${calls} built=${built.join(',')}`};
+        }
+    },
+    {
         name: 'editor: applyTransform applies non-uniform width/height/depth',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
