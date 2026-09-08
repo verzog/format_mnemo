@@ -329,6 +329,54 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The admin-authored flying-car types, parsed from the 'cartypes' setting.
+     * Each non-empty, non-comment line is "model | path | speed | height | land
+     * [| count]"; malformed lines and lines naming an unknown/unplaceable model
+     * are skipped, and numeric fields are clamped to sane ranges. An empty
+     * result lets the client fall back to its single default avenue vehicle.
+     *
+     * @return array<int, array{model: string, path: string, speed: float,
+     *     height: float, land: string, count: int}>
+     */
+    protected function car_types(): array {
+        $raw = get_config('format_mnemo', 'cartypes');
+        if ($raw === false || trim((string)$raw) === '') {
+            return [];
+        }
+        $paths = ['avenue' => true, 'cross' => true, 'diagonal' => true];
+        $lands = ['none' => true, 'ground' => true, 'rooftop' => true];
+        $models = array_flip(\format_mnemo\output\asset_gallery::placer_prop_names());
+        $out = [];
+        foreach (preg_split('/\r\n|\r|\n/', (string)$raw) as $line) {
+            $line = trim($line);
+            if ($line === '' || $line[0] === '#') {
+                continue;
+            }
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) < 5) {
+                continue;
+            }
+            [$model, $path, $speed, $height, $land] = $parts;
+            if (!isset($models[$model]) || !isset($paths[$path]) || !isset($lands[$land])) {
+                continue;
+            }
+            $count = (isset($parts[5]) && is_numeric($parts[5])) ? (int)$parts[5] : 4;
+            $out[] = [
+                'model' => $model,
+                'path' => $path,
+                'speed' => (float)max(1, min(60, (float)$speed)),
+                'height' => (float)max(4, min(60, (float)$height)),
+                'land' => $land,
+                'count' => (int)max(1, min(16, $count)),
+            ];
+            if (count($out) >= 12) {
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -532,6 +580,9 @@ class scene implements renderable, templatable {
             // The prop palette the in-view placer offers: the bundled props plus
             // any uploaded asset-pack model that is not a named building.
             'placerprops' => $this->placer_props(),
+            // Admin-authored flying-car types (model + path/speed/height/landing
+            // behaviour). Empty lets the client use its default avenue vehicle.
+            'cartypes' => $this->car_types(),
             // The grid the generated layout snaps to and the placer/editor use.
             'gridsize' => 2,
             'threeurl' => $threeurl,

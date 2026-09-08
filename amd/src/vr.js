@@ -2355,9 +2355,10 @@ define('format_mnemo/vr', [], function() {
         load('kiosk', function(tpl) {
             self.scatterKiosks(tpl);
         });
-        load('av', function(tpl) {
-            self.spawnTraffic(tpl);
-        });
+        // The vehicle template is needed for teacher-placed vehicles (and the
+        // placer); flying traffic is built separately from the admin-authored
+        // car types below, which may use several different models.
+        load('av');
 
         // Load templates for any prop beyond the built-in four that is already
         // placed in this course, so every viewer sees it. load() caches each
@@ -2376,6 +2377,8 @@ define('format_mnemo/vr', [], function() {
         Object.keys(extra).forEach(function(name) {
             load(name);
         });
+
+        this.buildTraffic();
     };
 
     /**
@@ -2732,50 +2735,210 @@ define('format_mnemo/vr', [], function() {
         }
     };
 
+    /** @const {Number} Hard cap on concurrent flying cars, for performance. */
+    var TRAFFIC_MAX = 32;
+
     /**
-     * Spawn flying-car traffic gliding above the avenue and highways; animated
-     * each frame in updateTraffic().
+     * The bounding box flying traffic travels within (and wraps around),
+     * derived from the generated road network: the avenue plus every side
+     * street, with a margin. Computed once and cached.
      *
-     * @param {Object} tpl The AV template group.
+     * @return {Object} {xMin, xMax, zMin, zMax, avHalfX} in world units.
      */
-    Cyberspace.prototype.spawnTraffic = function(tpl) {
+    Cyberspace.prototype.trafficBounds = function() {
+        if (this.trafficBox) {
+            return this.trafficBox;
+        }
         var road = this.roads[0];
-        if (!road) {
+        var xMin = road.xMin;
+        var xMax = road.xMax;
+        var zMin = road.zMin;
+        var zMax = road.zMax;
+        for (var i = 1; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            xMin = Math.min(xMin, r.xMin);
+            xMax = Math.max(xMax, r.xMax);
+            zMin = Math.min(zMin, r.zMin);
+            zMax = Math.max(zMax, r.zMax);
+        }
+        var margin = 20;
+        this.trafficBox = {
+            xMin: xMin - margin, xMax: xMax + margin,
+            zMin: zMin - margin, zMax: zMax + margin,
+            // The lateral spread of avenue traffic (kept near the avenue).
+            avHalfX: Math.max(20, road.xMax + 6)
+        };
+        return this.trafficBox;
+    };
+
+    /**
+     * Build the flying traffic from the admin-authored car types
+     * (config.cartypes), falling back to a single avenue vehicle type when
+     * none is configured (the original behaviour). Each distinct model is
+     * loaded once and shared by every type that uses it.
+     */
+    Cyberspace.prototype.buildTraffic = function() {
+        if (!this.roads || !this.roads[0]) {
             return;
         }
-        var lanes = this.config.environment === 'void' ? 6 : 10;
-        for (var i = 0; i < lanes; i++) {
-            var car = tpl.clone();
-            var dir = i % 2 === 0 ? 1 : -1;
-            car.scale.setScalar(0.9 + Math.random() * 0.5);
-            car.rotation.y = dir > 0 ? 0 : Math.PI;
-            var laneX = (Math.random() - 0.5) * 40;
-            var y = 13 + Math.random() * 20;
-            var z = road.zMin + Math.random() * (road.zMax - road.zMin);
-            car.position.set(laneX, y, z);
-            this.scene.add(car);
-            this.traffic.push({
-                mesh: car, dir: dir, speed: 10 + Math.random() * 16,
-                zMin: road.zMin - 20, zMax: road.zMax + 20,
-                bob: Math.random() * 6.28
+        var self = this;
+        var types = (this.config.cartypes && this.config.cartypes.length) ?
+            this.config.cartypes : [{
+                model: 'av', path: 'avenue', speed: 14, height: 20, land: 'none',
+                count: this.config.environment === 'void' ? 6 : 10
+            }];
+        // Group types by model so a model shared by several types loads once.
+        var byModel = {};
+        types.forEach(function(ct) {
+            (byModel[ct.model] = byModel[ct.model] || []).push(ct);
+        });
+        Object.keys(byModel).forEach(function(model) {
+            self.loadProp(model).then(function(tpl) {
+                byModel[model].forEach(function(ct) {
+                    self.spawnTrafficType(tpl, ct);
+                });
+                return null;
+            }).catch(function(e) {
+                if (window.console) {
+                    window.console.warn('format_mnemo: car ' + model + ' unavailable', e);
+                }
             });
+        });
+    };
+
+    /**
+     * Spawn the cars for one car type from its loaded model template, up to the
+     * type's count and the global traffic cap.
+     *
+     * @param {Object} tpl The car model template group.
+     * @param {Object} ct The car type {model, path, speed, height, land, count}.
+     */
+    Cyberspace.prototype.spawnTrafficType = function(tpl, ct) {
+        var box = this.trafficBounds();
+        var count = Math.max(1, Math.min(ct.count || 4, 16));
+        for (var i = 0; i < count; i++) {
+            if (this.traffic.length >= TRAFFIC_MAX) {
+                break;
+            }
+            var car = tpl.clone();
+            car.scale.setScalar(0.9 + Math.random() * 0.5);
+            var dir = i % 2 === 0 ? 1 : -1;
+            var rec = this.makeTrafficCar(car, ct, dir, box);
+            this.setShadow(car, true);
+            this.scene.add(car);
+            this.traffic.push(rec);
         }
     };
 
     /**
-     * Advance flying traffic, wrapping cars around the avenue ends.
+     * Build one traffic-car record: place the car within the traffic box, set
+     * its velocity and heading for its path (avenue = along Z, cross = along X,
+     * diagonal = both), and its vertical/landing parameters. Positioning the
+     * car and orienting it to its direction of travel is done here so
+     * updateTraffic() only advances and wraps it.
+     *
+     * @param {Object} car The cloned car object.
+     * @param {Object} ct The car type.
+     * @param {Number} dir Travel sign along the primary axis (+1 or -1).
+     * @param {Object} box The traffic bounds.
+     * @return {Object} The traffic record consumed by updateTraffic().
+     */
+    Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box) {
+        var speed = ct.speed || 14;
+        var height = ct.height || 20;
+        var vx = 0;
+        var vz = 0;
+        var x;
+        var z;
+        if (ct.path === 'cross') {
+            vx = dir * speed;
+            x = box.xMin + Math.random() * (box.xMax - box.xMin);
+            z = box.zMin + Math.random() * (box.zMax - box.zMin);
+        } else if (ct.path === 'diagonal') {
+            var sgn = Math.random() < 0.5 ? 1 : -1;
+            var c = Math.SQRT1_2;
+            vx = dir * speed * c;
+            vz = sgn * speed * c;
+            x = box.xMin + Math.random() * (box.xMax - box.xMin);
+            z = box.zMin + Math.random() * (box.zMax - box.zMin);
+        } else {
+            // Avenue (default): travel along Z, spread laterally near the avenue.
+            vz = dir * speed;
+            x = (Math.random() - 0.5) * 2 * box.avHalfX;
+            z = box.zMin + Math.random() * (box.zMax - box.zMin);
+        }
+        car.position.set(x, height, z);
+        // Face the direction of travel. The model's forward is +Z at yaw 0, so
+        // yaw = atan2(vx, vz) turns it onto its heading (avenue -Z reads as pi,
+        // cross +X as +pi/2, matching the placed vehicles and side props).
+        car.rotation.y = Math.atan2(vx, vz);
+        // Landing cars descend toward a low altitude (the ground, or a rooftop
+        // band) and climb back; cruising cars keep a gentle bob at height.
+        var low = ct.land === 'ground' ? 2 : (ct.land === 'rooftop' ? 10 : height);
+        return {
+            mesh: car, vx: vx, vz: vz, box: box,
+            height: height, low: low, land: ct.land || 'none',
+            bob: Math.random() * 6.28,
+            landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
+        };
+    };
+
+    /**
+     * The world-y of a landing car at a point in its descend/hold/ascend cycle.
+     * cyclePos runs 0..1: the car cruises at height, dips to low with a short
+     * hold at the bottom (so it reads as touching down), then climbs back.
+     *
+     * @param {Number} cyclePos Cycle position in [0, 1).
+     * @param {Number} height Cruise altitude.
+     * @param {Number} low Landing altitude.
+     * @return {Number} The world-y.
+     */
+    Cyberspace.prototype.trafficLandingY = function(cyclePos, height, low) {
+        var ease = function(f) {
+            f = Math.max(0, Math.min(1, f));
+            return f * f * (3 - 2 * f); // Smoothstep.
+        };
+        if (cyclePos < 0.55 || cyclePos >= 0.95) {
+            return height;
+        }
+        if (cyclePos < 0.7) {
+            return height + (low - height) * ease((cyclePos - 0.55) / 0.15);
+        }
+        if (cyclePos < 0.82) {
+            return low; // Hold on the surface.
+        }
+        return low + (height - low) * ease((cyclePos - 0.82) / 0.13);
+    };
+
+    /**
+     * Advance flying traffic each frame: move each car along its velocity,
+     * wrap it within the traffic box on both axes, and set its altitude (a
+     * gentle cruise bob, or a landing cycle for cars that touch down).
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateTraffic = function(dt) {
         for (var i = 0; i < this.traffic.length; i++) {
             var t = this.traffic[i];
-            t.mesh.position.z += t.dir * t.speed * dt;
-            t.mesh.position.y += Math.sin(this.time * 0.8 + t.bob) * 0.02;
-            if (t.dir > 0 && t.mesh.position.z > t.zMax) {
-                t.mesh.position.z = t.zMin;
-            } else if (t.dir < 0 && t.mesh.position.z < t.zMin) {
-                t.mesh.position.z = t.zMax;
+            var p = t.mesh.position;
+            p.x += t.vx * dt;
+            p.z += t.vz * dt;
+            var box = t.box;
+            if (p.x > box.xMax) {
+                p.x = box.xMin;
+            } else if (p.x < box.xMin) {
+                p.x = box.xMax;
+            }
+            if (p.z > box.zMax) {
+                p.z = box.zMin;
+            } else if (p.z < box.zMin) {
+                p.z = box.zMax;
+            }
+            if (t.land === 'none') {
+                p.y = t.height + Math.sin(this.time * 0.8 + t.bob) * 0.4;
+            } else {
+                var cyclePos = ((this.time + t.landPhase * t.landPeriod) / t.landPeriod) % 1;
+                p.y = this.trafficLandingY(cyclePos, t.height, t.low);
             }
         }
     };
