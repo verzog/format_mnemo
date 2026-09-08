@@ -360,6 +360,11 @@ class scene implements renderable, templatable {
             if (!isset($models[$model]) || !isset($paths[$path]) || !isset($lands[$land])) {
                 continue;
             }
+            // Speed and height are required numeric fields; a non-numeric value
+            // is a malformed line, skipped rather than silently clamped.
+            if (!is_numeric($speed) || !is_numeric($height)) {
+                continue;
+            }
             $count = (isset($parts[5]) && is_numeric($parts[5])) ? (int)$parts[5] : 4;
             $out[] = [
                 'model' => $model,

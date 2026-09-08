@@ -2367,8 +2367,14 @@ define('format_mnemo/vr', [], function() {
         // palette button is selected - see buildPlacer/ensurePropTemplate - so
         // a large uploaded asset pack does not download and parse on every
         // teacher page view.
-        var known = {lamp: true, barrier: true, kiosk: true, av: true};
-        var extra = {};
+        // Null-prototype maps so a prop literally named "constructor",
+        // "toString" or "__proto__" cannot collide with an inherited property.
+        var known = Object.create(null);
+        known.lamp = true;
+        known.barrier = true;
+        known.kiosk = true;
+        known.av = true;
+        var extra = Object.create(null);
         this.placedObjects.forEach(function(p) {
             if (!known[p.type]) {
                 extra[p.type] = true;
@@ -2784,18 +2790,29 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         var types = (this.config.cartypes && this.config.cartypes.length) ?
             this.config.cartypes : [{
-                model: 'av', path: 'avenue', speed: 14, height: 20, land: 'none',
+                // The default fleet (no config) keeps the original per-car
+                // random speed/altitude variation, not a rigid formation.
+                model: 'av', path: 'avenue', land: 'none', jitter: true,
                 count: this.config.environment === 'void' ? 6 : 10
             }];
+        // Allocate the global car cap across types up front, in order, so the
+        // fleet is deterministic regardless of which model finishes loading
+        // first (each type gets a fixed share, not a race for the shared cap).
+        var allocs = this.allocateTrafficCounts(types);
         // Group types by model so a model shared by several types loads once.
-        var byModel = {};
-        types.forEach(function(ct) {
-            (byModel[ct.model] = byModel[ct.model] || []).push(ct);
+        // A null-prototype map so a model literally named "constructor" or
+        // "__proto__" cannot collide with an inherited property.
+        var byModel = Object.create(null);
+        types.forEach(function(ct, i) {
+            if (allocs[i] <= 0) {
+                return;
+            }
+            (byModel[ct.model] = byModel[ct.model] || []).push({ct: ct, count: allocs[i]});
         });
         Object.keys(byModel).forEach(function(model) {
             self.loadProp(model).then(function(tpl) {
-                byModel[model].forEach(function(ct) {
-                    self.spawnTrafficType(tpl, ct);
+                byModel[model].forEach(function(entry) {
+                    self.spawnTrafficType(tpl, entry.ct, entry.count);
                 });
                 return null;
             }).catch(function(e) {
@@ -2807,15 +2824,40 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Allocate the global traffic cap across the configured car types, in
+     * order: each type gets its clamped count, up to whatever remains of the
+     * cap. Computed before any model loads so the resulting fleet does not
+     * depend on network/cache timing.
+     *
+     * @param {Array} types The car types.
+     * @return {Number[]} The per-type car count, aligned with types.
+     */
+    Cyberspace.prototype.allocateTrafficCounts = function(types) {
+        var remaining = TRAFFIC_MAX;
+        var out = [];
+        for (var i = 0; i < types.length; i++) {
+            var want = Math.max(1, Math.min(types[i].count || 4, 16));
+            var give = Math.max(0, Math.min(want, remaining));
+            out.push(give);
+            remaining -= give;
+        }
+        return out;
+    };
+
+    /**
      * Spawn the cars for one car type from its loaded model template, up to the
      * type's count and the global traffic cap.
      *
      * @param {Object} tpl The car model template group.
      * @param {Object} ct The car type {model, path, speed, height, land, count}.
+     * @param {Number} [count] Cars to spawn (from the cap allocation); falls
+     *     back to the type's own clamped count when omitted.
      */
-    Cyberspace.prototype.spawnTrafficType = function(tpl, ct) {
+    Cyberspace.prototype.spawnTrafficType = function(tpl, ct, count) {
         var box = this.trafficBounds();
-        var count = Math.max(1, Math.min(ct.count || 4, 16));
+        if (count === undefined) {
+            count = Math.max(1, Math.min(ct.count || 4, 16));
+        }
         for (var i = 0; i < count; i++) {
             if (this.traffic.length >= TRAFFIC_MAX) {
                 break;
@@ -2824,7 +2866,10 @@ define('format_mnemo/vr', [], function() {
             car.scale.setScalar(0.9 + Math.random() * 0.5);
             var dir = i % 2 === 0 ? 1 : -1;
             var rec = this.makeTrafficCar(car, ct, dir, box);
-            this.setShadow(car, true);
+            // No shadow casting on traffic: outside the void the shadow map is
+            // only refreshed when the learner moves, so a moving car's shadow
+            // would freeze in place and detach. (The original traffic cast no
+            // shadows either.)
             this.scene.add(car);
             this.traffic.push(rec);
         }
@@ -2844,8 +2889,10 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} The traffic record consumed by updateTraffic().
      */
     Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box) {
-        var speed = ct.speed || 14;
-        var height = ct.height || 20;
+        // The default fleet jitters each car's speed and altitude (matching the
+        // original 10-26 u/s, 13-33 u ranges); authored types use exact values.
+        var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
+        var height = ct.jitter ? (13 + Math.random() * 20) : (ct.height || 20);
         var vx = 0;
         var vz = 0;
         var x;
@@ -2879,6 +2926,12 @@ define('format_mnemo/vr', [], function() {
             low = 2;
         } else if (ct.land === 'rooftop') {
             low = 10;
+        }
+        // Keep the landing target below the cruise altitude so a low-flying car
+        // dips down (never climbs) during its "descent" - e.g. a rooftop car
+        // whose configured height is at or below the rooftop band.
+        if (low > height - 1) {
+            low = Math.max(0, height - 1);
         }
         return {
             mesh: car, vx: vx, vz: vz, box: box,

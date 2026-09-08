@@ -1288,6 +1288,20 @@ const scenarios = [
         }
     },
     {
+        name: 'traffic: allocateTrafficCounts shares the cap deterministically in order',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {allocateTrafficCounts: CS.prototype.allocateTrafficCounts};
+            // Per-type clamp to 16, and the global cap of 32 filled in order.
+            const a = self.allocateTrafficCounts([{count: 20}, {count: 20}, {count: 5}]);
+            // Defaults and clamping: missing count -> 4.
+            const b = self.allocateTrafficCounts([{}, {count: 100}]);
+            const pass = a[0] === 16 && a[1] === 16 && a[2] === 0 &&
+                b[0] === 4 && b[1] === 16;
+            return {pass, detail: `a=${a.join(',')} b=${b.join(',')}`};
+        }
+    },
+    {
         name: 'traffic: spawnTrafficType clamps count and respects the global cap',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

@@ -586,6 +586,7 @@ final class scene_test extends \advanced_testcase {
             'nope | avenue | 10 | 20 | none', // Unknown model: skipped.
             'av | spiral | 10 | 20 | none', // Bad path: skipped.
             'av | diagonal | 10 | 20 | orbit', // Bad land: skipped.
+            'av | avenue | fast | high | none', // Non-numeric speed/height: skipped.
             'av | avenue | 10', // Too few fields: skipped.
         ]), 'format_mnemo');
 
