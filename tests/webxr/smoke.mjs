@@ -1609,9 +1609,16 @@ const scenarios = [
                 minU = Math.min(minU, uv.getX(i));
                 maxU = Math.max(maxU, uv.getX(i));
             }
+            // Angular V must increase monotonically along the first ring row
+            // (columns 0..64), with the seam at the ends - not a mid-ring jump.
+            const vStart = uv.getY(0);
+            const vMid = uv.getY(32);
+            const vSeam = uv.getY(64);
+            const seamOk = vStart < 0.01 && Math.abs(vMid - 0.5) < 0.02 && vSeam > 0.99;
             const pass = !!ring && ring.material.map === ringTex &&
-                minU < 0.01 && maxU > 0.99;
-            return {pass, detail: `map=${ring && ring.material.map === ringTex} u=${minU.toFixed(2)}..${maxU.toFixed(2)}`};
+                minU < 0.01 && maxU > 0.99 && seamOk;
+            return {pass, detail: `map=${ring && ring.material.map === ringTex} ` +
+                `u=${minU.toFixed(2)}..${maxU.toFixed(2)} v=${vStart.toFixed(2)}/${vMid.toFixed(2)}/${vSeam.toFixed(2)}`};
         }
     },
     {
@@ -2050,6 +2057,26 @@ const scenarios = [
             const item = self.reader.items[0];
             const pass = item.lines.length === 3 && item.lines[0][0].text === 'line one';
             return {pass, detail: `lines=${item.lines.length} first=${item.lines[0][0].text}`};
+        }
+    },
+    {
+        name: 'preview: framePreviewModel centres the model and frames the camera',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            const model = new THREE.Group();
+            const box = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshBasicMaterial());
+            box.position.set(20, 10, -5); // Off-centre, so centring must move the model.
+            model.add(box);
+            const cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
+            M._framePreviewModel(THREE, model, cam);
+            model.updateMatrixWorld(true);
+            const centre = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+            const centred = centre.length() < 1e-6;
+            // The camera sits back from the origin and looks at it.
+            const dist = cam.position.length();
+            const framed = dist > 4 && cam.far > dist;
+            return {pass: centred && framed, detail: `centre=${centre.length().toFixed(3)} dist=${dist.toFixed(1)}`};
         }
     },
     {

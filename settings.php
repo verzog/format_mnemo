@@ -320,3 +320,13 @@ if ($ADMIN->fulltree) {
         0
     ));
 }
+
+// The asset viewer: a gallery of the uploaded/bundled textures and prop models.
+// Registered outside the fulltree guard so its URL always resolves in the admin
+// tree, and gated by site config like the settings page itself.
+$ADMIN->add('formatsettings', new admin_externalpage(
+    'format_mnemo_preview',
+    get_string('preview_title', 'format_mnemo'),
+    new moodle_url('/course/format/mnemo/preview.php'),
+    'moodle/site:config'
+));
