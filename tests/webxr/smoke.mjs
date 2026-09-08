@@ -1609,9 +1609,16 @@ const scenarios = [
                 minU = Math.min(minU, uv.getX(i));
                 maxU = Math.max(maxU, uv.getX(i));
             }
+            // Angular V must increase monotonically along the first ring row
+            // (columns 0..64), with the seam at the ends - not a mid-ring jump.
+            const vStart = uv.getY(0);
+            const vMid = uv.getY(32);
+            const vSeam = uv.getY(64);
+            const seamOk = vStart < 0.01 && Math.abs(vMid - 0.5) < 0.02 && vSeam > 0.99;
             const pass = !!ring && ring.material.map === ringTex &&
-                minU < 0.01 && maxU > 0.99;
-            return {pass, detail: `map=${ring && ring.material.map === ringTex} u=${minU.toFixed(2)}..${maxU.toFixed(2)}`};
+                minU < 0.01 && maxU > 0.99 && seamOk;
+            return {pass, detail: `map=${ring && ring.material.map === ringTex} ` +
+                `u=${minU.toFixed(2)}..${maxU.toFixed(2)} v=${vStart.toFixed(2)}/${vMid.toFixed(2)}/${vSeam.toFixed(2)}`};
         }
     },
     {

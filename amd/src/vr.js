@@ -860,16 +860,20 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.ringGeometry = function(inner, outer) {
         var THREE = this.THREE;
-        var geo = new THREE.RingGeometry(inner, outer, 64, 1);
-        var pos = geo.attributes.position;
+        var thetaseg = 64;
+        var phiseg = 1;
+        var geo = new THREE.RingGeometry(inner, outer, thetaseg, phiseg);
         var uv = geo.attributes.uv;
-        var span = outer - inner || 1;
-        for (var i = 0; i < pos.count; i++) {
-            var x = pos.getX(i);
-            var y = pos.getY(i);
-            var r = Math.sqrt(x * x + y * y);
-            var theta = Math.atan2(y, x);
-            uv.setXY(i, (r - inner) / span, (theta + Math.PI) / (2 * Math.PI));
+        var cols = thetaseg + 1;
+        // Derive UVs from the vertex generation order (RingGeometry emits
+        // phiseg+1 radial rows of thetaseg+1 angular columns) rather than from
+        // atan2 of the position: that keeps the angular V strictly increasing
+        // 0..1 with its one discontinuity on the geometry's own duplicated
+        // start/end seam, so the texture does not compress into a wedge there.
+        for (var v = 0; v < uv.count; v++) {
+            var i = v % cols; // Angular column: 0 at the seam, thetaseg at the seam's twin.
+            var j = Math.floor(v / cols); // Radial row: 0 inner, phiseg outer.
+            uv.setXY(v, j / phiseg, i / thetaseg);
         }
         uv.needsUpdate = true;
         return geo;
