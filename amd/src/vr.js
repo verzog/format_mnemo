@@ -2334,7 +2334,9 @@ define('format_mnemo/vr', [], function() {
                 // Cache the template so the in-view placer can clone it, and
                 // build any teacher-placed props of this type.
                 self.propTemplates[name] = tpl;
-                onReady(tpl);
+                if (onReady) {
+                    onReady(tpl);
+                }
                 self.buildPlacedObjectsOfType(name, tpl);
                 return null;
             }).catch(function(e) {
@@ -2377,7 +2379,7 @@ define('format_mnemo/vr', [], function() {
             });
         }
         Object.keys(extra).forEach(function(name) {
-            load(name, function() {});
+            load(name);
         });
     };
 
