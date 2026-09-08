@@ -2060,6 +2060,26 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: framePreviewModel centres the model and frames the camera',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            const model = new THREE.Group();
+            const box = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), new THREE.MeshBasicMaterial());
+            box.position.set(20, 10, -5); // Off-centre, so centring must move the model.
+            model.add(box);
+            const cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
+            M._framePreviewModel(THREE, model, cam);
+            model.updateMatrixWorld(true);
+            const centre = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+            const centred = centre.length() < 1e-6;
+            // The camera sits back from the origin and looks at it.
+            const dist = cam.position.length();
+            const framed = dist > 4 && cam.far > dist;
+            return {pass: centred && framed, detail: `centre=${centre.length().toFixed(3)} dist=${dist.toFixed(1)}`};
+        }
+    },
+    {
         name: 'reader: XR trigger locomotion is suppressed while reading',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

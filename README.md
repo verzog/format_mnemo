@@ -315,6 +315,18 @@ The road, ground and sidewalk textures tile best with a **seamless / tileable**
 image; the planet and sky images should be **equirectangular (2:1 lat-long)**
 maps, and the ring image a radial strip.
 
+### Asset viewer
+
+**Site administration → Plugins → Course formats → Mnemo (VR cyberspace) →
+Asset viewer** opens a gallery of every site-wide asset the format uses, so you
+can confirm what is in force without opening a course. Each card shows where the
+asset comes from — **Uploaded**, **From URL**, **Bundled default**, or **Not
+set** (the procedural look is used). Textures are shown as image previews; the
+glTF prop models are shown as **live, spinning 3D previews** (rendered with the
+same loader the scene uses, through a single WebGL context), with a link to the
+model file. A planet map whose filename marks it ringed is flagged. The page is
+read-only and needs site-configuration access.
+
 ### Preparing a compressed asset pack
 
 Models load through Three's `GLTFLoader` with the bundled Draco, meshopt and

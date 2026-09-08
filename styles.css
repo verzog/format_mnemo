@@ -464,3 +464,59 @@
     color: #888;
     font-style: italic;
 }
+
+/* Admin asset viewer (preview.php): a responsive grid of texture and model cards. */
+.format-mnemo-preview__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+    margin: 12px 0 28px;
+}
+
+.format-mnemo-preview__card {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0b1018;
+}
+
+.format-mnemo-preview__img,
+.format-mnemo-preview__canvas,
+.format-mnemo-preview__placeholder {
+    display: block;
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    background: #05070d;
+}
+
+.format-mnemo-preview__canvas {
+    object-fit: contain;
+}
+
+.format-mnemo-preview__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8aa0b4;
+    font-style: italic;
+    text-align: center;
+    padding: 0 12px;
+}
+
+.format-mnemo-preview__meta {
+    padding: 10px 12px;
+    background: #fff;
+}
+
+.format-mnemo-preview__name {
+    font-weight: 600;
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.format-mnemo-preview__use {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.85em;
+}

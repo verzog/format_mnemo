@@ -8179,6 +8179,129 @@ define('format_mnemo/vr', [], function() {
         ]);
     }
 
+    /**
+     * Centre a loaded model at the origin and frame the camera to it, so a
+     * model of any size fills its preview square from a pleasant three-quarter
+     * angle.
+     *
+     * @param {Object} THREE The Three.js namespace.
+     * @param {Object} model The loaded model group.
+     * @param {Object} cam The preview camera.
+     */
+    function framePreviewModel(THREE, model, cam) {
+        var box = new THREE.Box3().setFromObject(model);
+        var size = box.getSize(new THREE.Vector3());
+        var centre = box.getCenter(new THREE.Vector3());
+        model.position.sub(centre);
+        var maxdim = Math.max(size.x, size.y, size.z) || 1;
+        var dist = (maxdim / 2) / Math.tan((cam.fov * Math.PI / 180) / 2) * 1.7;
+        cam.position.set(dist * 0.55, dist * 0.4, dist);
+        cam.lookAt(0, 0, 0);
+        cam.near = Math.max(0.001, dist / 100);
+        cam.far = dist * 12;
+        cam.updateProjectionMatrix();
+    }
+
+    /**
+     * Build and configure a glTF loader for the admin previews from the loaded
+     * addon namespace, with the Draco, KTX2/Basis and meshopt decoders. Returns
+     * null when the addon loader is unavailable (a strict CSP blocked the import
+     * map), so the gallery simply keeps its blank canvases.
+     *
+     * @param {Object} loaded The loaded Three.js + addon namespace.
+     * @param {Object} config The preview config (addonsbaseurl).
+     * @param {Object} renderer The shared WebGL renderer (for KTX2 support).
+     * @return {Object|null} The loader, or null.
+     */
+    function buildPreviewLoader(loaded, config, renderer) {
+        if (!loaded.GLTFLoader) {
+            return null;
+        }
+        var loader = new loaded.GLTFLoader();
+        var base = config.addonsbaseurl;
+        if (loaded.DRACOLoader && base) {
+            loader.setDRACOLoader(new loaded.DRACOLoader().setDecoderPath(base + 'libs/draco/gltf/'));
+        }
+        if (loaded.KTX2Loader && base) {
+            try {
+                loader.setKTX2Loader(
+                    new loaded.KTX2Loader().setTranscoderPath(base + 'libs/basis/').detectSupport(renderer)
+                );
+            } catch (e) {
+                // KTX2/Basis unavailable on this GPU; other formats still load.
+            }
+        }
+        if (loaded.MeshoptDecoder) {
+            loader.setMeshoptDecoder(loaded.MeshoptDecoder);
+        }
+        return loader;
+    }
+
+    /**
+     * Render the admin asset viewer's model previews: load each model, frame it,
+     * and spin them all in one animation loop through a single shared WebGL
+     * renderer whose output is copied into each card's 2D canvas (so the gallery
+     * uses only one WebGL context however many models it shows).
+     *
+     * @param {Object} config The preview config ({models: [{canvasid, url}], addonsbaseurl}).
+     * @param {Object} loaded The loaded Three.js + addon namespace.
+     */
+    function renderModelPreviews(config, loaded) {
+        var THREE = loaded.THREE;
+        var models = config.models || [];
+        if (!models.length || typeof THREE.WebGLRenderer !== 'function') {
+            return;
+        }
+        var size = 240;
+        var renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+        renderer.setPixelRatio(1);
+        renderer.setSize(size, size, false);
+        var loader = buildPreviewLoader(loaded, config, renderer);
+        if (!loader) {
+            return;
+        }
+        var entries = [];
+        models.forEach(function(m) {
+            var canvas = document.getElementById(m.canvasid);
+            if (!canvas) {
+                return;
+            }
+            var scene = new THREE.Scene();
+            scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+            var key = new THREE.DirectionalLight(0xffffff, 1.1);
+            key.position.set(3, 5, 4);
+            scene.add(key);
+            var cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
+            var entry = {ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null};
+            entries.push(entry);
+            loader.loadAsync(m.url).then(function(gltf) {
+                framePreviewModel(THREE, gltf.scene, cam);
+                scene.add(gltf.scene);
+                entry.model = gltf.scene;
+                return null;
+            }).catch(function() {
+                // Leave this card's canvas blank if the model cannot be loaded.
+            });
+        });
+        if (!entries.length) {
+            return;
+        }
+        var spin = function() {
+            for (var i = 0; i < entries.length; i++) {
+                var e = entries[i];
+                if (!e.model) {
+                    continue;
+                }
+                e.model.rotation.y += 0.012;
+                renderer.render(e.scene, e.cam);
+                e.ctx.clearRect(0, 0, size, size);
+                e.ctx.drawImage(renderer.domElement, 0, 0, size, size);
+            }
+            window.requestAnimationFrame(spin);
+        };
+        window.requestAnimationFrame(spin);
+    }
+
     return {
         // Exposed for the headless tests (tests/webxr): the gesture manager so
         // its input->action mapping can be driven with scripted input, and the
@@ -8186,6 +8309,7 @@ define('format_mnemo/vr', [], function() {
         // plugin itself.
         _GestureManager: GestureManager,
         _Cyberspace: Cyberspace,
+        _framePreviewModel: framePreviewModel,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
@@ -8240,6 +8364,40 @@ define('format_mnemo/vr', [], function() {
                 if (window.console) {
                     window.console.error(e);
                 }
+            });
+        },
+
+        /**
+         * Entry point for the admin asset viewer (preview.php): render a live,
+         * spinning 3D preview of each prop model into its card canvas. Textures
+         * are shown by the page as plain images and need no client code, so this
+         * only wires up the model previews. Best-effort: if Three.js or the glTF
+         * addon loader cannot load, the gallery keeps its labels and links.
+         *
+         * @param {String} rootid The DOM id of the preview root element.
+         */
+        initPreview: function(rootid) {
+            var root = document.getElementById(rootid);
+            if (!root) {
+                return;
+            }
+            var config;
+            try {
+                config = JSON.parse(root.getAttribute('data-mnemo-preview') || '{}');
+            } catch (e) {
+                return;
+            }
+            loadThree(config).then(function(loaded) {
+                try {
+                    renderModelPreviews(config, loaded);
+                } catch (e) {
+                    if (window.console) {
+                        window.console.error(e);
+                    }
+                }
+                return null;
+            }).catch(function() {
+                // Three.js could not load; the gallery stays static.
             });
         }
     };
