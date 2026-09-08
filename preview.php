@@ -114,6 +114,19 @@ foreach ($models as $i => $model) {
             get_string('preview_openmodel', 'format_mnemo'),
             ['class' => 'format-mnemo-preview__use', 'target' => '_blank', 'rel' => 'noopener']
         );
+    // Attribution read from the model's glTF asset block, when present.
+    if (!empty($model['copyright'])) {
+        $body .= html_writer::div(
+            get_string('preview_copyright', 'format_mnemo', s($model['copyright'])),
+            'format-mnemo-preview__use text-muted'
+        );
+    }
+    if (!empty($model['generator'])) {
+        $body .= html_writer::div(
+            get_string('preview_generator', 'format_mnemo', s($model['generator'])),
+            'format-mnemo-preview__use text-muted'
+        );
+    }
     echo html_writer::div(
         $canvas . html_writer::div($body, 'format-mnemo-preview__meta'),
         'format-mnemo-preview__card'
