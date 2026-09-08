@@ -2301,6 +2301,26 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: glbEmissive tolerates a parser with no day/night state',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // A bare parser object (as the preview fallback uses) has no this.day.
+            const parser = Object.create(CS.prototype);
+            parser.THREE = THREE;
+            const m = new THREE.MeshStandardMaterial();
+            let threw = false;
+            try {
+                CS.prototype.glbEmissive.call(parser, {emissiveFactor: [1, 0.2, 0]}, m);
+            } catch (e) {
+                threw = true;
+            }
+            // An emissive material must glow (intensity > 0) without throwing.
+            const pass = !threw && m.emissiveIntensity > 0;
+            return {pass, detail: `threw=${threw} intensity=${m.emissiveIntensity}`};
+        }
+    },
+    {
         name: 'preview: model loader falls back to a loader when no addon is present',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
