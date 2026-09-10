@@ -637,12 +637,10 @@ final class scene_test extends \advanced_testcase {
         $PAGE->set_context(context_course::instance($course->id));
         $scene = new \format_mnemo\output\scene(course_get_format($course));
 
-        // No preference: defaults.
+        // No preference: null, so the client can fall back to a device-local
+        // choice (then the client defaults).
         $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
-        $this->assertSame(
-            ['turn' => 'snap', 'snapangle' => 30, 'vignette' => 'full', 'speed' => 'normal'],
-            $config['comfort']
-        );
+        $this->assertNull($config['comfort']);
 
         // A stored preference passes through; an invalid field defaults.
         set_user_preference('format_mnemo_comfort', json_encode([
@@ -653,6 +651,17 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame(45, $config['comfort']['snapangle']);
         $this->assertSame('off', $config['comfort']['vignette']);
         $this->assertSame('normal', $config['comfort']['speed']); // Invalid -> default.
+
+        // A non-scalar field (a hand-edited PARAM_RAW value) must not error; it
+        // just takes the defaults.
+        set_user_preference('format_mnemo_comfort', json_encode([
+            'turn' => [], 'snapangle' => ['x'], 'vignette' => 'light', 'speed' => 'fast',
+        ]));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame('snap', $config['comfort']['turn']); // Array -> default.
+        $this->assertSame(30, $config['comfort']['snapangle']); // Array -> default.
+        $this->assertSame('light', $config['comfort']['vignette']);
+        $this->assertSame('fast', $config['comfort']['speed']);
     }
 
     /**

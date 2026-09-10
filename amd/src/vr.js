@@ -4765,7 +4765,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Number} 0.6 (slow), 1 (normal) or 1.6 (fast).
      */
     Cyberspace.prototype.comfortSpeedScale = function() {
-        var s = this.comfort.speed;
+        var s = this.comfort ? this.comfort.speed : null;
         if (s === 'slow') {
             return 0.6;
         }
@@ -4781,7 +4781,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Number} 0 (off), 0.5 (light) or 1 (full).
      */
     Cyberspace.prototype.comfortVignetteScale = function() {
-        var v = this.comfort.vignette;
+        var v = this.comfort ? this.comfort.vignette : null;
         if (v === 'off') {
             return 0;
         }
@@ -4814,23 +4814,33 @@ define('format_mnemo/vr', [], function() {
      * just means the next page re-reads the previous value.
      */
     Cyberspace.prototype.saveComfort = function() {
-        var json = JSON.stringify(this.comfort);
+        var self = this;
         try {
-            window.localStorage.setItem('format_mnemo_comfort', json);
+            window.localStorage.setItem('format_mnemo_comfort', JSON.stringify(this.comfort));
         } catch (e) {
             // Storage unavailable (private mode / blocked); the server save still runs.
         }
         if (!window.require) {
             return;
         }
-        window.require(['core/ajax'], function(ajax) {
-            ajax.call([{
-                methodname: 'core_user_set_user_preferences',
-                args: {preferences: [{name: 'format_mnemo_comfort', value: json}]}
-            }])[0].catch(function() {
-                // Not logged in, or the preference is not writable; ignore.
+        // Debounce the server write so a burst of quick changes sends only the
+        // final state once, and out-of-order requests cannot let an older
+        // snapshot win. The current settings are read at fire time.
+        if (this.comfortSaveTimer) {
+            window.clearTimeout(this.comfortSaveTimer);
+        }
+        this.comfortSaveTimer = window.setTimeout(function() {
+            self.comfortSaveTimer = null;
+            var json = JSON.stringify(self.comfort);
+            window.require(['core/ajax'], function(ajax) {
+                ajax.call([{
+                    methodname: 'core_user_set_user_preferences',
+                    args: {preferences: [{name: 'format_mnemo_comfort', value: json}]}
+                }])[0].catch(function() {
+                    // Not logged in, or the preference is not writable; ignore.
+                });
             });
-        });
+        }, 400);
     };
 
     /**
@@ -4943,6 +4953,8 @@ define('format_mnemo/vr', [], function() {
             var field = o.getAttribute('data-comfort-field');
             var on = String(this.comfort[field]) === o.getAttribute('data-comfort-value');
             o.classList.toggle('format-mnemo__comfort-opt--on', on);
+            // Expose the selection to assistive tech, not only via colour.
+            o.setAttribute('aria-pressed', on ? 'true' : 'false');
         }
     };
 
@@ -7839,7 +7851,6 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.updateXrLocomotion = function(dt) {
         var THREE = this.THREE;
-        var speed = 6;
         if (this.brake) {
             // An open palm this frame is an explicit stop; hold position.
             return;
@@ -7849,6 +7860,9 @@ define('format_mnemo/vr', [], function() {
             // it must never fly the viewer (the panel body is not interactive).
             return;
         }
+        // Point-and-fly speed, scaled by the learner's comfort speed setting
+        // (same scale as thumbstick glide and desktop flight).
+        var speed = 6 * this.comfortSpeedScale();
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {

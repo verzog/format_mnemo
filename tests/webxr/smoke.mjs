@@ -1409,6 +1409,31 @@ const scenarios = [
         }
     },
     {
+        name: 'comfort: panel renders options and marks the active one for a11y',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                root: document.createElement('div'),
+                config: {strings: {}},
+                comfort: {turn: 'smooth', snapangle: 30, vignette: 'full', speed: 'normal'},
+                normalizeComfort: CS.prototype.normalizeComfort,
+                comfortSpeedScale: CS.prototype.comfortSpeedScale,
+                comfortVignetteScale: CS.prototype.comfortVignetteScale,
+                applyComfort: CS.prototype.applyComfort,
+                saveComfort: function() {},
+                markComfortActive: CS.prototype.markComfortActive,
+                buildComfort: CS.prototype.buildComfort
+            };
+            self.buildComfort();
+            const smooth = self.root.querySelector('[data-comfort-field="turn"][data-comfort-value="smooth"]');
+            const snap = self.root.querySelector('[data-comfort-field="turn"][data-comfort-value="snap"]');
+            const pass = smooth.getAttribute('aria-pressed') === 'true' &&
+                snap.getAttribute('aria-pressed') === 'false' &&
+                smooth.classList.contains('format-mnemo__comfort-opt--on');
+            return {pass, detail: `smooth=${smooth.getAttribute('aria-pressed')} snap=${snap.getAttribute('aria-pressed')}`};
+        }
+    },
+    {
         name: 'editor: applyTransform applies non-uniform width/height/depth',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

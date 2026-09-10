@@ -385,28 +385,38 @@ class scene implements renderable, templatable {
      * The current user's comfort settings (turn mode/angle, motion vignette,
      * movement speed), read from their 'format_mnemo_comfort' preference and
      * validated field by field against the allowed values, each falling back to
-     * the plugin default. The client re-validates too, so a stale or hand-edited
-     * preference can never produce an out-of-range value.
+     * the plugin default. Returns null when the user has no stored preference,
+     * so the client can honour a device-local (localStorage) choice before
+     * falling back to defaults. Fields are checked for the expected scalar type
+     * before use, so a hand-edited PARAM_RAW value (e.g. a nested array) cannot
+     * break rendering.
      *
-     * @return array{turn: string, snapangle: int, vignette: string, speed: string}
+     * @return array{turn: string, snapangle: int, vignette: string, speed: string}|null
      */
-    protected function comfort(): array {
-        $defaults = ['turn' => 'snap', 'snapangle' => 30, 'vignette' => 'full', 'speed' => 'normal'];
+    protected function comfort(): ?array {
         $raw = get_user_preferences('format_mnemo_comfort', '');
         $stored = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
         if (!is_array($stored)) {
-            return $defaults;
+            return null;
         }
         $turns = ['snap' => true, 'smooth' => true];
         $vignettes = ['off' => true, 'light' => true, 'full' => true];
         $speeds = ['slow' => true, 'normal' => true, 'fast' => true];
         $angles = [15 => true, 30 => true, 45 => true];
-        $angle = isset($stored['snapangle']) ? (int)$stored['snapangle'] : 0;
+        // Only a string field may index the allow-lists; a non-scalar (array,
+        // object) becomes an empty string and so takes the default.
+        $str = function ($value): string {
+            return is_string($value) ? $value : '';
+        };
+        $turn = $str($stored['turn'] ?? null);
+        $vignette = $str($stored['vignette'] ?? null);
+        $speed = $str($stored['speed'] ?? null);
+        $angle = (isset($stored['snapangle']) && is_numeric($stored['snapangle'])) ? (int)$stored['snapangle'] : 0;
         return [
-            'turn' => isset($turns[$stored['turn'] ?? '']) ? $stored['turn'] : $defaults['turn'],
-            'snapangle' => isset($angles[$angle]) ? $angle : $defaults['snapangle'],
-            'vignette' => isset($vignettes[$stored['vignette'] ?? '']) ? $stored['vignette'] : $defaults['vignette'],
-            'speed' => isset($speeds[$stored['speed'] ?? '']) ? $stored['speed'] : $defaults['speed'],
+            'turn' => isset($turns[$turn]) ? $turn : 'snap',
+            'snapangle' => isset($angles[$angle]) ? $angle : 30,
+            'vignette' => isset($vignettes[$vignette]) ? $vignette : 'full',
+            'speed' => isset($speeds[$speed]) ? $speed : 'normal',
         ];
     }
 

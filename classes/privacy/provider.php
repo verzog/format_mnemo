@@ -25,15 +25,19 @@
 namespace format_mnemo\privacy;
 
 use core_privacy\local\metadata\collection;
+use core_privacy\local\request\writer;
 
 /**
  * Privacy provider for format_mnemo.
  *
  * The format keeps no data in its own tables. It stores teacher-uploaded topic
- * images as course content via the files subsystem, which is declared here; the
- * files subsystem handles their export and deletion.
+ * images as course content via the files subsystem, and one per-user comfort
+ * preference (VR turn mode/angle, motion vignette and movement speed); both are
+ * declared here, and the comfort preference is exported on request.
  */
-class provider implements \core_privacy\local\metadata\provider {
+class provider implements
+    \core_privacy\local\metadata\provider,
+    \core_privacy\local\request\user_preference_provider {
     /**
      * Describe the data this plugin stores.
      *
@@ -46,6 +50,27 @@ class provider implements \core_privacy\local\metadata\provider {
             [],
             'privacy:metadata:core_files'
         );
+        $collection->add_user_preference(
+            'format_mnemo_comfort',
+            'privacy:metadata:preference:comfort'
+        );
         return $collection;
+    }
+
+    /**
+     * Export the plugin's user preferences for a user.
+     *
+     * @param int $userid The user whose preferences are being exported.
+     */
+    public static function export_user_preferences(int $userid): void {
+        $value = get_user_preferences('format_mnemo_comfort', null, $userid);
+        if ($value !== null) {
+            writer::export_user_preference(
+                'format_mnemo',
+                'format_mnemo_comfort',
+                $value,
+                get_string('privacy:metadata:preference:comfort', 'format_mnemo')
+            );
+        }
     }
 }

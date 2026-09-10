@@ -138,6 +138,7 @@ $string['preview_use_sidewalktexture'] = 'Laid over the raised sidewalks along t
 $string['preview_use_signtexture'] = 'Tints the neon frame behind every activity sign.';
 $string['preview_use_spacetexture'] = 'Wraps the Void environment\'s sky (equirectangular).';
 $string['privacy:metadata:core_files'] = 'Topic images uploaded for the course format are stored using the Moodle files subsystem.';
+$string['privacy:metadata:preference:comfort'] = 'The learner\'s Mnemo comfort settings: VR turn mode and snap angle, the motion vignette strength, and the movement speed.';
 $string['scenearialabel'] = 'Interactive 3D cyberpunk city view of the course. An equivalent list of all topics and activities follows.';
 $string['scenecontrols'] = 'Controls: drag to look, W/S to fly down the street, click a sign to open it. In VR, point and pinch (or squeeze the trigger) to fly and select.';
 $string['scenefailed'] = 'The 3D scene could not be loaded. Showing the list view instead.';
