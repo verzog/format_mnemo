@@ -39,6 +39,14 @@ off).
 - **On-screen fallback** — no headset needed. Drag to look, `W`/`S` to fly,
   `A`/`D` to strafe, `R`/`F` (or `Space`) for altitude, and click a node to open
   it. `Shift` to boost.
+- **Comfort settings** — a **⚙ gear button** opens a small panel where each
+  learner tunes the controls to their own comfort: **snap or smooth turning**
+  (with a **15° / 30° / 45°** snap angle), the **motion vignette** (Off / Light /
+  Full) that narrows the view while moving, and the **movement speed** (Slow /
+  Normal / Fast, applied to both VR glide and desktop flight). Choices apply
+  instantly and are **saved per learner** (a Moodle user preference, with a
+  per-device fallback), so they follow the user across courses and devices. Set
+  them before entering a headset.
 - **Live course data** — every section becomes a side street; every activity
   becomes a building or shop with a lit signboard colour-coded by state:
   **green = complete**, **palette colour = available**, **red = restricted**.

@@ -382,6 +382,35 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The current user's comfort settings (turn mode/angle, motion vignette,
+     * movement speed), read from their 'format_mnemo_comfort' preference and
+     * validated field by field against the allowed values, each falling back to
+     * the plugin default. The client re-validates too, so a stale or hand-edited
+     * preference can never produce an out-of-range value.
+     *
+     * @return array{turn: string, snapangle: int, vignette: string, speed: string}
+     */
+    protected function comfort(): array {
+        $defaults = ['turn' => 'snap', 'snapangle' => 30, 'vignette' => 'full', 'speed' => 'normal'];
+        $raw = get_user_preferences('format_mnemo_comfort', '');
+        $stored = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
+        if (!is_array($stored)) {
+            return $defaults;
+        }
+        $turns = ['snap' => true, 'smooth' => true];
+        $vignettes = ['off' => true, 'light' => true, 'full' => true];
+        $speeds = ['slow' => true, 'normal' => true, 'fast' => true];
+        $angles = [15 => true, 30 => true, 45 => true];
+        $angle = isset($stored['snapangle']) ? (int)$stored['snapangle'] : 0;
+        return [
+            'turn' => isset($turns[$stored['turn'] ?? '']) ? $stored['turn'] : $defaults['turn'],
+            'snapangle' => isset($angles[$angle]) ? $angle : $defaults['snapangle'],
+            'vignette' => isset($vignettes[$stored['vignette'] ?? '']) ? $stored['vignette'] : $defaults['vignette'],
+            'speed' => isset($speeds[$stored['speed'] ?? '']) ? $stored['speed'] : $defaults['speed'],
+        ];
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -590,6 +619,9 @@ class scene implements renderable, templatable {
             'cartypes' => $this->car_types(),
             // The grid the generated layout snaps to and the placer/editor use.
             'gridsize' => 2,
+            // Per-learner comfort settings (turn mode/angle, motion vignette,
+            // movement speed), from this user's preference or the defaults.
+            'comfort' => $this->comfort(),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -671,6 +703,19 @@ class scene implements renderable, templatable {
                 'placebarrier' => get_string('placebarrier', 'format_mnemo'),
                 'placekiosk' => get_string('placekiosk', 'format_mnemo'),
                 'placevehicle' => get_string('placevehicle', 'format_mnemo'),
+                'comfort' => get_string('comfort', 'format_mnemo'),
+                'comfortturn' => get_string('comfortturn', 'format_mnemo'),
+                'comfortturnsnap' => get_string('comfortturnsnap', 'format_mnemo'),
+                'comfortturnsmooth' => get_string('comfortturnsmooth', 'format_mnemo'),
+                'comfortangle' => get_string('comfortangle', 'format_mnemo'),
+                'comfortvignette' => get_string('comfortvignette', 'format_mnemo'),
+                'comfortspeed' => get_string('comfortspeed', 'format_mnemo'),
+                'comfortoff' => get_string('comfortoff', 'format_mnemo'),
+                'comfortlight' => get_string('comfortlight', 'format_mnemo'),
+                'comfortfull' => get_string('comfortfull', 'format_mnemo'),
+                'comfortslow' => get_string('comfortslow', 'format_mnemo'),
+                'comfortnormal' => get_string('comfortnormal', 'format_mnemo'),
+                'comfortfast' => get_string('comfortfast', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editsidewalksurface' => get_string('editsidewalksurface', 'format_mnemo'),
