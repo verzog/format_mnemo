@@ -221,6 +221,10 @@ define('format_mnemo/vr', [], function() {
         this.yaw = 0; // Desktop look yaw.
         this.pitch = 0; // Desktop look pitch.
         this.invertlook = !!config.invertlook; // Invert drag-to-look direction.
+        // Per-learner comfort settings (turn mode/angle, motion vignette,
+        // movement speed). Seeded from the server user preference, falling back
+        // to this device's last choice, then defaults. See normalizeComfort.
+        this.comfort = this.normalizeComfort(config.comfort || this.readLocalComfort());
         this.dragging = false;
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
@@ -388,6 +392,7 @@ define('format_mnemo/vr', [], function() {
         this.gestures = new GestureManager(this);
         this.buildVrButton();
         this.buildFullscreenButton();
+        this.buildComfort();
         if (this.config.canedit) {
             this.buildEditor();
         }
@@ -4728,6 +4733,231 @@ define('format_mnemo/vr', [], function() {
         });
     };
 
+    /** @const {Object} Allowed comfort values and the plugin defaults. */
+    var COMFORT_TURN = {snap: true, smooth: true};
+    var COMFORT_VIGNETTE = {off: true, light: true, full: true};
+    var COMFORT_SPEED = {slow: true, normal: true, fast: true};
+    var COMFORT_ANGLE = {'15': true, '30': true, '45': true};
+    var COMFORT_DEFAULT = {turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal'};
+
+    /**
+     * Normalise a comfort settings object to known values, filling any missing
+     * or invalid field with its default. Accepts the server preference, this
+     * device's stored choice, or nothing.
+     *
+     * @param {Object} c A partial/untrusted comfort object, or null.
+     * @return {Object} {turn, snapangle, vignette, speed}.
+     */
+    Cyberspace.prototype.normalizeComfort = function(c) {
+        c = c || {};
+        var angle = parseInt(c.snapangle, 10);
+        return {
+            turn: COMFORT_TURN[c.turn] ? c.turn : COMFORT_DEFAULT.turn,
+            snapangle: COMFORT_ANGLE[String(angle)] ? angle : COMFORT_DEFAULT.snapangle,
+            vignette: COMFORT_VIGNETTE[c.vignette] ? c.vignette : COMFORT_DEFAULT.vignette,
+            speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed
+        };
+    };
+
+    /**
+     * The movement-speed multiplier for the current comfort speed setting.
+     *
+     * @return {Number} 0.6 (slow), 1 (normal) or 1.6 (fast).
+     */
+    Cyberspace.prototype.comfortSpeedScale = function() {
+        var s = this.comfort ? this.comfort.speed : null;
+        if (s === 'slow') {
+            return 0.6;
+        }
+        if (s === 'fast') {
+            return 1.6;
+        }
+        return 1;
+    };
+
+    /**
+     * The motion-vignette strength multiplier for the current comfort setting.
+     *
+     * @return {Number} 0 (off), 0.5 (light) or 1 (full).
+     */
+    Cyberspace.prototype.comfortVignetteScale = function() {
+        var v = this.comfort ? this.comfort.vignette : null;
+        if (v === 'off') {
+            return 0;
+        }
+        if (v === 'light') {
+            return 0.5;
+        }
+        return 1;
+    };
+
+    /**
+     * The last comfort settings stored on this device (localStorage), or null.
+     * A per-device convenience so an unsaved/anonymous session still remembers;
+     * the server preference is authoritative when present.
+     *
+     * @return {Object|null} The stored comfort object, or null.
+     */
+    Cyberspace.prototype.readLocalComfort = function() {
+        try {
+            var raw = window.localStorage.getItem('format_mnemo_comfort');
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * Persist the current comfort settings: to this device (localStorage) for an
+     * instant, offline-safe fallback, and to the Moodle user preference so the
+     * choice follows the learner across devices. Best-effort - a failed save
+     * just means the next page re-reads the previous value.
+     */
+    Cyberspace.prototype.saveComfort = function() {
+        var self = this;
+        try {
+            window.localStorage.setItem('format_mnemo_comfort', JSON.stringify(this.comfort));
+        } catch (e) {
+            // Storage unavailable (private mode / blocked); the server save still runs.
+        }
+        if (!window.require) {
+            return;
+        }
+        // Debounce the server write so a burst of quick changes sends only the
+        // final state once, and out-of-order requests cannot let an older
+        // snapshot win. The current settings are read at fire time.
+        if (this.comfortSaveTimer) {
+            window.clearTimeout(this.comfortSaveTimer);
+        }
+        this.comfortSaveTimer = window.setTimeout(function() {
+            self.comfortSaveTimer = null;
+            var json = JSON.stringify(self.comfort);
+            window.require(['core/ajax'], function(ajax) {
+                ajax.call([{
+                    methodname: 'core_user_set_user_preferences',
+                    args: {preferences: [{name: 'format_mnemo_comfort', value: json}]}
+                }])[0].catch(function() {
+                    // Not logged in, or the preference is not writable; ignore.
+                });
+            });
+        }, 400);
+    };
+
+    /**
+     * Apply the current comfort settings to live systems: the gesture manager's
+     * turn mode/angle, glide speed and vignette strength. The desktop movement
+     * path reads the speed scale directly each frame.
+     */
+    Cyberspace.prototype.applyComfort = function() {
+        if (this.gestures && this.gestures.applyComfort) {
+            this.gestures.applyComfort();
+        }
+    };
+
+    /**
+     * Build the comfort settings control: a gear button (shown to every learner)
+     * that opens a small panel of segmented controls for turn mode, snap angle,
+     * motion vignette and movement speed. Changes apply live and are saved per
+     * learner. On-screen only - set it before entering a headset.
+     */
+    Cyberspace.prototype.buildComfort = function() {
+        var self = this;
+        var s = this.config.strings || {};
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__comfort-btn';
+        btn.textContent = '⚙';
+        btn.title = s.comfort || 'Comfort & controls';
+        btn.setAttribute('aria-label', btn.title);
+        this.root.appendChild(btn);
+
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__comfort';
+        panel.hidden = true;
+        this.root.appendChild(panel);
+        this.comfortPanel = panel;
+
+        // Each row: a label and a set of segmented option buttons. Picking one
+        // updates that comfort field, applies it live and persists.
+        var rows = [
+            {field: 'turn', label: s.comfortturn || 'Turning', options: [
+                {value: 'snap', label: s.comfortturnsnap || 'Snap'},
+                {value: 'smooth', label: s.comfortturnsmooth || 'Smooth'}
+            ]},
+            {field: 'snapangle', label: s.comfortangle || 'Snap angle', options: [
+                {value: 15, label: '15°'},
+                {value: 30, label: '30°'},
+                {value: 45, label: '45°'}
+            ]},
+            {field: 'vignette', label: s.comfortvignette || 'Motion vignette', options: [
+                {value: 'off', label: s.comfortoff || 'Off'},
+                {value: 'light', label: s.comfortlight || 'Light'},
+                {value: 'full', label: s.comfortfull || 'Full'}
+            ]},
+            {field: 'speed', label: s.comfortspeed || 'Movement speed', options: [
+                {value: 'slow', label: s.comfortslow || 'Slow'},
+                {value: 'normal', label: s.comfortnormal || 'Normal'},
+                {value: 'fast', label: s.comfortfast || 'Fast'}
+            ]}
+        ];
+
+        rows.forEach(function(row) {
+            var wrap = document.createElement('div');
+            wrap.className = 'format-mnemo__comfort-row';
+            var label = document.createElement('span');
+            label.className = 'format-mnemo__comfort-label';
+            label.textContent = row.label;
+            wrap.appendChild(label);
+            var seg = document.createElement('div');
+            seg.className = 'format-mnemo__comfort-seg';
+            row.options.forEach(function(opt) {
+                var ob = document.createElement('button');
+                ob.type = 'button';
+                ob.className = 'format-mnemo__comfort-opt';
+                ob.textContent = opt.label;
+                ob.setAttribute('data-comfort-field', row.field);
+                ob.setAttribute('data-comfort-value', String(opt.value));
+                seg.appendChild(ob);
+                ob.addEventListener('click', function() {
+                    self.comfort[row.field] = opt.value;
+                    self.comfort = self.normalizeComfort(self.comfort);
+                    self.markComfortActive();
+                    self.applyComfort();
+                    self.saveComfort();
+                });
+            });
+            wrap.appendChild(seg);
+            panel.appendChild(wrap);
+        });
+
+        btn.addEventListener('click', function() {
+            panel.hidden = !panel.hidden;
+        });
+
+        this.markComfortActive();
+        this.applyComfort();
+    };
+
+    /**
+     * Highlight the option button in each comfort row that matches the current
+     * setting.
+     */
+    Cyberspace.prototype.markComfortActive = function() {
+        if (!this.comfortPanel) {
+            return;
+        }
+        var opts = this.comfortPanel.querySelectorAll('[data-comfort-field]');
+        for (var i = 0; i < opts.length; i++) {
+            var o = opts[i];
+            var field = o.getAttribute('data-comfort-field');
+            var on = String(this.comfort[field]) === o.getAttribute('data-comfort-value');
+            o.classList.toggle('format-mnemo__comfort-opt--on', on);
+            // Expose the selection to assistive tech, not only via colour.
+            o.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+    };
+
     /**
      * Build the in-view object editor: a toggle button and a controls panel for
      * scaling, moving and rotating the selected building or video screen. Only
@@ -7621,7 +7851,6 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.updateXrLocomotion = function(dt) {
         var THREE = this.THREE;
-        var speed = 6;
         if (this.brake) {
             // An open palm this frame is an explicit stop; hold position.
             return;
@@ -7631,6 +7860,9 @@ define('format_mnemo/vr', [], function() {
             // it must never fly the viewer (the panel body is not interactive).
             return;
         }
+        // Point-and-fly speed, scaled by the learner's comfort speed setting
+        // (same scale as thumbstick glide and desktop flight).
+        var speed = 6 * this.comfortSpeedScale();
         for (var i = 0; i < this.controllers.length; i++) {
             var c = this.controllers[i];
             if (!c.userData.selecting) {
@@ -7670,7 +7902,8 @@ define('format_mnemo/vr', [], function() {
         // Apply look.
         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
 
-        var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) * dt;
+        var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) *
+            this.comfortSpeedScale() * dt;
         var forward = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
         var right = new THREE.Vector3(1, 0, 0).applyEuler(this.camera.rotation);
 
@@ -7783,8 +8016,12 @@ define('format_mnemo/vr', [], function() {
 
         // Tunables.
         this.deadzone = 0.15; // Thumbstick centre deadzone.
-        this.glideSpeed = 4.5; // Metres per second at full stick.
-        this.snapAngle = Math.PI / 6; // 30 degrees per snap.
+        this.baseGlideSpeed = 4.5; // Metres per second at full stick (before comfort scale).
+        this.glideSpeed = 4.5; // Effective glide speed (set from comfort).
+        this.snapAngle = Math.PI / 6; // Radians per snap turn (set from comfort).
+        this.smoothTurnSpeed = 2.2; // Radians per second at full stick in smooth-turn mode.
+        this.turnMode = 'snap'; // 'snap' or 'smooth' (set from comfort).
+        this.vignetteScale = 1; // Motion-vignette strength multiplier (set from comfort).
         this.snapThreshold = 0.7; // Stick X magnitude that triggers a snap.
         this.snapRelease = 0.3; // Fall back below this to re-arm the snap.
         this.readerScrollSpeed = 1400; // Reader scroll, canvas px per second at full stick.
@@ -7814,7 +8051,27 @@ define('format_mnemo/vr', [], function() {
         this.hands = [];
         this.buildHands();
         this.buildVignette();
+        this.applyComfort();
     }
+
+    /**
+     * Read the owning scene's comfort settings into this manager's tunables:
+     * turn mode and snap angle, the comfort-scaled glide speed, and the motion
+     * vignette strength. Called at construction and whenever the learner changes
+     * a comfort setting.
+     */
+    GestureManager.prototype.applyComfort = function() {
+        var cs = this.cs;
+        var c = cs.comfort || {};
+        this.turnMode = c.turn === 'smooth' ? 'smooth' : 'snap';
+        this.snapAngle = (c.snapangle || 30) * Math.PI / 180;
+        // Tolerate a partial owner (e.g. a test harness): fall back to the
+        // neutral scales when the comfort helpers are not present.
+        this.glideSpeed = this.baseGlideSpeed *
+            (typeof cs.comfortSpeedScale === 'function' ? cs.comfortSpeedScale() : 1);
+        this.vignetteScale = typeof cs.comfortVignetteScale === 'function' ?
+            cs.comfortVignetteScale() : 1;
+    };
 
     /**
      * Attach the two tracked-hand objects so their joints update each frame.
@@ -7878,7 +8135,7 @@ define('format_mnemo/vr', [], function() {
         var grabCount = hands.grabCount + ctrl.grabCount;
 
         this.handleRecenter(ctrl.thumbClicks);
-        this.handleSnapTurn(ctrl.turnX);
+        this.handleTurn(ctrl.turnX, dt);
 
         if (this.cs.brake) {
             // Braking cancels translation this frame; a fresh grab must re-anchor.
@@ -7979,17 +8236,38 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Snap-turn on a firm right-stick flick, debounced so one flick is one snap.
+     * Turn the viewer with the right thumbstick X, per the comfort turn mode:
+     * snap (a fixed step per firm flick, debounced) or smooth (continuous,
+     * proportional to stick deflection). Stick left turns left.
      *
-     * @param {Number} turnX The right thumbstick X value.
+     * @param {Number} turnX The right thumbstick X value (already deadzoned).
+     * @param {Number} dt Delta time in seconds.
      */
-    GestureManager.prototype.handleSnapTurn = function(turnX) {
+    GestureManager.prototype.handleTurn = function(turnX, dt) {
+        if (this.turnMode === 'smooth') {
+            if (turnX !== 0) {
+                this.rotatePlayer(-turnX * this.smoothTurnSpeed * dt);
+                this.bumpVignette(0.2);
+            }
+            return;
+        }
         if (Math.abs(turnX) > this.snapThreshold && this.snapArmed) {
             this.rotatePlayer(turnX < 0 ? this.snapAngle : -this.snapAngle);
+            this.bumpVignette(0.4);
             this.snapArmed = false;
         } else if (Math.abs(turnX) < this.snapRelease) {
             this.snapArmed = true;
         }
+    };
+
+    /**
+     * Raise the motion vignette to at least the given strength (scaled by the
+     * comfort vignette setting, so it stays off when the learner turned it off).
+     *
+     * @param {Number} v The unscaled target opacity in [0, 1].
+     */
+    GestureManager.prototype.bumpVignette = function(v) {
+        this.vignetteOpacity = Math.max(this.vignetteOpacity, v * this.vignetteScale);
     };
 
     /**
@@ -8150,8 +8428,6 @@ define('format_mnemo/vr', [], function() {
         this.player.position.applyAxisAngle(this.up, angle);
         this.player.position.add(pivot);
         this.player.rotateOnWorldAxis(this.up, angle);
-        // A turn is motion too; give the vignette a brief pulse.
-        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.4);
     };
 
     /**
@@ -8184,7 +8460,7 @@ define('format_mnemo/vr', [], function() {
         player.position.y = 0;
 
         this.grabbing = false;
-        this.vignetteOpacity = Math.max(this.vignetteOpacity, 0.5);
+        this.bumpVignette(0.5);
         this.pulse(null, 0.5, 40);
     };
 
@@ -8221,8 +8497,9 @@ define('format_mnemo/vr', [], function() {
         if (!this.vignetteMat) {
             return;
         }
-        // Ramp in over the first few m/s, capped so peripheral vision stays.
-        var target = Math.min(0.6, speed * 0.12);
+        // Ramp in over the first few m/s, capped so peripheral vision stays,
+        // and scaled by the learner's comfort vignette setting (0 = off).
+        var target = Math.min(0.6, speed * 0.12) * this.vignetteScale;
         // Ease toward the target, and let a turn pulse decay smoothly.
         var k = Math.min(1, dt * 8);
         this.vignetteOpacity += (target - this.vignetteOpacity) * k;

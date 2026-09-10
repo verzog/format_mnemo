@@ -622,4 +622,63 @@ final class scene_test extends \advanced_testcase {
 
         $this->assertSame([], $config['cartypes']);
     }
+
+    /**
+     * With no comfort preference the scene exposes the defaults; a stored
+     * preference is parsed through, and invalid fields fall back to defaults.
+     */
+    public function test_scene_config_comfort(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+
+        $user = $this->getDataGenerator()->create_user();
+        $this->setUser($user);
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // No preference: null, so the client can fall back to a device-local
+        // choice (then the client defaults).
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertNull($config['comfort']);
+
+        // A stored preference passes through; an invalid field defaults.
+        set_user_preference('format_mnemo_comfort', json_encode([
+            'turn' => 'smooth', 'snapangle' => 45, 'vignette' => 'off', 'speed' => 'bogus',
+        ]));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame('smooth', $config['comfort']['turn']);
+        $this->assertSame(45, $config['comfort']['snapangle']);
+        $this->assertSame('off', $config['comfort']['vignette']);
+        $this->assertSame('normal', $config['comfort']['speed']); // Invalid -> default.
+
+        // A non-scalar field (a hand-edited PARAM_RAW value) must not error; it
+        // just takes the defaults.
+        set_user_preference('format_mnemo_comfort', json_encode([
+            'turn' => [], 'snapangle' => ['x'], 'vignette' => 'light', 'speed' => 'fast',
+        ]));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame('snap', $config['comfort']['turn']); // Array -> default.
+        $this->assertSame(30, $config['comfort']['snapangle']); // Array -> default.
+        $this->assertSame('light', $config['comfort']['vignette']);
+        $this->assertSame('fast', $config['comfort']['speed']);
+    }
+
+    /**
+     * The comfort user-preference is writable only by its owner: the permission
+     * callback accepts the current user and rejects another.
+     */
+    public function test_comfort_preference_permission(): void {
+        $this->resetAfterTest();
+
+        $owner = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        $this->setUser($owner);
+
+        $prefs = format_mnemo_user_preferences();
+        $this->assertArrayHasKey('format_mnemo_comfort', $prefs);
+        $callback = $prefs['format_mnemo_comfort']['permissioncallback'];
+        $this->assertTrue($callback($owner, 'format_mnemo_comfort'));
+        $this->assertFalse($callback($other, 'format_mnemo_comfort'));
+    }
 }

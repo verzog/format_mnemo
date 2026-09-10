@@ -382,6 +382,45 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The current user's comfort settings (turn mode/angle, motion vignette,
+     * movement speed), read from their 'format_mnemo_comfort' preference and
+     * validated field by field against the allowed values, each falling back to
+     * the plugin default. Returns null when the user has no stored preference,
+     * so the client can honour a device-local (localStorage) choice before
+     * falling back to defaults. Fields are checked for the expected scalar type
+     * before use, so a hand-edited PARAM_RAW value (e.g. a nested array) cannot
+     * break rendering.
+     *
+     * @return array{turn: string, snapangle: int, vignette: string, speed: string}|null
+     */
+    protected function comfort(): ?array {
+        $raw = get_user_preferences('format_mnemo_comfort', '');
+        $stored = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
+        if (!is_array($stored)) {
+            return null;
+        }
+        $turns = ['snap' => true, 'smooth' => true];
+        $vignettes = ['off' => true, 'light' => true, 'full' => true];
+        $speeds = ['slow' => true, 'normal' => true, 'fast' => true];
+        $angles = [15 => true, 30 => true, 45 => true];
+        // Only a string field may index the allow-lists; a non-scalar (array,
+        // object) becomes an empty string and so takes the default.
+        $str = function ($value): string {
+            return is_string($value) ? $value : '';
+        };
+        $turn = $str($stored['turn'] ?? null);
+        $vignette = $str($stored['vignette'] ?? null);
+        $speed = $str($stored['speed'] ?? null);
+        $angle = (isset($stored['snapangle']) && is_numeric($stored['snapangle'])) ? (int)$stored['snapangle'] : 0;
+        return [
+            'turn' => isset($turns[$turn]) ? $turn : 'snap',
+            'snapangle' => isset($angles[$angle]) ? $angle : 30,
+            'vignette' => isset($vignettes[$vignette]) ? $vignette : 'full',
+            'speed' => isset($speeds[$speed]) ? $speed : 'normal',
+        ];
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -590,6 +629,9 @@ class scene implements renderable, templatable {
             'cartypes' => $this->car_types(),
             // The grid the generated layout snaps to and the placer/editor use.
             'gridsize' => 2,
+            // Per-learner comfort settings (turn mode/angle, motion vignette,
+            // movement speed), from this user's preference or the defaults.
+            'comfort' => $this->comfort(),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -671,6 +713,19 @@ class scene implements renderable, templatable {
                 'placebarrier' => get_string('placebarrier', 'format_mnemo'),
                 'placekiosk' => get_string('placekiosk', 'format_mnemo'),
                 'placevehicle' => get_string('placevehicle', 'format_mnemo'),
+                'comfort' => get_string('comfort', 'format_mnemo'),
+                'comfortturn' => get_string('comfortturn', 'format_mnemo'),
+                'comfortturnsnap' => get_string('comfortturnsnap', 'format_mnemo'),
+                'comfortturnsmooth' => get_string('comfortturnsmooth', 'format_mnemo'),
+                'comfortangle' => get_string('comfortangle', 'format_mnemo'),
+                'comfortvignette' => get_string('comfortvignette', 'format_mnemo'),
+                'comfortspeed' => get_string('comfortspeed', 'format_mnemo'),
+                'comfortoff' => get_string('comfortoff', 'format_mnemo'),
+                'comfortlight' => get_string('comfortlight', 'format_mnemo'),
+                'comfortfull' => get_string('comfortfull', 'format_mnemo'),
+                'comfortslow' => get_string('comfortslow', 'format_mnemo'),
+                'comfortnormal' => get_string('comfortnormal', 'format_mnemo'),
+                'comfortfast' => get_string('comfortfast', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editsidewalksurface' => get_string('editsidewalksurface', 'format_mnemo'),

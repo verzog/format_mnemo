@@ -1327,6 +1327,113 @@ const scenarios = [
         }
     },
     {
+        name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const norm = CS.prototype.normalizeComfort;
+            const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast'});
+            const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z'});
+            const empty = norm(null);
+            const pass = valid.turn === 'smooth' && valid.snapangle === 45 &&
+                valid.vignette === 'off' && valid.speed === 'fast' &&
+                bad.turn === 'snap' && bad.snapangle === 30 &&
+                bad.vignette === 'full' && bad.speed === 'normal' &&
+                empty.speed === 'normal';
+            return {pass, detail: `valid=${JSON.stringify(valid)} bad=${JSON.stringify(bad)}`};
+        }
+    },
+    {
+        name: 'comfort: applyComfort maps settings onto the gesture manager',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const GM = window.__mnemoModule._GestureManager;
+            const cs = {
+                comfort: {turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast'},
+                comfortSpeedScale: CS.prototype.comfortSpeedScale,
+                comfortVignetteScale: CS.prototype.comfortVignetteScale
+            };
+            const gm = {cs, baseGlideSpeed: 4.5, applyComfort: GM.prototype.applyComfort};
+            gm.applyComfort();
+            const pass = gm.turnMode === 'smooth' &&
+                Math.abs(gm.snapAngle - 45 * Math.PI / 180) < 1e-9 &&
+                Math.abs(gm.glideSpeed - 4.5 * 1.6) < 1e-9 &&
+                gm.vignetteScale === 0;
+            return {pass, detail: `mode=${gm.turnMode} glide=${gm.glideSpeed} vig=${gm.vignetteScale}`};
+        }
+    },
+    {
+        name: 'comfort: smooth turn rotates continuously; snap turn is one-per-flick',
+        fn: () => {
+            const GM = window.__mnemoModule._GestureManager;
+            // Smooth: rotates proportionally each frame (stick left -> +angle).
+            const smooth = {
+                turnMode: 'smooth', smoothTurnSpeed: 2.2, vignetteScale: 1, vignetteOpacity: 0,
+                bumpVignette: GM.prototype.bumpVignette, handleTurn: GM.prototype.handleTurn,
+                angles: [], rotatePlayer: function(a) {
+                    this.angles.push(a);
+                }
+            };
+            smooth.handleTurn(-1, 0.5); // -> +1.1 rad
+            smooth.handleTurn(0, 0.5); // stick centred -> no rotation
+            const smoothOk = smooth.angles.length === 1 && Math.abs(smooth.angles[0] - 1.1) < 1e-9 &&
+                Math.abs(smooth.vignetteOpacity - 0.2) < 1e-9;
+            // Snap: one flick is one snap until the stick returns to centre.
+            const snap = {
+                turnMode: 'snap', snapArmed: true, snapThreshold: 0.7, snapRelease: 0.3,
+                snapAngle: Math.PI / 6, vignetteScale: 1, vignetteOpacity: 0,
+                bumpVignette: GM.prototype.bumpVignette, handleTurn: GM.prototype.handleTurn,
+                angles: [], rotatePlayer: function(a) {
+                    this.angles.push(a);
+                }
+            };
+            snap.handleTurn(-1, 0.016); // Fires once.
+            snap.handleTurn(-1, 0.016); // Held: no repeat.
+            snap.handleTurn(0, 0.016); // Re-arm.
+            snap.handleTurn(-1, 0.016); // Fires again.
+            const snapOk = snap.angles.length === 2 && Math.abs(snap.angles[0] - Math.PI / 6) < 1e-9;
+            return {pass: smoothOk && snapOk, detail: `smooth=${smooth.angles} snap=${snap.angles.length}`};
+        }
+    },
+    {
+        name: 'comfort: vignette respects the off setting',
+        fn: () => {
+            const GM = window.__mnemoModule._GestureManager;
+            const off = {vignetteMat: {opacity: 0}, vignetteScale: 0, vignetteOpacity: 0,
+                updateVignette: GM.prototype.updateVignette};
+            off.updateVignette(10, 1); // Fast motion, but vignette is off.
+            const on = {vignetteMat: {opacity: 0}, vignetteScale: 1, vignetteOpacity: 0,
+                updateVignette: GM.prototype.updateVignette};
+            on.updateVignette(10, 1);
+            const pass = off.vignetteMat.opacity === 0 && on.vignetteMat.opacity > 0;
+            return {pass, detail: `off=${off.vignetteMat.opacity} on=${on.vignetteMat.opacity.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'comfort: panel renders options and marks the active one for a11y',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                root: document.createElement('div'),
+                config: {strings: {}},
+                comfort: {turn: 'smooth', snapangle: 30, vignette: 'full', speed: 'normal'},
+                normalizeComfort: CS.prototype.normalizeComfort,
+                comfortSpeedScale: CS.prototype.comfortSpeedScale,
+                comfortVignetteScale: CS.prototype.comfortVignetteScale,
+                applyComfort: CS.prototype.applyComfort,
+                saveComfort: function() {},
+                markComfortActive: CS.prototype.markComfortActive,
+                buildComfort: CS.prototype.buildComfort
+            };
+            self.buildComfort();
+            const smooth = self.root.querySelector('[data-comfort-field="turn"][data-comfort-value="smooth"]');
+            const snap = self.root.querySelector('[data-comfort-field="turn"][data-comfort-value="snap"]');
+            const pass = smooth.getAttribute('aria-pressed') === 'true' &&
+                snap.getAttribute('aria-pressed') === 'false' &&
+                smooth.classList.contains('format-mnemo__comfort-opt--on');
+            return {pass, detail: `smooth=${smooth.getAttribute('aria-pressed')} snap=${snap.getAttribute('aria-pressed')}`};
+        }
+    },
+    {
         name: 'editor: applyTransform applies non-uniform width/height/depth',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

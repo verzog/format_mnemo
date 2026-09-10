@@ -665,3 +665,26 @@ function format_mnemo_coursemodule_edit_post_actions($data, $course) {
 
     return $data;
 }
+
+/**
+ * Declare the plugin's writable user preferences, so the scene's comfort
+ * settings can be saved with the core `core_user_set_user_preferences` web
+ * service. The value is the comfort settings as a JSON string; the scene
+ * re-validates every field, so any stored value is safe. A learner may only
+ * write their own preference.
+ *
+ * @return array The user preference definitions, keyed by preference name.
+ */
+function format_mnemo_user_preferences(): array {
+    return [
+        'format_mnemo_comfort' => [
+            'type' => PARAM_RAW,
+            'null' => NULL_NOT_ALLOWED,
+            'default' => '',
+            'permissioncallback' => function ($user, $preferencename) {
+                global $USER;
+                return $user->id == $USER->id;
+            },
+        ],
+    ];
+}
