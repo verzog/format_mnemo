@@ -28,25 +28,32 @@ off).
   hand-tracking input to movement:
   - **Thumbstick** to glide (head-relative), **right thumbstick left/right**
     to **snap-turn** without physically turning.
+  - **Teleport** (optional movement style) — push the thumbstick forward to
+    aim a landing arc, release to jump there; a comfort alternative to gliding
+    that never moves you continuously (see **Comfort settings**).
   - **Grip / make a fist** to **grab the world** and pull yourself along the
     streets; **open your palm** to brake to a stop.
   - **Pinch** (hand tracking) or **hold the trigger** to glide toward where you
     point; aim at a node and **pinch / trigger** to open it.
   - **Click both thumbsticks** together to recenter at the avenue mouth.
+  - **Press a face button** (A/X or B/Y) to open the **in-headset comfort
+    panel** and change any comfort setting without leaving VR.
   - A **comfort vignette** narrows your view while you move to reduce motion
     sickness, and controllers **buzz** when a node lights up and when you open
     one.
 - **On-screen fallback** — no headset needed. Drag to look, `W`/`S` to fly,
   `A`/`D` to strafe, `R`/`F` (or `Space`) for altitude, and click a node to open
   it. `Shift` to boost.
-- **Comfort settings** — a **⚙ gear button** opens a small panel where each
-  learner tunes the controls to their own comfort: **snap or smooth turning**
-  (with a **15° / 30° / 45°** snap angle), the **motion vignette** (Off / Light /
-  Full) that narrows the view while moving, and the **movement speed** (Slow /
-  Normal / Fast, applied to both VR glide and desktop flight). Choices apply
+- **Comfort settings** — a **⚙ gear button** (on screen) and a matching
+  **in-headset panel** (summoned with a controller face button) let each learner
+  tune the controls to their own comfort: **snap or smooth turning** (with a
+  **15° / 30° / 45°** snap angle), the **motion vignette** (Off / Light / Full)
+  that narrows the view while moving, the **movement speed** (Slow / Normal /
+  Fast, applied to both VR glide and desktop flight), and the **VR movement
+  style** — **Glide** (continuous) or **Teleport** (aim-and-jump). Choices apply
   instantly and are **saved per learner** (a Moodle user preference, with a
-  per-device fallback), so they follow the user across courses and devices. Set
-  them before entering a headset.
+  per-device fallback), so they follow the user across courses and devices — and
+  can be changed on screen, before entering a headset, or from inside VR.
 - **Live course data** — every section becomes a side street; every activity
   becomes a building or shop with a lit signboard colour-coded by state:
   **green = complete**, **palette colour = available**, **red = restricted**.

@@ -217,6 +217,7 @@ define('format_mnemo/vr', [], function() {
         this.videos = []; // HTMLVideoElements driving in-world screens.
         this.hovered = null; // Currently highlighted mesh.
         this.controllers = []; // XR controller target-ray spaces.
+        this.vrComfort = null; // In-headset comfort panel (built after the renderer).
         this.keys = {}; // Held keyboard keys.
         this.yaw = 0; // Desktop look yaw.
         this.pitch = 0; // Desktop look pitch.
@@ -393,6 +394,7 @@ define('format_mnemo/vr', [], function() {
         this.buildVrButton();
         this.buildFullscreenButton();
         this.buildComfort();
+        this.buildVrComfortPanel();
         if (this.config.canedit) {
             this.buildEditor();
         }
@@ -4321,7 +4323,9 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var ud = target.userData;
-        if (ud.readerAction) {
+        if (ud.comfortField) {
+            this.setComfort(ud.comfortField, ud.comfortValue);
+        } else if (ud.readerAction) {
             this.readerControl(ud.readerAction);
         } else if (ud.videoToggle) {
             this.toggleVideo(ud.videoToggle);
@@ -4672,7 +4676,8 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         if (target && target.userData &&
-                (target.userData.url || target.userData.videoToggle || target.userData.readerAction)) {
+                (target.userData.url || target.userData.videoToggle ||
+                    target.userData.readerAction || target.userData.comfortField)) {
             // A firm confirmation buzz before acting on the node.
             if (this.gestures) {
                 this.gestures.pulse(controller.userData.handedness, 0.6, 40);
@@ -4738,7 +4743,10 @@ define('format_mnemo/vr', [], function() {
     var COMFORT_VIGNETTE = {off: true, light: true, full: true};
     var COMFORT_SPEED = {slow: true, normal: true, fast: true};
     var COMFORT_ANGLE = {'15': true, '30': true, '45': true};
-    var COMFORT_DEFAULT = {turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal'};
+    var COMFORT_LOCOMOTION = {smooth: true, teleport: true};
+    var COMFORT_DEFAULT = {
+        turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal', locomotion: 'smooth'
+    };
 
     /**
      * Normalise a comfort settings object to known values, filling any missing
@@ -4746,7 +4754,7 @@ define('format_mnemo/vr', [], function() {
      * device's stored choice, or nothing.
      *
      * @param {Object} c A partial/untrusted comfort object, or null.
-     * @return {Object} {turn, snapangle, vignette, speed}.
+     * @return {Object} {turn, snapangle, vignette, speed, locomotion}.
      */
     Cyberspace.prototype.normalizeComfort = function(c) {
         c = c || {};
@@ -4755,7 +4763,8 @@ define('format_mnemo/vr', [], function() {
             turn: COMFORT_TURN[c.turn] ? c.turn : COMFORT_DEFAULT.turn,
             snapangle: COMFORT_ANGLE[String(angle)] ? angle : COMFORT_DEFAULT.snapangle,
             vignette: COMFORT_VIGNETTE[c.vignette] ? c.vignette : COMFORT_DEFAULT.vignette,
-            speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed
+            speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed,
+            locomotion: COMFORT_LOCOMOTION[c.locomotion] ? c.locomotion : COMFORT_DEFAULT.locomotion
         };
     };
 
@@ -4899,6 +4908,10 @@ define('format_mnemo/vr', [], function() {
                 {value: 'slow', label: s.comfortslow || 'Slow'},
                 {value: 'normal', label: s.comfortnormal || 'Normal'},
                 {value: 'fast', label: s.comfortfast || 'Fast'}
+            ]},
+            {field: 'locomotion', label: s.comfortmovement || 'Moving in VR', options: [
+                {value: 'smooth', label: s.comfortglide || 'Glide'},
+                {value: 'teleport', label: s.comfortteleport || 'Teleport'}
             ]}
         ];
 
@@ -4920,11 +4933,7 @@ define('format_mnemo/vr', [], function() {
                 ob.setAttribute('data-comfort-value', String(opt.value));
                 seg.appendChild(ob);
                 ob.addEventListener('click', function() {
-                    self.comfort[row.field] = opt.value;
-                    self.comfort = self.normalizeComfort(self.comfort);
-                    self.markComfortActive();
-                    self.applyComfort();
-                    self.saveComfort();
+                    self.setComfort(row.field, opt.value);
                 });
             });
             wrap.appendChild(seg);
@@ -4937,6 +4946,24 @@ define('format_mnemo/vr', [], function() {
 
         this.markComfortActive();
         this.applyComfort();
+    };
+
+    /**
+     * Change one comfort field and apply it everywhere: validate the whole
+     * settings object, refresh both the on-screen panel and the in-headset
+     * panel, push the change to the live systems and persist it. The single
+     * entry point shared by the DOM panel buttons and the in-VR panel.
+     *
+     * @param {String} field The comfort field name.
+     * @param {String|Number} value The new value for that field.
+     */
+    Cyberspace.prototype.setComfort = function(field, value) {
+        this.comfort[field] = value;
+        this.comfort = this.normalizeComfort(this.comfort);
+        this.markComfortActive();
+        this.markVrComfortActive();
+        this.applyComfort();
+        this.saveComfort();
     };
 
     /**
@@ -4955,6 +4982,258 @@ define('format_mnemo/vr', [], function() {
             o.classList.toggle('format-mnemo__comfort-opt--on', on);
             // Expose the selection to assistive tech, not only via colour.
             o.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+    };
+
+    /**
+     * The comfort rows shown in both comfort panels: turn mode/angle, motion
+     * vignette, movement speed and the VR movement style, each with its allowed
+     * option values and labels.
+     *
+     * @return {Array} Rows of {field, label, options: [[value, label], ...]}.
+     */
+    Cyberspace.prototype.vrComfortRows = function() {
+        var s = this.config.strings || {};
+        return [
+            {field: 'turn', label: s.comfortturn || 'Turning', options: [
+                ['snap', s.comfortturnsnap || 'Snap'], ['smooth', s.comfortturnsmooth || 'Smooth']
+            ]},
+            {field: 'snapangle', label: s.comfortangle || 'Snap angle', options: [
+                [15, '15°'], [30, '30°'], [45, '45°']
+            ]},
+            {field: 'vignette', label: s.comfortvignette || 'Motion vignette', options: [
+                ['off', s.comfortoff || 'Off'], ['light', s.comfortlight || 'Light'],
+                ['full', s.comfortfull || 'Full']
+            ]},
+            {field: 'speed', label: s.comfortspeed || 'Movement speed', options: [
+                ['slow', s.comfortslow || 'Slow'], ['normal', s.comfortnormal || 'Normal'],
+                ['fast', s.comfortfast || 'Fast']
+            ]},
+            {field: 'locomotion', label: s.comfortmovement || 'Moving in VR', options: [
+                ['smooth', s.comfortglide || 'Glide'], ['teleport', s.comfortteleport || 'Teleport']
+            ]}
+        ];
+    };
+
+    /**
+     * Build the in-headset comfort panel: a world-fixed 3D board mirroring the
+     * on-screen comfort controls, so a learner can change turn mode/angle, motion
+     * vignette, movement speed and the VR movement style (glide or teleport)
+     * without leaving the headset. Hidden until summoned with a controller face
+     * button; its option tiles join the interactive set only while it is shown.
+     */
+    Cyberspace.prototype.buildVrComfortPanel = function() {
+        var THREE = this.THREE;
+        var s = this.config.strings || {};
+        var accent = (this.palette && this.palette.primary) || 0x39d0ff;
+        var rows = this.vrComfortRows();
+
+        var rowH = 0.135;
+        var step = 0.205;
+        var topRowY = (rows.length - 1) * rowH / 2;
+        var group = new THREE.Group();
+        group.visible = false;
+
+        // Backing board and a slightly larger accent frame behind it.
+        var bgW = 1.32;
+        var bgH = rows.length * rowH + 0.34;
+        var frame = new THREE.Mesh(
+            new THREE.PlaneGeometry(bgW + 0.03, bgH + 0.03),
+            new THREE.MeshBasicMaterial({
+                color: accent, transparent: true, opacity: 0.35, depthWrite: false
+            })
+        );
+        frame.position.z = -0.008;
+        group.add(frame);
+        var bg = new THREE.Mesh(
+            new THREE.PlaneGeometry(bgW, bgH),
+            new THREE.MeshBasicMaterial({
+                color: 0x0a101a, transparent: true, opacity: 0.86, depthWrite: false
+            })
+        );
+        bg.position.z = -0.006;
+        group.add(bg);
+
+        // Title.
+        var title = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.92, 0.16),
+            new THREE.MeshBasicMaterial({
+                map: this.makeTextTexture(s.comfort || 'Comfort & controls', accent),
+                transparent: true, depthWrite: false
+            })
+        );
+        title.position.set(0, topRowY + 0.18, 0);
+        group.add(title);
+
+        var buttons = [];
+        for (var r = 0; r < rows.length; r++) {
+            var row = rows[r];
+            var y = topRowY - r * rowH;
+            var label = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.46, 0.1),
+                new THREE.MeshBasicMaterial({
+                    map: this.makeTextTexture(row.label, accent), transparent: true, depthWrite: false
+                })
+            );
+            label.position.set(-0.44, y, 0);
+            group.add(label);
+            for (var o = 0; o < row.options.length; o++) {
+                var btn = this.makeComfortButton(row.options[o][1], row.field, row.options[o][0], accent);
+                btn.position.set(-0.02 + o * step, y, 0);
+                group.add(btn);
+                buttons.push(btn);
+            }
+        }
+
+        this.scene.add(group);
+        this.vrComfort = {group: group, buttons: buttons, visible: false, inInteractive: false};
+        this.markVrComfortActive();
+    };
+
+    /**
+     * Build one in-VR comfort option tile: a small rounded plane carrying the
+     * comfort field/value it sets. Two textures are baked - an "off" (dark) and
+     * an "on" (accent-filled) face - so the active option can be shown by
+     * swapping the map, leaving the mesh colour free for the hover highlight.
+     *
+     * @param {String} text The option label.
+     * @param {String} field The comfort field this tile sets.
+     * @param {String|Number} value The value this tile sets.
+     * @param {Number} accent The course neon primary colour (hex int).
+     * @return {Object} A Three.Mesh with comfort userData.
+     */
+    Cyberspace.prototype.makeComfortButton = function(text, field, value, accent) {
+        var THREE = this.THREE;
+        var accentCss = '#' + ('000000' + accent.toString(16)).slice(-6);
+        var self = this;
+        var bake = function(on) {
+            var canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 120;
+            var ctx = canvas.getContext('2d');
+            ctx.fillStyle = on ? accentCss : 'rgba(10,16,26,0.92)';
+            self.roundRect(ctx, 6, 6, 244, 108, 20);
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = accentCss;
+            self.roundRect(ctx, 6, 6, 244, 108, 20);
+            ctx.stroke();
+            ctx.fillStyle = on ? '#0a101a' : accentCss;
+            ctx.font = '600 46px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 128, 66);
+            var tex = new THREE.CanvasTexture(canvas);
+            if (tex.colorSpace !== undefined) {
+                tex.colorSpace = THREE.SRGBColorSpace;
+            }
+            tex.anisotropy = 4;
+            return tex;
+        };
+        var mapOff = bake(false);
+        var mapOn = bake(true);
+        var mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.185, 0.09),
+            new THREE.MeshBasicMaterial({map: mapOff, transparent: true})
+        );
+        mesh.userData = {
+            comfortField: field, comfortValue: value, comfortValueStr: String(value),
+            material: mesh.material, baseColour: 0xffffff, interactive: true,
+            mapOff: mapOff, mapOn: mapOn
+        };
+        return mesh;
+    };
+
+    /**
+     * Show or hide the in-VR comfort panel. On show it is placed in front of the
+     * viewer (world-fixed, so it does not swim with the head) and its tiles join
+     * the interactive set; on hide they leave it again.
+     */
+    Cyberspace.prototype.toggleVrComfort = function() {
+        var v = this.vrComfort;
+        if (!v) {
+            return;
+        }
+        v.visible = !v.visible;
+        v.group.visible = v.visible;
+        if (v.visible) {
+            this.positionVrComfortInFront();
+            this.markVrComfortActive();
+            this.addVrComfortInteractive();
+        } else {
+            this.removeVrComfortInteractive();
+        }
+    };
+
+    /**
+     * Place the in-VR comfort panel about 1.4 m in front of the viewer, dropped
+     * a little below eye level and facing them, so it is easy to point at without
+     * blocking the forward view. World-fixed once placed (see the reader).
+     */
+    Cyberspace.prototype.positionVrComfortInFront = function() {
+        var THREE = this.THREE;
+        var v = this.vrComfort;
+        if (!v) {
+            return;
+        }
+        var camPos = this.camera.getWorldPosition(new THREE.Vector3());
+        var dir = this.camera.getWorldDirection(new THREE.Vector3());
+        dir.y = 0;
+        if (dir.lengthSq() < 1e-6) {
+            dir.set(0, 0, -1);
+        }
+        dir.normalize();
+        var pos = camPos.clone().add(dir.multiplyScalar(1.4));
+        pos.y = camPos.y - 0.2;
+        v.group.position.copy(pos);
+        v.group.lookAt(camPos.x, pos.y, camPos.z);
+    };
+
+    /**
+     * Add the in-VR comfort tiles to the interactive set (once).
+     */
+    Cyberspace.prototype.addVrComfortInteractive = function() {
+        var v = this.vrComfort;
+        if (!v || v.inInteractive) {
+            return;
+        }
+        for (var i = 0; i < v.buttons.length; i++) {
+            this.interactive.push(v.buttons[i]);
+        }
+        v.inInteractive = true;
+    };
+
+    /**
+     * Remove the in-VR comfort tiles from the interactive set.
+     */
+    Cyberspace.prototype.removeVrComfortInteractive = function() {
+        var v = this.vrComfort;
+        if (!v || !v.inInteractive) {
+            return;
+        }
+        for (var i = 0; i < v.buttons.length; i++) {
+            var idx = this.interactive.indexOf(v.buttons[i]);
+            if (idx !== -1) {
+                this.interactive.splice(idx, 1);
+            }
+        }
+        v.inInteractive = false;
+    };
+
+    /**
+     * Mark the in-VR comfort tile matching each current setting as active, by
+     * swapping its baked "on" texture in (and the others' "off" texture back).
+     */
+    Cyberspace.prototype.markVrComfortActive = function() {
+        var v = this.vrComfort;
+        if (!v) {
+            return;
+        }
+        for (var i = 0; i < v.buttons.length; i++) {
+            var ud = v.buttons[i].userData;
+            var on = String(this.comfort[ud.comfortField]) === ud.comfortValueStr;
+            ud.material.map = on ? ud.mapOn : ud.mapOff;
+            ud.material.needsUpdate = true;
         }
     };
 
@@ -8028,14 +8307,25 @@ define('format_mnemo/vr', [], function() {
         this.pinchDist = 0.025; // Not used directly (pinch = select event).
         this.fistDist = 0.075; // Fingertip-to-wrist under this reads as a fist.
         this.palmDist = 0.13; // Fingertip-to-wrist over this reads as open.
+        this.locomotion = 'smooth'; // 'smooth' glide or 'teleport' (set from comfort).
+        this.teleportThreshold = 0.6; // Forward stick push that arms teleport aiming.
+        this.teleportLaunch = 9; // Teleport arc launch speed, metres per second.
+        this.teleportGravity = 12; // Downward accel shaping the teleport arc.
+        this.teleportRange = 260; // Max |x|/|z| a teleport target may land at.
+        this.teleportMax = 32; // Arc sample count.
 
         // State.
         this.snapArmed = true; // Debounce so one flick is one snap.
         this.recenterArmed = true; // Debounce the recenter chord.
+        this.menuArmed = true; // Debounce the in-VR menu toggle.
         this.grabbing = false; // Mid grab-the-world pull.
         this.grabCount = 0; // How many grips were active last frame.
         this.grabAnchor = new THREE.Vector3();
         this.vignetteOpacity = 0; // Smoothed current vignette strength.
+        this.fadeOpacity = 0; // Teleport blink overlay opacity.
+        this.teleportActive = false; // Mid teleport aim (forward stick held).
+        this.teleportValid = false; // Whether the current aim lands on valid ground.
+        this.teleportTarget = new THREE.Vector3();
         this.home = new THREE.Vector3(0, 0, 12); // Avenue mouth.
 
         // Scratch vectors, reused to avoid per-frame allocation.
@@ -8044,6 +8334,9 @@ define('format_mnemo/vr', [], function() {
         this.vSum = new THREE.Vector3();
         this.vDelta = new THREE.Vector3();
         this.vTip = new THREE.Vector3();
+        this.vArc = new THREE.Vector3();
+        this.vArcVel = new THREE.Vector3();
+        this.qArc = new THREE.Quaternion();
         this.up = new THREE.Vector3(0, 1, 0);
         this.handWrist = [new THREE.Vector3(), new THREE.Vector3()];
         this.ctrlPos = [new THREE.Vector3(), new THREE.Vector3()];
@@ -8051,6 +8344,7 @@ define('format_mnemo/vr', [], function() {
         this.hands = [];
         this.buildHands();
         this.buildVignette();
+        this.buildTeleport();
         this.applyComfort();
     }
 
@@ -8064,6 +8358,7 @@ define('format_mnemo/vr', [], function() {
         var cs = this.cs;
         var c = cs.comfort || {};
         this.turnMode = c.turn === 'smooth' ? 'smooth' : 'snap';
+        this.locomotion = c.locomotion === 'teleport' ? 'teleport' : 'smooth';
         this.snapAngle = (c.snapangle || 30) * Math.PI / 180;
         // Tolerate a partial owner (e.g. a test harness): fall back to the
         // neutral scales when the comfort helpers are not present.
@@ -8116,6 +8411,66 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build the teleport aids: a parabolic aiming arc and a ground landing
+     * reticle (both world-fixed, hidden until aiming), plus a black blink
+     * overlay on the camera that flashes over each jump so the instant move
+     * carries no visible sweep. All are inert unless the learner picks the
+     * teleport movement style.
+     */
+    GestureManager.prototype.buildTeleport = function() {
+        var THREE = this.THREE;
+        var scene = this.cs.scene || (this.player && this.player.parent);
+        if (!scene) {
+            return;
+        }
+        var accent = (this.cs.palette && this.cs.palette.primary) || 0x39d0ff;
+
+        var arcGeo = new THREE.BufferGeometry();
+        arcGeo.setAttribute('position',
+            new THREE.BufferAttribute(new Float32Array(this.teleportMax * 3), 3));
+        var arc = new THREE.Line(arcGeo, new THREE.LineBasicMaterial({
+            color: accent, transparent: true, opacity: 0.9
+        }));
+        arc.frustumCulled = false;
+
+        var ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.18, 0.32, 32),
+            new THREE.MeshBasicMaterial({
+                color: accent, transparent: true, opacity: 0.85,
+                side: THREE.DoubleSide, depthWrite: false
+            })
+        );
+        ring.rotation.x = -Math.PI / 2;
+
+        var teleGroup = new THREE.Group();
+        teleGroup.visible = false;
+        teleGroup.add(arc);
+        teleGroup.add(ring);
+        scene.add(teleGroup);
+
+        this.teleGroup = teleGroup;
+        this.teleArc = arc;
+        this.teleArcGeo = arcGeo;
+        this.teleRing = ring;
+        this.teleValidColour = new THREE.Color(accent);
+        this.teleInvalidColour = new THREE.Color(0xff4d5e);
+
+        var fade = new THREE.Mesh(
+            new THREE.PlaneGeometry(3, 3),
+            new THREE.MeshBasicMaterial({
+                color: 0x000000, transparent: true, opacity: 0,
+                depthTest: false, depthWrite: false
+            })
+        );
+        fade.position.set(0, 0, -0.5);
+        fade.renderOrder = 1000;
+        fade.frustumCulled = false;
+        this.camera.add(fade);
+        this.fadeMesh = fade;
+        this.fadeMat = fade.material;
+    };
+
+    /**
      * Read and act on all XR input for this frame.
      *
      * @param {Number} dt Delta time in seconds.
@@ -8135,17 +8490,20 @@ define('format_mnemo/vr', [], function() {
         var grabCount = hands.grabCount + ctrl.grabCount;
 
         this.handleRecenter(ctrl.thumbClicks);
+        this.handleMenu(ctrl.menuPress);
         this.handleTurn(ctrl.turnX, dt);
 
         if (this.cs.brake) {
             // Braking cancels translation this frame; a fresh grab must re-anchor.
             this.grabbing = false;
+            this.hideTeleport();
             return;
         }
 
         if (this.cs.readerOpen) {
             // While the reader is up, a thumbstick scrolls it instead of moving
             // the viewer (pushing forward scrolls down through the page).
+            this.hideTeleport();
             if (Math.abs(ctrl.glideZ) > this.deadzone) {
                 this.cs.scrollReader(-ctrl.glideZ * this.readerScrollSpeed * dt);
             }
@@ -8153,7 +8511,14 @@ define('format_mnemo/vr', [], function() {
         }
 
         this.applyGrab(grabCount);
-        this.applyGlide(ctrl.glideX, ctrl.glideZ, dt);
+        // The learner's movement style: aim-and-jump teleport, or continuous
+        // thumbstick glide. Snap turn and grab-the-world work in both.
+        if (this.locomotion === 'teleport') {
+            this.handleTeleport();
+        } else {
+            this.hideTeleport();
+            this.applyGlide(ctrl.glideX, ctrl.glideZ, dt);
+        }
     };
 
     /**
@@ -8188,7 +8553,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} {glideX, glideZ, turnX, thumbClicks, grabCount}.
      */
     GestureManager.prototype.readControllers = function() {
-        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0};
+        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0, menuPress: 0};
         var controllers = this.cs.controllers;
         for (var c = 0; c < controllers.length; c++) {
             var ctrl = controllers[c];
@@ -8216,6 +8581,10 @@ define('format_mnemo/vr', [], function() {
                 this.vSum.add(this.ctrlPos[c]);
                 out.grabCount++;
             }
+            // Either face button (A/X or B/Y) summons the in-VR comfort menu.
+            if (this.buttonPressed(gp, 4) || this.buttonPressed(gp, 5)) {
+                out.menuPress++;
+            }
         }
         return out;
     };
@@ -8232,6 +8601,23 @@ define('format_mnemo/vr', [], function() {
             this.recenterArmed = false;
         } else if (thumbClicks === 0) {
             this.recenterArmed = true;
+        }
+    };
+
+    /**
+     * Toggle the in-VR comfort panel when a face button is pressed, debounced so
+     * one press is one toggle.
+     *
+     * @param {Number} menuPress How many controllers report a face button down.
+     */
+    GestureManager.prototype.handleMenu = function(menuPress) {
+        if (menuPress > 0 && this.menuArmed) {
+            if (this.cs.toggleVrComfort) {
+                this.cs.toggleVrComfort();
+            }
+            this.menuArmed = false;
+        } else if (menuPress === 0) {
+            this.menuArmed = true;
         }
     };
 
@@ -8257,6 +8643,159 @@ define('format_mnemo/vr', [], function() {
             this.snapArmed = false;
         } else if (Math.abs(turnX) < this.snapRelease) {
             this.snapArmed = true;
+        }
+    };
+
+    /**
+     * Teleport locomotion, one frame: while a thumbstick is pushed forward,
+     * project an aiming arc to the ground and show the landing reticle; when the
+     * stick is released, jump to the last valid target (blinking over the move).
+     * A comfort alternative to smooth glide - it never moves you continuously.
+     */
+    GestureManager.prototype.handleTeleport = function() {
+        var aim = this.teleportAimController();
+        if (!aim) {
+            // The stick returned to centre: commit a valid aim, then clear.
+            if (this.teleportActive) {
+                if (this.teleportValid) {
+                    this.commitTeleport();
+                }
+                this.teleportActive = false;
+                this.teleportValid = false;
+            }
+            this.hideTeleport();
+            return;
+        }
+        this.teleportActive = true;
+        if (this.teleGroup) {
+            this.computeTeleportArc(aim);
+        }
+    };
+
+    /**
+     * The controller pushing its thumbstick forward hardest (past the teleport
+     * threshold), or null when neither is - the one whose aim the arc follows.
+     *
+     * @return {Object|null} An XR controller, or null.
+     */
+    GestureManager.prototype.teleportAimController = function() {
+        var controllers = this.cs.controllers;
+        var best = null;
+        var bestPush = this.teleportThreshold;
+        for (var c = 0; c < controllers.length; c++) {
+            var src = controllers[c].userData.inputSource;
+            var gp = src && src.gamepad;
+            if (!gp) {
+                continue;
+            }
+            var push = -this.readStick(gp).y; // Stick up (forward) is negative.
+            if (push > bestPush) {
+                bestPush = push;
+                best = controllers[c];
+            }
+        }
+        return best;
+    };
+
+    /**
+     * Trace the teleport aiming parabola from a controller to the ground plane,
+     * writing the arc samples into the line geometry and placing/colouring the
+     * landing reticle. Sets teleportTarget and teleportValid for the commit.
+     *
+     * @param {Object} controller The aiming XR controller.
+     */
+    GestureManager.prototype.computeTeleportArc = function(controller) {
+        controller.getWorldPosition(this.vArc);
+        controller.getWorldQuaternion(this.qArc);
+        this.vArcVel.set(0, 0, -1).applyQuaternion(this.qArc).multiplyScalar(this.teleportLaunch);
+        var pos = this.teleArcGeo.attributes.position.array;
+        var g = this.teleportGravity;
+        var step = 0.045;
+        var px = this.vArc.x;
+        var py = this.vArc.y;
+        var pz = this.vArc.z;
+        var vx = this.vArcVel.x;
+        var vy = this.vArcVel.y;
+        var vz = this.vArcVel.z;
+        pos[0] = px;
+        pos[1] = py;
+        pos[2] = pz;
+        var n = 1;
+        var landed = false;
+        for (var i = 1; i < this.teleportMax; i++) {
+            var nx = px + vx * step;
+            var ny = py + vy * step;
+            var nz = pz + vz * step;
+            vy -= g * step;
+            if (ny <= 0) {
+                // Interpolate to the exact ground crossing (py > 0 >= ny).
+                var f = py / (py - ny);
+                nx = px + (nx - px) * f;
+                nz = pz + (nz - pz) * f;
+                ny = 0;
+                pos[n * 3] = nx;
+                pos[n * 3 + 1] = ny;
+                pos[n * 3 + 2] = nz;
+                n++;
+                landed = true;
+                break;
+            }
+            pos[n * 3] = nx;
+            pos[n * 3 + 1] = ny;
+            pos[n * 3 + 2] = nz;
+            n++;
+            px = nx;
+            py = ny;
+            pz = nz;
+        }
+        var lastX = pos[(n - 1) * 3];
+        var lastZ = pos[(n - 1) * 3 + 2];
+        var valid = landed &&
+            Math.abs(lastX) <= this.teleportRange && Math.abs(lastZ) <= this.teleportRange;
+        this.teleportValid = valid;
+        this.teleportTarget.set(lastX, 0, lastZ);
+
+        this.teleArcGeo.setDrawRange(0, n);
+        this.teleArcGeo.attributes.position.needsUpdate = true;
+        this.teleArcGeo.computeBoundingSphere();
+        this.teleRing.position.set(lastX, 0.02, lastZ);
+        this.teleRing.visible = landed;
+        var col = valid ? this.teleValidColour : this.teleInvalidColour;
+        this.teleArc.material.color.copy(col);
+        this.teleRing.material.color.copy(col);
+        this.teleGroup.visible = true;
+    };
+
+    /**
+     * Jump the rig so the head lands over the teleport target on the ground,
+     * then blink and buzz to confirm.
+     */
+    GestureManager.prototype.commitTeleport = function() {
+        var cam = this.camera.getWorldPosition(this.vArc);
+        this.player.position.x += this.teleportTarget.x - cam.x;
+        this.player.position.z += this.teleportTarget.z - cam.z;
+        this.player.position.y = 0;
+        this.blink();
+        this.pulse(null, 0.4, 25);
+    };
+
+    /**
+     * Hide the teleport arc and reticle (nothing is being aimed).
+     */
+    GestureManager.prototype.hideTeleport = function() {
+        if (this.teleGroup) {
+            this.teleGroup.visible = false;
+        }
+    };
+
+    /**
+     * Start a teleport blink: snap the black overlay opaque, to fade back out
+     * over the next frames (see updateVignette), covering the instant jump.
+     */
+    GestureManager.prototype.blink = function() {
+        this.fadeOpacity = 0.85;
+        if (this.fadeMat) {
+            this.fadeMat.opacity = this.fadeOpacity;
         }
     };
 
@@ -8494,6 +9033,14 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} dt Delta time in seconds.
      */
     GestureManager.prototype.updateVignette = function(speed, dt) {
+        // Fade the teleport blink back out (a quick flash covering each jump).
+        if (this.fadeMat && this.fadeOpacity > 0) {
+            this.fadeOpacity -= dt / 0.15;
+            if (this.fadeOpacity < 0) {
+                this.fadeOpacity = 0;
+            }
+            this.fadeMat.opacity = this.fadeOpacity;
+        }
         if (!this.vignetteMat) {
             return;
         }

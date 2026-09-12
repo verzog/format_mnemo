@@ -391,7 +391,8 @@ class scene implements renderable, templatable {
      * before use, so a hand-edited PARAM_RAW value (e.g. a nested array) cannot
      * break rendering.
      *
-     * @return array{turn: string, snapangle: int, vignette: string, speed: string}|null
+     * @return array{turn: string, snapangle: int, vignette: string, speed: string,
+     *     locomotion: string}|null
      */
     protected function comfort(): ?array {
         $raw = get_user_preferences('format_mnemo_comfort', '');
@@ -402,6 +403,7 @@ class scene implements renderable, templatable {
         $turns = ['snap' => true, 'smooth' => true];
         $vignettes = ['off' => true, 'light' => true, 'full' => true];
         $speeds = ['slow' => true, 'normal' => true, 'fast' => true];
+        $locomotions = ['smooth' => true, 'teleport' => true];
         $angles = [15 => true, 30 => true, 45 => true];
         // Only a string field may index the allow-lists; a non-scalar (array,
         // object) becomes an empty string and so takes the default.
@@ -411,12 +413,14 @@ class scene implements renderable, templatable {
         $turn = $str($stored['turn'] ?? null);
         $vignette = $str($stored['vignette'] ?? null);
         $speed = $str($stored['speed'] ?? null);
+        $locomotion = $str($stored['locomotion'] ?? null);
         $angle = (isset($stored['snapangle']) && is_numeric($stored['snapangle'])) ? (int)$stored['snapangle'] : 0;
         return [
             'turn' => isset($turns[$turn]) ? $turn : 'snap',
             'snapangle' => isset($angles[$angle]) ? $angle : 30,
             'vignette' => isset($vignettes[$vignette]) ? $vignette : 'full',
             'speed' => isset($speeds[$speed]) ? $speed : 'normal',
+            'locomotion' => isset($locomotions[$locomotion]) ? $locomotion : 'smooth',
         ];
     }
 
@@ -726,6 +730,9 @@ class scene implements renderable, templatable {
                 'comfortslow' => get_string('comfortslow', 'format_mnemo'),
                 'comfortnormal' => get_string('comfortnormal', 'format_mnemo'),
                 'comfortfast' => get_string('comfortfast', 'format_mnemo'),
+                'comfortmovement' => get_string('comfortmovement', 'format_mnemo'),
+                'comfortglide' => get_string('comfortglide', 'format_mnemo'),
+                'comfortteleport' => get_string('comfortteleport', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editsidewalksurface' => get_string('editsidewalksurface', 'format_mnemo'),
