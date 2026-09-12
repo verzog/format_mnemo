@@ -1331,14 +1331,17 @@ const scenarios = [
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const norm = CS.prototype.normalizeComfort;
-            const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast'});
-            const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z'});
+            const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast',
+                locomotion: 'teleport'});
+            const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z', locomotion: 'q'});
             const empty = norm(null);
             const pass = valid.turn === 'smooth' && valid.snapangle === 45 &&
                 valid.vignette === 'off' && valid.speed === 'fast' &&
+                valid.locomotion === 'teleport' &&
                 bad.turn === 'snap' && bad.snapangle === 30 &&
                 bad.vignette === 'full' && bad.speed === 'normal' &&
-                empty.speed === 'normal';
+                bad.locomotion === 'smooth' &&
+                empty.speed === 'normal' && empty.locomotion === 'smooth';
             return {pass, detail: `valid=${JSON.stringify(valid)} bad=${JSON.stringify(bad)}`};
         }
     },
@@ -1348,17 +1351,19 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const GM = window.__mnemoModule._GestureManager;
             const cs = {
-                comfort: {turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast'},
+                comfort: {turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast',
+                    locomotion: 'teleport'},
                 comfortSpeedScale: CS.prototype.comfortSpeedScale,
                 comfortVignetteScale: CS.prototype.comfortVignetteScale
             };
             const gm = {cs, baseGlideSpeed: 4.5, applyComfort: GM.prototype.applyComfort};
             gm.applyComfort();
             const pass = gm.turnMode === 'smooth' &&
+                gm.locomotion === 'teleport' &&
                 Math.abs(gm.snapAngle - 45 * Math.PI / 180) < 1e-9 &&
                 Math.abs(gm.glideSpeed - 4.5 * 1.6) < 1e-9 &&
                 gm.vignetteScale === 0;
-            return {pass, detail: `mode=${gm.turnMode} glide=${gm.glideSpeed} vig=${gm.vignetteScale}`};
+            return {pass, detail: `mode=${gm.turnMode} loco=${gm.locomotion} glide=${gm.glideSpeed}`};
         }
     },
     {
@@ -1431,6 +1436,135 @@ const scenarios = [
                 snap.getAttribute('aria-pressed') === 'false' &&
                 smooth.classList.contains('format-mnemo__comfort-opt--on');
             return {pass, detail: `smooth=${smooth.getAttribute('aria-pressed')} snap=${snap.getAttribute('aria-pressed')}`};
+        }
+    },
+    {
+        name: 'teleport: forward push aims an arc to the ground, release jumps there',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.gm.locomotion = 'teleport';
+            // Head-height controller, aimed level down the avenue (-Z).
+            c.controllers[1].position.set(0, 1.6, 0);
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, -1]; // Push forward.
+            T.frame(c, 0.05); // Aim only - no continuous motion.
+            const aiming = c.gm.teleportActive === true && c.gm.teleGroup.visible === true &&
+                c.gm.teleportValid === true;
+            const aimedStill = Math.abs(c.player.position.z) < 1e-6;
+            const target = c.gm.teleportTarget.z; // Lands ahead, on -Z.
+            // Release the stick: commit the jump.
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, 0];
+            T.frame(c, 0.05);
+            const s = T.state(c);
+            const jumped = Math.abs(s.z - target) < 1e-6 && target < -1 &&
+                c.gm.teleGroup.visible === false && c.gm.teleportActive === false;
+            return {pass: aiming && aimedStill && jumped,
+                detail: `aiming=${aiming} still=${aimedStill} target=${target.toFixed(2)} z=${s.z.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'teleport: an out-of-range target is invalid and is not committed',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.gm.locomotion = 'teleport';
+            c.gm.teleportRange = 1; // Anything past 1 m is out of bounds.
+            c.controllers[1].position.set(0, 1.6, 0);
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, -1];
+            T.frame(c, 0.05);
+            const invalid = c.gm.teleportValid === false && c.gm.teleGroup.visible === true;
+            c.controllers[1].userData.inputSource.gamepad.axes = [0, 0, 0, 0];
+            T.frame(c, 0.05);
+            const s = T.state(c);
+            const pass = invalid && Math.abs(s.z) < 1e-6; // No jump.
+            return {pass, detail: `invalid=${invalid} z=${s.z.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'teleport: glide is suppressed in teleport mode (forward push does not slide)',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.gm.locomotion = 'teleport';
+            c.controllers[0].position.set(0, 1.6, 0); // Left stick pushes forward.
+            c.controllers[0].userData.inputSource.gamepad.axes = [0, 0, 0, -1];
+            // Several aim frames must never accumulate continuous motion.
+            T.frame(c, 0.1);
+            T.frame(c, 0.1);
+            const s = T.state(c);
+            const pass = Math.abs(s.z) < 1e-6 && c.gm.teleportActive === true;
+            return {pass, detail: `z=${s.z.toFixed(4)} active=${c.gm.teleportActive}`};
+        }
+    },
+    {
+        name: 'menu: a face button toggles the in-VR comfort panel, debounced',
+        fn: () => {
+            const GM = window.__mnemoModule._GestureManager;
+            let toggles = 0;
+            const gm = {
+                cs: {toggleVrComfort: () => {
+                    toggles++;
+                }},
+                menuArmed: true, handleMenu: GM.prototype.handleMenu
+            };
+            gm.handleMenu(1); // Press -> toggle.
+            gm.handleMenu(1); // Held -> no repeat.
+            gm.handleMenu(0); // Release -> re-arm.
+            gm.handleMenu(1); // Press -> toggle.
+            const pass = toggles === 2;
+            return {pass, detail: `toggles=${toggles}`};
+        }
+    },
+    {
+        name: 'menu: face button (index 4/5) is read as a menu press',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.controllers[1].userData.inputSource.gamepad.buttons[5].pressed = true;
+            const ctrl = c.gm.readControllers();
+            return {pass: ctrl.menuPress === 1, detail: `menuPress=${ctrl.menuPress}`};
+        }
+    },
+    {
+        name: 'comfort: in-VR panel builds tiles, marks the active one, toggles interactive',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
+            scene.add(camera);
+            const self = {
+                THREE, scene, camera,
+                interactive: [],
+                palette: {primary: 0x39d0ff},
+                config: {strings: {}},
+                comfort: {turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal',
+                    locomotion: 'teleport'},
+                makeTextTexture: CS.prototype.makeTextTexture,
+                wrapLines: CS.prototype.wrapLines,
+                signFontStack: CS.prototype.signFontStack,
+                roundRect: CS.prototype.roundRect,
+                makeComfortButton: CS.prototype.makeComfortButton,
+                vrComfortRows: CS.prototype.vrComfortRows,
+                buildVrComfortPanel: CS.prototype.buildVrComfortPanel,
+                positionVrComfortInFront: CS.prototype.positionVrComfortInFront,
+                toggleVrComfort: CS.prototype.toggleVrComfort,
+                addVrComfortInteractive: CS.prototype.addVrComfortInteractive,
+                removeVrComfortInteractive: CS.prototype.removeVrComfortInteractive,
+                markVrComfortActive: CS.prototype.markVrComfortActive
+            };
+            self.buildVrComfortPanel();
+            const built = !!self.vrComfort && self.vrComfort.buttons.length === 13;
+            const tele = self.vrComfort.buttons.find((b) =>
+                b.userData.comfortField === 'locomotion' && b.userData.comfortValueStr === 'teleport');
+            const teleActive = tele.material.map === tele.userData.mapOn;
+            self.toggleVrComfort();
+            const shown = self.vrComfort.visible === true &&
+                self.interactive.length === self.vrComfort.buttons.length;
+            self.toggleVrComfort();
+            const hidden = self.vrComfort.visible === false && self.interactive.length === 0;
+            return {pass: built && teleActive && shown && hidden,
+                detail: `built=${built} teleActive=${teleActive} shown=${shown} hidden=${hidden}`};
         }
     },
     {
