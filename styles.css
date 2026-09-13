@@ -568,6 +568,11 @@
 
 .format-mnemo-preview__canvas {
     object-fit: contain;
+    /* The 3D preview renders on a transparent WebGL buffer, so this shows
+       through behind the model. A soft neutral studio backdrop (a centred
+       spotlight fading to a mid slate) instead of near-black, so models that
+       are themselves mostly dark still read clearly against it. */
+    background: radial-gradient(circle at 50% 42%, #565f70 0%, #2a303b 100%);
 }
 
 .format-mnemo-preview__placeholder {
