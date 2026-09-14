@@ -247,10 +247,6 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(to right,
-        rgba(0, 229, 255, 0.10) 0, rgba(0, 229, 255, 0.10) 33.3%,
-        transparent 33.3%, transparent 66.6%,
-        rgba(0, 229, 255, 0.10) 66.6%, rgba(0, 229, 255, 0.10) 100%);
 }
 
 .format-mnemo__cam-zones::before {
