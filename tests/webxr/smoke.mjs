@@ -1344,6 +1344,33 @@ const scenarios = [
         }
     },
     {
+        name: 'traffic: trafficClearance adds the car body drop to rooftop clearance',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {footprints: [{xMin: -3, xMax: 3, zMin: -3, zMax: 3, top: 20}]};
+            const noDrop = CS.prototype.trafficClearance.call(self, 0, 0);
+            const withDrop = CS.prototype.trafficClearance.call(self, 0, 0, 1.5);
+            // A model reaching 1.5 below its origin is lifted 1.5 higher.
+            return {pass: Math.abs(withDrop - noDrop - 1.5) < 1e-6, detail: `no=${noDrop} with=${withDrop}`};
+        }
+    },
+    {
+        name: 'traffic: setFootprintBounds expands a rotated footprint to its bounding box',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const set = CS.prototype.setFootprintBounds;
+            // A 2 x 6 rectangle turned 90deg spans 6 wide x 2 deep.
+            const r90 = set({}, 0, 0, 2, 6, 10, Math.PI / 2);
+            const ok90 = Math.abs((r90.xMax - r90.xMin) - 6) < 1e-6 &&
+                Math.abs((r90.zMax - r90.zMin) - 2) < 1e-6 && r90.top === 10;
+            // Unrotated keeps its own size.
+            const r0 = set({}, 0, 0, 2, 6, 0, 0);
+            const ok0 = Math.abs((r0.xMax - r0.xMin) - 2) < 1e-6 &&
+                Math.abs((r0.zMax - r0.zMin) - 6) < 1e-6;
+            return {pass: ok90 && ok0, detail: `w90=${(r90.xMax - r90.xMin).toFixed(2)} d90=${(r90.zMax - r90.zMin).toFixed(2)}`};
+        }
+    },
+    {
         name: 'traffic: makeTrafficCar makes a roaming record started clear of buildings',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

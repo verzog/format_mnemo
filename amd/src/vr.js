@@ -1688,6 +1688,9 @@ define('format_mnemo/vr', [], function() {
             body.castShadow = true;
             body.receiveShadow = true;
             this.scene.add(body);
+            // Register the slab as a solid so roaming traffic clears its roof
+            // instead of flying through the skyline.
+            this.recordFootprint(x, z, w, d, h);
 
             // Crown edge glow (a neon accent, so it fades by day) and an
             // occasional blinking aviation beacon.
@@ -1756,6 +1759,9 @@ define('format_mnemo/vr', [], function() {
                 );
                 pillar.position.set(px, r.y / 2, r.z);
                 self.scene.add(pillar);
+                // Solid pillar: cars clear it (the thin overhead deck is left
+                // passable so low traffic can still fly under the highway).
+                self.recordFootprint(px, r.z, 1.6, 1.6, r.y);
                 // A knot of slum boxes crammed against the pillar's shadow.
                 self.buildSlumCluster(px, r.z);
             }
@@ -1785,6 +1791,8 @@ define('format_mnemo/vr', [], function() {
             box.position.set(cx + jx, y + h / 2, cz + jz);
             box.rotation.y = Math.random() * 0.5;
             this.scene.add(box);
+            // Register each slum box as a solid so traffic clears the cluster.
+            this.recordFootprint(cx + jx, cz + jz, w, d, y + h, box.rotation.y);
             y += h * (0.7 + Math.random() * 0.2);
         }
     };
@@ -3132,6 +3140,9 @@ define('format_mnemo/vr', [], function() {
         // travels (models come from many sources and do not share a forward
         // axis); every car of this type reuses the same offset.
         var yawOffset = this.trafficModelYaw(tpl, ct);
+        // How far the model reaches below its own origin (before per-car scale),
+        // so a car sitting on a rooftop keeps its whole body above the roof.
+        var modelDrop = Math.max(0, -new this.THREE.Box3().setFromObject(tpl).min.y);
         for (var i = 0; i < count; i++) {
             if (this.traffic.length >= TRAFFIC_MAX) {
                 break;
@@ -3139,7 +3150,7 @@ define('format_mnemo/vr', [], function() {
             var car = tpl.clone();
             car.scale.setScalar(0.9 + Math.random() * 0.5);
             var dir = i % 2 === 0 ? 1 : -1;
-            var rec = this.makeTrafficCar(car, ct, dir, box, yawOffset);
+            var rec = this.makeTrafficCar(car, ct, dir, box, yawOffset, modelDrop * car.scale.x);
             // No shadow casting on traffic: outside the void the shadow map is
             // only refreshed when the learner moves, so a moving car's shadow
             // would freeze in place and detach. (The original traffic cast no
@@ -3196,9 +3207,12 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} box The traffic bounds.
      * @param {Number} [yawOffset] Extra yaw (radians) to face the model's length
      *     along its travel direction (see trafficModelYaw).
+     * @param {Number} [drop] How far the scaled model reaches below its origin,
+     *     added to rooftop clearance so the body clears the roof, not just the
+     *     origin.
      * @return {Object} The traffic record consumed by updateTraffic().
      */
-    Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box, yawOffset) {
+    Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box, yawOffset, drop) {
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
         // Cruise band: the default fleet spreads wide so some cars weave low
         // over the open streets and some cruise above the rooftops; authored
@@ -3210,7 +3224,7 @@ define('format_mnemo/vr', [], function() {
         // Start somewhere in the box, lifted clear of any building beneath it.
         var x = box.xMin + Math.random() * (box.xMax - box.xMin);
         var z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        car.position.set(x, Math.max(cruiseY, this.trafficClearance(x, z)), z);
+        car.position.set(x, Math.max(cruiseY, this.trafficClearance(x, z, drop || 0)), z);
         var dest = this.pickTrafficDest(box, x, z);
         // Face the first destination (plus the per-model yaw offset that turns
         // the model's length onto its heading).
@@ -3227,6 +3241,7 @@ define('format_mnemo/vr', [], function() {
         }
         return {
             mesh: car, box: box, speed: speed, yawOffset: yawOffset || 0,
+            drop: drop || 0,
             cruiseY: cruiseY, dest: dest, low: low, land: ct.land || 'none',
             bob: Math.random() * 6.28,
             landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
@@ -3320,18 +3335,18 @@ define('format_mnemo/vr', [], function() {
                 baseY = t.cruiseY + Math.sin(this.time * 0.8 + t.bob) * 0.4;
             } else {
                 var cyclePos = ((this.time + t.landPhase * t.landPeriod) / t.landPeriod) % 1;
-                var lowTarget = Math.max(t.low, this.trafficClearance(p.x, p.z));
+                var lowTarget = Math.max(t.low, this.trafficClearance(p.x, p.z, t.drop));
                 baseY = this.trafficLandingY(cyclePos, t.cruiseY, lowTarget);
             }
             var need = Math.max(
-                this.trafficClearance(p.x, p.z),
-                this.trafficClearance(p.x + vx * lookahead, p.z + vz * lookahead)
+                this.trafficClearance(p.x, p.z, t.drop),
+                this.trafficClearance(p.x + vx * lookahead, p.z + vz * lookahead, t.drop)
             );
             var targetY = Math.max(baseY, need);
             // Ease toward the target for a smooth climb, then hard-floor the car
             // above the building it is over so it can never be inside one.
             p.y += (targetY - p.y) * Math.min(1, dt * 3);
-            var floor = this.trafficClearance(p.x, p.z);
+            var floor = this.trafficClearance(p.x, p.z, t.drop);
             if (p.y < floor) {
                 p.y = floor;
             }
@@ -3524,17 +3539,29 @@ define('format_mnemo/vr', [], function() {
             var tf = act.transform || {};
             var ts = tf.scale > 0 ? tf.scale : 1;
             // Include the per-axis width/depth multipliers so a widened or
-            // deepened building's footprint keeps scattered props clear of it.
+            // deepened building's footprint keeps scattered props clear of it,
+            // the stored Move-Y in the roof height, and the stored rotation so a
+            // turned building's corners are still covered.
             var tsx = tf.sx > 0 ? tf.sx : 1;
             var tsz = tf.sz > 0 ? tf.sz : 1;
             var tsy = tf.sy > 0 ? tf.sy : 1;
-            self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
-                built.w * ts * tsx, built.d * ts * tsz, built.h * ts * tsy);
+            var frot = built.group.rotation.y + (tf.rot || 0) * Math.PI / 180;
+            var footprint = self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
+                built.w * ts * tsx, built.d * ts * tsz,
+                (tf.y || 0) + built.h * ts * tsy, frot);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
             // takes the non-uniform width/height/depth so the sign never shears.
-            self.registerEditable(act, built.group, bx, 0, bz, built.sign, built.scalenode, built.panel);
+            var editable = self.registerEditable(
+                act, built.group, bx, 0, bz, built.sign, built.scalenode, built.panel);
+            // Link the footprint to the editable and its base size so a live
+            // Move/Rotate/Scale keeps traffic collision in sync (see
+            // applyTransform), not just the reloaded scene.
+            if (editable) {
+                editable.footprint = footprint;
+                editable.footprintBase = {w: built.w, d: built.d, h: built.h};
+            }
         });
     };
 
@@ -3824,13 +3851,42 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} w Footprint width (x).
      * @param {Number} d Footprint depth (z).
      * @param {Number} [top] Roof height (world y); 0/omitted for ground props.
+     * @param {Number} [rot] Y-rotation (radians); the w x d rectangle is
+     *     expanded to its world-axis bounding box so a rotated building is
+     *     covered.
+     * @return {Object} The stored footprint (so a live edit can update it).
      */
-    Cyberspace.prototype.recordFootprint = function(cx, cz, w, d, top) {
-        this.footprints.push({
-            xMin: cx - w / 2, xMax: cx + w / 2,
-            zMin: cz - d / 2, zMax: cz + d / 2,
-            top: top || 0
-        });
+    Cyberspace.prototype.recordFootprint = function(cx, cz, w, d, top, rot) {
+        var f = this.setFootprintBounds({}, cx, cz, w, d, top, rot);
+        this.footprints.push(f);
+        return f;
+    };
+
+    /**
+     * Fill a footprint's world-axis bounds from a centre, size, roof height and
+     * Y-rotation. A rotated w x d rectangle is expanded to the axis-aligned box
+     * that contains it, so traffic clears a rotated building's corners too.
+     *
+     * @param {Object} f The footprint object to fill (created if a bare {}).
+     * @param {Number} cx Centre x.
+     * @param {Number} cz Centre z.
+     * @param {Number} w Footprint width (x).
+     * @param {Number} d Footprint depth (z).
+     * @param {Number} [top] Roof height (world y).
+     * @param {Number} [rot] Y-rotation in radians.
+     * @return {Object} The same footprint object.
+     */
+    Cyberspace.prototype.setFootprintBounds = function(f, cx, cz, w, d, top, rot) {
+        var c = Math.abs(Math.cos(rot || 0));
+        var s = Math.abs(Math.sin(rot || 0));
+        var hx = (w / 2) * c + (d / 2) * s;
+        var hz = (w / 2) * s + (d / 2) * c;
+        f.xMin = cx - hx;
+        f.xMax = cx + hx;
+        f.zMin = cz - hz;
+        f.zMax = cz + hz;
+        f.top = top || 0;
+        return f;
     };
 
     /**
@@ -3862,9 +3918,11 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Number} x Point x.
      * @param {Number} z Point z.
-     * @return {Number} Minimum altitude (world y), or 0 over open ground.
+     * @param {Number} [drop] How far the car's body extends below its origin
+     *     (scaled), so the returned altitude keeps the whole mesh above the roof.
+     * @return {Number} Minimum origin altitude (world y), or 0 over open ground.
      */
-    Cyberspace.prototype.trafficClearance = function(x, z) {
+    Cyberspace.prototype.trafficClearance = function(x, z, drop) {
         var margin = 2;
         var top = 0;
         for (var i = 0; i < this.footprints.length; i++) {
@@ -3874,7 +3932,7 @@ define('format_mnemo/vr', [], function() {
                 top = f.top;
             }
         }
-        return top > 0 ? top + 2.5 : 0;
+        return top > 0 ? top + 2.5 + (drop || 0) : 0;
     };
 
     /**
@@ -6740,6 +6798,7 @@ define('format_mnemo/vr', [], function() {
             group.userData.mnemoEditable = editable;
             this.editables.push(editable);
         }
+        return editable;
     };
 
     /**
@@ -6927,6 +6986,16 @@ define('format_mnemo/vr', [], function() {
         if (editable.sign) {
             editable.sign.rotation.y = -t.rot * Math.PI / 180;
             editable.sign.position.z = (editable.signBaseZ || 0) * sz;
+        }
+        // Keep the traffic-collision footprint in sync with a live edit, so
+        // cars avoid the building where it now stands, not where it loaded.
+        if (editable.footprint && editable.footprintBase) {
+            var fb = editable.footprintBase;
+            this.setFootprintBounds(editable.footprint,
+                editable.baseX + t.x, editable.baseZ + t.z,
+                fb.w * t.scale * sx, fb.d * t.scale * sz,
+                (editable.baseY + t.y) + fb.h * t.scale * sy,
+                editable.baseRotY + t.rot * Math.PI / 180);
         }
         if (this.selBox) {
             this.selBox.update();
