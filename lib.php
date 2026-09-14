@@ -149,6 +149,10 @@ class format_mnemo extends core_courseformat\base {
                     'default' => 'inherit',
                     'type' => PARAM_ALPHA,
                 ],
+                'mnemogame' => [
+                    'default' => 0,
+                    'type' => PARAM_INT,
+                ],
             ];
         }
         if ($foreditform && !isset($courseformatoptions['coursedisplay']['label'])) {
@@ -229,6 +233,18 @@ class format_mnemo extends core_courseformat\base {
                         ],
                     ],
                     'help' => 'lighting',
+                    'help_component' => 'format_mnemo',
+                ],
+                'mnemogame' => [
+                    'label' => new lang_string('game', 'format_mnemo'),
+                    'element_type' => 'select',
+                    'element_attributes' => [
+                        [
+                            0 => new lang_string('no'),
+                            1 => new lang_string('yes'),
+                        ],
+                    ],
+                    'help' => 'game',
                     'help_component' => 'format_mnemo',
                 ],
             ];

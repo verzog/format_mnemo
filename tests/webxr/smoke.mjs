@@ -2182,6 +2182,67 @@ const scenarios = [
         }
     },
     {
+        name: 'game: start fills the field; stop clears it and leaves play',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null};
+            const gm = new GM(cs);
+            gm.start();
+            const started = gm.isPlaying() && gm.targets.length === gm.maxTargets &&
+                gm.group.visible === true && gm.score === 0;
+            gm.stop();
+            const stopped = !gm.isPlaying() && gm.targets.length === 0 && gm.group.visible === false;
+            return {pass: started && stopped, detail: `started=${started} stopped=${stopped}`};
+        }
+    },
+    {
+        name: 'game: a shot on a target scores and respawns; a miss does not',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null};
+            const gm = new GM(cs);
+            gm.start();
+            scene.updateMatrixWorld(true);
+            const t = gm.targets[0];
+            // Aim straight at the first target from 10 units in front of it.
+            const origin = new THREE.Vector3(t.position.x, t.position.y, t.position.z + 10);
+            const hit = gm.shoot(origin, new THREE.Vector3(0, 0, -1));
+            const scored = hit === t && gm.score === 10 &&
+                gm.targets.length === gm.maxTargets && gm.targets.indexOf(t) === -1;
+            // A miss into empty space scores nothing.
+            const miss = gm.shoot(new THREE.Vector3(999, 999, 999), new THREE.Vector3(0, 1, 0));
+            const pass = scored && miss === null && gm.score === 10;
+            return {pass, detail: `hit=${hit === t} score=${gm.score} respawned=${gm.targets.length} miss=${miss}`};
+        }
+    },
+    {
+        name: 'game: shots are ignored unless the game is playing',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null};
+            const gm = new GM(cs);
+            // Idle: shooting does nothing, no targets exist.
+            const idle = gm.shoot(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+            return {pass: idle === null && gm.isPlaying() === false && gm.score === 0,
+                detail: `idle=${idle} playing=${gm.isPlaying()}`};
+        }
+    },
+    {
         name: 'delete: isHidden and isDeletable classify slots',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
