@@ -416,6 +416,16 @@ its built-in **uncompressed**-glTF parser, so uncompressed packs still work. If
 Three.js itself cannot load at all, the plugin falls back to the accessible list
 view with a short message.
 
+The optional **camera gesture navigation** (opt-in, flat-screen only; toggle it
+off site-wide with the *Camera gesture navigation* admin setting) calls
+`getUserMedia`, which requires a **secure context** (HTTPS) and a
+`Permissions-Policy: camera=(self)` that allows the page's origin — if the page
+is embedded in an iframe, that frame also needs `allow="camera"`. The webcam is
+read only while the learner has the control switched on, analysed on a small
+offscreen canvas **on the device**, and never uploaded, recorded, or sent
+anywhere; when permission is denied or the context is insecure the control shows
+a short message and the scene keeps its mouse/keyboard/touch controls.
+
 A sign font, sign/road/ground texture **uploaded into Moodle** is served from
 the plugin's own origin, so `font-src 'self'` / `img-src 'self'` already cover
 it. If you instead point the **URL** settings at an externally hosted font or

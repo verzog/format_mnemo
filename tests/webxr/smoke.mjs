@@ -1743,6 +1743,121 @@ const scenarios = [
         }
     },
     {
+        name: 'cameranav: zoneMotion measures frame motion per control zone',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            const w = 6, h = 4;
+            const prev = new Uint8ClampedArray(w * h); // A still frame.
+            const mk = (pred) => {
+                const a = new Uint8ClampedArray(w * h);
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (pred(x, y)) {
+                            a[y * w + x] = 255;
+                        }
+                    }
+                }
+                return a;
+            };
+            // Motion only in the right third, then only in the centre-lower zone.
+            const zr = nav.zoneMotion(prev, mk((x) => x >= 4), w, h);
+            const zf = nav.zoneMotion(prev, mk((x, y) => x >= 2 && x < 4 && y >= 2), w, h);
+            const pass = zr.right > 0.9 && zr.left < 1e-6 && zr.fwd < 1e-6 &&
+                zf.fwd > 0.9 && zf.back < 1e-6 && zf.left < 1e-6;
+            return {pass, detail: `right=${zr.right.toFixed(2)} fwd=${zf.fwd.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'cameranav: motionToIntent steers and moves, ignoring sub-deadzone noise',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            const turnRight = nav.motionToIntent({left: 0, right: 0.1, fwd: 0, back: 0});
+            const forward = nav.motionToIntent({left: 0, right: 0, fwd: 0.1, back: 0});
+            const noise = nav.motionToIntent({left: 0.005, right: 0.008, fwd: 0.004, back: 0});
+            const pass = turnRight.turn > 0 && Math.abs(turnRight.move) < 1e-6 &&
+                forward.move > 0 && Math.abs(forward.turn) < 1e-6 &&
+                noise.turn === 0 && noise.move === 0;
+            return {pass, detail: `turn=${turnRight.turn.toFixed(2)} move=${forward.move.toFixed(2)} noise=${noise.turn},${noise.move}`};
+        }
+    },
+    {
+        name: 'cameranav: apply steers the look yaw and sets the analog move',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const cs = {yaw: 0, navMove: 0, navStrafe: 0};
+            const nav = new CN(cs);
+            nav.turnRate = 2;
+            nav.intent = {turn: 1, move: 0.5};
+            nav.apply(0.5);
+            // A rightward turn decreases yaw by turn*rate*dt = 1*2*0.5 = 1.
+            const pass = Math.abs(cs.yaw + 1) < 1e-6 && Math.abs(cs.navMove - 0.5) < 1e-6;
+            return {pass, detail: `yaw=${cs.yaw} navMove=${cs.navMove}`};
+        }
+    },
+    {
+        name: 'cameranav: navMove drives the desktop walker forward',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, yaw: 0, keys: {}, navMove: 1, navStrafe: 0,
+                comfortSpeedScale: () => 1,
+                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                player: new THREE.Group(),
+                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            };
+            self.updateDesktopWalk(1);
+            // Yaw 0 -> forward is -Z; navMove 1 at speed 7 moves the rig to z=-7.
+            const pass = self.player.position.z < -6.5 && Math.abs(self.player.position.x) < 1e-6;
+            return {pass, detail: `z=${self.player.position.z.toFixed(1)}`};
+        }
+    },
+    {
+        name: 'cameranav: errorReason separates permission denial from an unavailable device',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            const denied = nav.errorReason({name: 'NotAllowedError'});
+            const sec = nav.errorReason({name: 'SecurityError'});
+            const gone = nav.errorReason({name: 'NotFoundError'});
+            const busy = nav.errorReason({name: 'NotReadableError'});
+            const pass = denied === 'denied' && sec === 'denied' &&
+                gone === 'unavailable' && busy === 'unavailable';
+            return {pass, detail: `${denied},${sec},${gone},${busy}`};
+        }
+    },
+    {
+        name: 'cameranav: sample clears the intent when no camera frame is available',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null); // No video -> the feed has stalled.
+            nav.intent = {turn: 1, move: 1};
+            nav.energy = {left: 0.5, right: 0, fwd: 0.5, back: 0};
+            nav.sample();
+            const pass = nav.intent.turn === 0 && nav.intent.move === 0 &&
+                nav.energy.left === 0 && nav.energy.fwd === 0;
+            return {pass, detail: `intent=${nav.intent.turn},${nav.intent.move}`};
+        }
+    },
+    {
+        name: 'cameranav: sample holds the intent on a duplicate video frame',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            // A ready video whose currentTime has not advanced since last sample.
+            nav.video = {readyState: 2, videoWidth: 4, currentTime: 5};
+            nav.ctx = {}; // Not touched before the frame gate returns.
+            nav.lastTime = 5;
+            nav.intent = {turn: 0.7, move: -0.3};
+            nav.sample();
+            const pass = Math.abs(nav.intent.turn - 0.7) < 1e-9 &&
+                Math.abs(nav.intent.move + 0.3) < 1e-9;
+            return {pass, detail: `intent=${nav.intent.turn},${nav.intent.move}`};
+        }
+    },
+    {
         name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

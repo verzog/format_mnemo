@@ -228,6 +228,9 @@ define('format_mnemo/vr', [], function() {
         this.yaw = 0; // Desktop look yaw.
         this.pitch = 0; // Desktop look pitch.
         this.invertlook = !!config.invertlook; // Invert drag-to-look direction.
+        this.navMove = 0; // Analog forward/back from camera-gesture nav (-1..1).
+        this.navStrafe = 0; // Analog strafe from camera-gesture nav (-1..1).
+        this.cameraNav = null; // Webcam gesture-navigation driver (flat screen only).
         // Per-learner comfort settings (turn mode/angle, motion vignette,
         // movement speed). Seeded from the server user preference, falling back
         // to this device's last choice, then defaults. See normalizeComfort.
@@ -410,6 +413,9 @@ define('format_mnemo/vr', [], function() {
         this.buildFullscreenButton();
         this.buildComfort();
         this.buildVrComfortPanel();
+        if (this.config.cameranav !== false) {
+            this.buildCameraNav();
+        }
         if (this.config.game) {
             this.game = new GameManager(this);
             this.buildGameButton();
@@ -4927,6 +4933,10 @@ define('format_mnemo/vr', [], function() {
                         // list view hides; close it so its iframe stops running
                         // (and does not reappear when 3D view is restored).
                         self.closeActivityOverlay();
+                        // The 3D view (and its camera-nav controls) is now
+                        // hidden, so release the webcam rather than keep
+                        // capturing where the learner cannot reach the toggle.
+                        self.stopCameraNav();
                     }
                 });
             }
@@ -4934,8 +4944,19 @@ define('format_mnemo/vr', [], function() {
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 self.pauseVideos();
+                self.stopCameraNav();
             }
         });
+    };
+
+    /**
+     * Stop camera-gesture navigation and release the webcam, if it is running.
+     * Safe to call when the control was never built or is already off.
+     */
+    Cyberspace.prototype.stopCameraNav = function() {
+        if (this.cameraNav && this.cameraNav.active) {
+            this.cameraNav.stop();
+        }
     };
 
     /**
@@ -8539,6 +8560,10 @@ define('format_mnemo/vr', [], function() {
             // Arcade mode suspends flight so the mouse only aims and clicks
             // only shoot; look (drag) still works.
             if (!(this.game && this.game.isPlaying())) {
+                // Camera-gesture navigation feeds the same desktop movement path
+                // (steering yaw + an analog forward/back term), so it composes
+                // with the mouse/keyboard and shares the road/ground clamping.
+                this.updateCameraNav(dt);
                 this.updateDesktop(dt);
             }
             this.updateDesktopHighlight();
@@ -8850,6 +8875,23 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Number} dt Delta time in seconds.
      */
+    /**
+     * Drive one frame of camera-gesture navigation when it is active: sample the
+     * webcam and apply the steering/move intent. When it is off, clear any analog
+     * movement it left so the mouse/keyboard have the movement path to themselves.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateCameraNav = function(dt) {
+        if (this.cameraNav && this.cameraNav.active) {
+            this.cameraNav.sample();
+            this.cameraNav.apply(dt);
+        } else if (this.navMove || this.navStrafe) {
+            this.navMove = 0;
+            this.navStrafe = 0;
+        }
+    };
+
     Cyberspace.prototype.updateDesktop = function(dt) {
         // Apply look.
         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
@@ -8891,6 +8933,13 @@ define('format_mnemo/vr', [], function() {
         if (this.keys.KeyF) {
             this.player.position.y -= speed;
         }
+        // Analog forward/back and strafe from camera-gesture navigation.
+        if (this.navMove) {
+            this.player.position.addScaledVector(forward, speed * this.navMove);
+        }
+        if (this.navStrafe) {
+            this.player.position.addScaledVector(right, speed * this.navStrafe);
+        }
     };
 
     /**
@@ -8920,6 +8969,13 @@ define('format_mnemo/vr', [], function() {
         }
         if (this.keys.KeyD || this.keys.ArrowRight) {
             this.player.position.addScaledVector(right, speed);
+        }
+        // Analog forward/back and strafe from camera-gesture navigation.
+        if (this.navMove) {
+            this.player.position.addScaledVector(forward, speed * this.navMove);
+        }
+        if (this.navStrafe) {
+            this.player.position.addScaledVector(right, speed * this.navStrafe);
         }
 
         // Jump and gravity. A jump only launches from the ground; the apex stays
@@ -9830,6 +9886,437 @@ define('format_mnemo/vr', [], function() {
             this.vignetteOpacity = 0;
         }
         this.vignetteMat.opacity = this.vignetteOpacity;
+    };
+
+    /**
+     * Camera-gesture navigation for flat-screen (non-VR) viewers: it reads the
+     * device webcam, measures where movement happens in the frame, and turns that
+     * into steering and forward/back motion. Everything runs locally - each frame
+     * is analysed on a tiny offscreen canvas and never leaves the device or gets
+     * recorded - and it is strictly opt-in (off until the learner turns it on) and
+     * only offered outside a headset.
+     *
+     * Gestures (the preview is mirrored, so it reads like a mirror):
+     *   - move a hand on the LEFT of the frame   -> steer left
+     *   - move a hand on the RIGHT of the frame  -> steer right
+     *   - move a hand LOW in the centre          -> glide forward
+     *   - raise a hand HIGH in the centre        -> glide back
+     * Holding still lets the motion energy decay so the rig coasts to a stop.
+     *
+     * The frame maths (grayscale diff, per-zone motion, and the mapping to a
+     * turn/move intent) are pure and unit tested; only start()/stop()/capture()
+     * touch getUserMedia and the DOM.
+     *
+     * @param {Object} cs The owning Cyberspace instance.
+     * @param {Object} [dom] The DOM handles {video, canvas}; omitted in tests.
+     */
+    function CameraNav(cs, dom) {
+        this.cs = cs;
+        this.video = dom ? dom.video : null;
+        this.canvas = dom ? dom.canvas : null;
+        this.ctx = this.canvas ? this.canvas.getContext('2d', {willReadFrequently: true}) : null;
+        this.w = 48; // Downscaled analysis width.
+        this.h = 36; // Downscaled analysis height.
+        this.prev = null; // Previous grayscale frame.
+        this.energy = {left: 0, right: 0, fwd: 0, back: 0}; // Smoothed motion.
+        this.intent = {turn: 0, move: 0};
+        this.active = false;
+        this.stream = null;
+        this.starting = false; // A getUserMedia request is in flight.
+        this.reqId = 0; // Bumped per start()/stop() so stale resolutions drop.
+        this.lastTime = -1; // Last processed video currentTime (frame gate).
+        this.onchange = null; // Optional callback(active) for the HUD to sync.
+        // Tunables: a deadzone that ignores frame noise, a gain that maps motion
+        // energy to a full-scale axis, an EMA smoothing factor that gives the
+        // control momentum (intermittent motion sustains movement, a stop coasts),
+        // and the steering rate.
+        this.deadzone = 0.01;
+        this.gain = 0.06;
+        this.smoothing = 0.82;
+        this.turnRate = 1.6; // Radians per second at full deflection.
+    }
+
+    /**
+     * The grayscale frame-to-frame motion energy in each control zone: the left
+     * and right thirds (steering), and the centre third split into its lower
+     * (forward) and upper (back) halves. Each is the mean absolute luma change
+     * over the zone, normalised to 0..1.
+     *
+     * @param {Uint8ClampedArray} prev The previous frame's luma (length w*h).
+     * @param {Uint8ClampedArray} cur The current frame's luma.
+     * @param {Number} w Frame width.
+     * @param {Number} h Frame height.
+     * @return {Object} {left, right, fwd, back} energies in 0..1.
+     */
+    CameraNav.prototype.zoneMotion = function(prev, cur, w, h) {
+        var third = w / 3;
+        var halfH = h / 2;
+        var left = 0;
+        var right = 0;
+        var fwd = 0;
+        var back = 0;
+        var nl = 0;
+        var nr = 0;
+        var nf = 0;
+        var nb = 0;
+        for (var y = 0; y < h; y++) {
+            for (var x = 0; x < w; x++) {
+                var i = y * w + x;
+                var d = Math.abs(cur[i] - prev[i]);
+                if (x < third) {
+                    left += d;
+                    nl++;
+                } else if (x >= 2 * third) {
+                    right += d;
+                    nr++;
+                } else if (y >= halfH) {
+                    fwd += d;
+                    nf++;
+                } else {
+                    back += d;
+                    nb++;
+                }
+            }
+        }
+        return {
+            left: nl ? left / (nl * 255) : 0,
+            right: nr ? right / (nr * 255) : 0,
+            fwd: nf ? fwd / (nf * 255) : 0,
+            back: nb ? back / (nb * 255) : 0
+        };
+    };
+
+    /**
+     * Map one signed motion difference to a control axis in [-1, 1]: subtract the
+     * deadzone (so frame noise reads as zero) and scale by the gain.
+     *
+     * @param {Number} v The signed difference of two zone energies.
+     * @return {Number} The axis value in [-1, 1].
+     */
+    CameraNav.prototype.axis = function(v) {
+        var s = v < 0 ? -1 : 1;
+        var m = Math.abs(v) - this.deadzone;
+        if (m <= 0) {
+            return 0;
+        }
+        return Math.max(-1, Math.min(1, s * m / this.gain));
+    };
+
+    /**
+     * Turn the smoothed per-zone energies into a {turn, move} intent: steering
+     * from the right/left difference (positive = turn right) and forward/back
+     * from the centre lower/upper difference (positive = forward).
+     *
+     * @param {Object} z Smoothed {left, right, fwd, back} energies.
+     * @return {Object} {turn, move} each in [-1, 1].
+     */
+    CameraNav.prototype.motionToIntent = function(z) {
+        return {turn: this.axis(z.right - z.left), move: this.axis(z.fwd - z.back)};
+    };
+
+    /**
+     * Read one webcam frame into a normalised grayscale buffer, mirrored so the
+     * control matches the mirrored preview. Returns null until the video has a
+     * frame to draw.
+     *
+     * @return {Uint8ClampedArray|null} The luma buffer (length w*h), or null.
+     */
+    CameraNav.prototype.capture = function() {
+        var v = this.video;
+        if (!v || !this.ctx || v.readyState < 2 || !v.videoWidth) {
+            return null;
+        }
+        var w = this.w;
+        var h = this.h;
+        // Mirror horizontally (flip x) so moving a hand to the right of the
+        // mirrored preview steers right.
+        this.ctx.setTransform(-1, 0, 0, 1, w, 0);
+        this.ctx.drawImage(v, 0, 0, w, h);
+        var data = this.ctx.getImageData(0, 0, w, h).data;
+        var gray = new Uint8ClampedArray(w * h);
+        for (var i = 0, p = 0; i < gray.length; i++, p += 4) {
+            gray[i] = (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
+        }
+        return gray;
+    };
+
+    /**
+     * Zero the smoothed motion and the current intent, so a stalled camera can
+     * never leave the rig steering or gliding on stale input.
+     */
+    CameraNav.prototype.clearIntent = function() {
+        this.energy = {left: 0, right: 0, fwd: 0, back: 0};
+        this.intent = {turn: 0, move: 0};
+    };
+
+    /**
+     * Sample the webcam once and update the steering/move intent. Runs only on a
+     * genuinely new camera frame: when the render rate exceeds the webcam frame
+     * rate the duplicate frames are skipped (so sensitivity does not vary with
+     * monitor refresh rate and the smoothing does not decay between real frames),
+     * and if the feed stalls (track muted/suspended or no ready frame) the intent
+     * is cleared so motion stops rather than continuing on the last input.
+     */
+    CameraNav.prototype.sample = function() {
+        var v = this.video;
+        if (!v || !this.ctx || v.readyState < 2 || !v.videoWidth) {
+            this.clearIntent();
+            return;
+        }
+        // Only a fresh camera frame advances currentTime; hold the intent between
+        // frames rather than treating a duplicate as zero motion.
+        if (v.currentTime === this.lastTime) {
+            return;
+        }
+        this.lastTime = v.currentTime;
+        var cur = this.capture();
+        if (!cur) {
+            this.clearIntent();
+            return;
+        }
+        if (this.prev) {
+            var z = this.zoneMotion(this.prev, cur, this.w, this.h);
+            var k = this.smoothing;
+            this.energy.left = this.energy.left * k + z.left * (1 - k);
+            this.energy.right = this.energy.right * k + z.right * (1 - k);
+            this.energy.fwd = this.energy.fwd * k + z.fwd * (1 - k);
+            this.energy.back = this.energy.back * k + z.back * (1 - k);
+            this.intent = this.motionToIntent(this.energy);
+        }
+        this.prev = cur;
+    };
+
+    /**
+     * Apply the current intent to the rig: steer the desktop look yaw (a positive
+     * turn rotates right) and set the analog forward/back term the desktop
+     * movement integrators read.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    CameraNav.prototype.apply = function(dt) {
+        // THREE's +y rotation turns left, so a rightward turn decreases yaw.
+        this.cs.yaw -= this.intent.turn * this.turnRate * dt;
+        this.cs.navMove = this.intent.move;
+        this.cs.navStrafe = 0;
+    };
+
+    /**
+     * Start the webcam and begin driving navigation. Requests the front camera
+     * with audio off; on success shows the preview, on failure reports why
+     * (permission denied, or no secure/camera support) without throwing.
+     *
+     * @param {Function} [onError] Called with a reason key
+     *     ('denied'|'unavailable'|'insecure').
+     * @param {Function} [onReady] Called once the stream is live.
+     */
+    CameraNav.prototype.start = function(onError, onReady) {
+        var self = this;
+        var md = navigator.mediaDevices;
+        if (!md || !md.getUserMedia) {
+            if (onError) {
+                onError('insecure');
+            }
+            return;
+        }
+        if (this.starting) {
+            return; // A request is already in flight; ignore the extra click.
+        }
+        this.starting = true;
+        // Tag this request so a resolution that arrives after a stop() or another
+        // start() (its generation superseded) is dropped and its stream closed,
+        // rather than activating the camera late or leaking a track.
+        var gen = ++this.reqId;
+        md.getUserMedia({video: {facingMode: 'user', width: 320, height: 240}, audio: false})
+            .then(function(stream) {
+                if (gen !== self.reqId) {
+                    stream.getTracks().forEach(function(t) {
+                        t.stop();
+                    });
+                    return null;
+                }
+                self.starting = false;
+                self.stream = stream;
+                if (self.video) {
+                    self.video.srcObject = stream;
+                    self.playPreview();
+                }
+                self.prev = null;
+                self.lastTime = -1;
+                self.clearIntent();
+                self.active = true;
+                if (onReady) {
+                    onReady();
+                }
+                if (self.onchange) {
+                    self.onchange(true);
+                }
+                return null;
+            })
+            .catch(function(err) {
+                if (gen !== self.reqId) {
+                    return;
+                }
+                self.starting = false;
+                if (onError) {
+                    onError(self.errorReason(err));
+                }
+            });
+    };
+
+    /**
+     * Classify a getUserMedia rejection: a denied permission (which the learner
+     * can fix by allowing the camera) versus an unavailable device (no camera, in
+     * use, or unsatisfiable constraints - allowing permission cannot fix it).
+     *
+     * @param {Object} err The rejection error.
+     * @return {String} 'denied' or 'unavailable'.
+     */
+    CameraNav.prototype.errorReason = function(err) {
+        var name = err && err.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+            return 'denied';
+        }
+        return 'unavailable';
+    };
+
+    /**
+     * Play the live preview video, ignoring a deferred-autoplay rejection (the
+     * frame loop still reads frames regardless). Kept separate so the promise is
+     * not chained inside start()'s getUserMedia handler.
+     */
+    CameraNav.prototype.playPreview = function() {
+        if (!this.video) {
+            return;
+        }
+        var p = this.video.play();
+        if (p && p.catch) {
+            p.catch(function() {
+                // Autoplay may be deferred; nothing to do.
+            });
+        }
+    };
+
+    /**
+     * Stop navigation and release the webcam: end every media track, clear the
+     * preview source, and zero the movement the rig was carrying.
+     */
+    CameraNav.prototype.stop = function() {
+        // Supersede any in-flight getUserMedia so a late resolution closes its
+        // own stream instead of reactivating the camera.
+        this.reqId++;
+        this.starting = false;
+        if (this.stream) {
+            this.stream.getTracks().forEach(function(t) {
+                t.stop();
+            });
+            this.stream = null;
+        }
+        if (this.video) {
+            this.video.srcObject = null;
+        }
+        this.active = false;
+        this.prev = null;
+        this.lastTime = -1;
+        this.clearIntent();
+        if (this.cs) {
+            this.cs.navMove = 0;
+            this.cs.navStrafe = 0;
+        }
+        if (this.onchange) {
+            this.onchange(false);
+        }
+    };
+
+    /**
+     * Build the camera-navigation control: a toggle button in the HUD cluster and
+     * a small mirrored preview with the control zones drawn on it. Flat-screen
+     * only - the webcam is opened only when the learner switches it on, a clear
+     * indicator shows while it is live, and entering a headset releases it.
+     */
+    Cyberspace.prototype.buildCameraNav = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'format-mnemo__cam-btn';
+        button.textContent = '📷';
+        button.title = s.cameranav || 'Camera navigation';
+        button.setAttribute('aria-label', button.title);
+        button.setAttribute('aria-pressed', 'false');
+        this.root.appendChild(button);
+
+        // Mirrored preview: the video and the four control-zone guides share a
+        // media box (so the drawn zones line up with the analysed frame, not the
+        // status row below it); a "camera on" dot and a one-line hint or error
+        // sit under it. Hidden until on.
+        var preview = document.createElement('div');
+        preview.className = 'format-mnemo__cam-preview';
+        preview.hidden = true;
+        var media = document.createElement('div');
+        media.className = 'format-mnemo__cam-media';
+        var video = document.createElement('video');
+        video.className = 'format-mnemo__cam-video';
+        video.muted = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('aria-hidden', 'true');
+        var zones = document.createElement('div');
+        zones.className = 'format-mnemo__cam-zones';
+        zones.setAttribute('aria-hidden', 'true');
+        var status = document.createElement('div');
+        status.className = 'format-mnemo__cam-status';
+        status.setAttribute('role', 'status');
+        media.appendChild(video);
+        media.appendChild(zones);
+        preview.appendChild(media);
+        preview.appendChild(status);
+        this.root.appendChild(preview);
+
+        // The analysis canvas is offscreen (never added to the DOM); its size is
+        // the driver's downscaled resolution.
+        var analysis = document.createElement('canvas');
+        analysis.width = 48;
+        analysis.height = 36;
+        this.cameraNav = new CameraNav(this, {video: video, canvas: analysis});
+
+        // Reflect the driver's live state in the button and preview, including
+        // when the camera is released from elsewhere (list view, tab hidden, XR).
+        // The "live" class gates the camera-on indicator, so an error message
+        // never shows the dot.
+        var setOn = function(on) {
+            button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            button.classList.toggle('format-mnemo__cam-btn--on', on);
+            preview.classList.toggle('format-mnemo__cam-preview--live', on);
+            preview.hidden = !on;
+        };
+        this.cameraNav.onchange = setOn;
+
+        button.addEventListener('click', function() {
+            if (self.cameraNav.active || self.cameraNav.starting) {
+                self.cameraNav.stop();
+                return;
+            }
+            status.textContent = s.cameranav_hint || '';
+            self.cameraNav.start(function(reason) {
+                // Failed to open: show why, without the live indicator.
+                var msg = s.cameranav_denied || '';
+                if (reason === 'insecure') {
+                    msg = s.cameranav_insecure || '';
+                } else if (reason === 'unavailable') {
+                    msg = s.cameranav_unavailable || '';
+                }
+                status.textContent = msg;
+                preview.hidden = false;
+            }, function() {
+                status.textContent = s.cameranav_hint || '';
+            });
+        });
+
+        // Entering a headset takes over navigation, so release the webcam.
+        if (this.renderer && this.renderer.xr && this.renderer.xr.addEventListener) {
+            this.renderer.xr.addEventListener('sessionstart', function() {
+                self.cameraNav.stop();
+            });
+        }
     };
 
     /**
@@ -10757,6 +11244,7 @@ define('format_mnemo/vr', [], function() {
         // plugin itself.
         _GestureManager: GestureManager,
         _GameManager: GameManager,
+        _CameraNav: CameraNav,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,

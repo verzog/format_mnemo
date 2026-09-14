@@ -335,6 +335,17 @@ if ($ADMIN->fulltree) {
         get_string('setting_defaultinvertlook_desc', 'format_mnemo'),
         0
     ));
+
+    // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
+    // steering and moving. On by default; the camera is only used when the
+    // learner turns it on, is processed on the device and never uploaded. Untick
+    // to remove the control site-wide (e.g. to satisfy a camera policy).
+    $settings->add(new admin_setting_configcheckbox(
+        'format_mnemo/cameranav',
+        get_string('setting_cameranav', 'format_mnemo'),
+        get_string('setting_cameranav_desc', 'format_mnemo'),
+        1
+    ));
 }
 
 // Nest the plugin's pages under a single "Mnemo" category in the course-format
