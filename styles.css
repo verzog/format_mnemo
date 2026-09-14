@@ -194,6 +194,98 @@
     background: rgba(0, 229, 255, 0.18);
 }
 
+/* Camera gesture navigation: toggle button (top-right cluster) + mirrored preview. */
+.format-mnemo__cam-btn {
+    position: absolute;
+    top: 12px;
+    right: 156px;
+    z-index: 5;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    line-height: 1;
+    color: #00e5ff;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__cam-btn:hover {
+    background: rgba(0, 229, 255, 0.18);
+}
+
+.format-mnemo__cam-btn--on {
+    background: rgba(0, 229, 255, 0.28);
+    border-color: #00e5ff;
+}
+
+.format-mnemo__cam-preview {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 6;
+    width: 200px;
+    max-width: 42vw;
+    overflow: hidden;
+    background: rgba(2, 6, 15, 0.85);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 6px;
+    font-family: "Courier New", monospace;
+}
+
+.format-mnemo__cam-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    transform: scaleX(-1); /* Mirror, matching the mirrored analysis. */
+}
+
+/* The four control zones drawn over the feed: left and right thirds (steer) and
+   the centre third split into forward (lower) and back (upper). */
+.format-mnemo__cam-zones {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(to right,
+        rgba(0, 229, 255, 0.10) 0, rgba(0, 229, 255, 0.10) 33.3%,
+        transparent 33.3%, transparent 66.6%,
+        rgba(0, 229, 255, 0.10) 66.6%, rgba(0, 229, 255, 0.10) 100%);
+}
+
+.format-mnemo__cam-zones::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: 0 33.3%;
+    border-left: 1px dashed rgba(0, 229, 255, 0.5);
+    border-right: 1px dashed rgba(0, 229, 255, 0.5);
+}
+
+.format-mnemo__cam-zones::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 33.3%;
+    right: 33.3%;
+    border-top: 1px dashed rgba(0, 229, 255, 0.5);
+}
+
+.format-mnemo__cam-status {
+    position: relative;
+    padding: 4px 6px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: #cfefff;
+    background: rgba(2, 6, 15, 0.8);
+}
+
+.format-mnemo__cam-status::before {
+    content: "\25CF"; /* Filled dot = camera live. */
+    margin-right: 4px;
+    color: #ff5470;
+}
+
 /* Optional arcade game: launch button (left of the comfort gear) + HUD overlay. */
 .format-mnemo__game-btn {
     position: absolute;

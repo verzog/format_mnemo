@@ -669,6 +669,10 @@ class scene implements renderable, templatable {
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),
+            // Whether the opt-in webcam gesture-navigation control is offered to
+            // flat-screen viewers. Site-wide admin setting, on unless explicitly
+            // turned off (so an unset value defaults to available).
+            'cameranav' => get_config('format_mnemo', 'cameranav') !== '0',
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
             'game' => !empty($options['mnemogame']),
@@ -730,6 +734,10 @@ class scene implements renderable, templatable {
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
                 'fullscreen' => get_string('fullscreen', 'format_mnemo'),
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
+                'cameranav' => get_string('cameranav', 'format_mnemo'),
+                'cameranav_hint' => get_string('cameranav_hint', 'format_mnemo'),
+                'cameranav_denied' => get_string('cameranav_denied', 'format_mnemo'),
+                'cameranav_insecure' => get_string('cameranav_insecure', 'format_mnemo'),
                 'edit' => get_string('editlayout', 'format_mnemo'),
                 'editdone' => get_string('editdone', 'format_mnemo'),
                 'editbrightness' => get_string('editbrightness', 'format_mnemo'),
