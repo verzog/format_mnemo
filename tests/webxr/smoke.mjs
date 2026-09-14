@@ -2077,6 +2077,7 @@ const scenarios = [
                     spaceTexture,
                     buildStarfield: () => { starfield++; },
                     buildPlanets: () => {},
+                    buildCelestialBodies: () => {},
                     buildSpace: CS.prototype.buildSpace
                 };
                 self.buildSpace();
@@ -2088,6 +2089,83 @@ const scenarios = [
             const pass = withSky.bg === tex && withSky.starfield === 0 &&
                 without.starfield === 1;
             return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
+    },
+    {
+        name: 'sky: both a sun and a moon disc are placed, across the sky',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const day = CS.prototype.computeDaylight.call({THREE, palette: {haze: 0x99aabb}}, 12);
+            const added = [];
+            const self = {
+                THREE, day, scene: {add: (o) => added.push(o)},
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                buildCelestialBodies: CS.prototype.buildCelestialBodies,
+                moonDirection: CS.prototype.moonDirection,
+                buildSky: CS.prototype.buildSky
+            };
+            self.buildSky();
+            const sprites = added.filter((o) => o.isSprite);
+            const sun = sprites[0];
+            const moon = sprites[1];
+            // Two discs, on opposite azimuths (their horizontal directions oppose).
+            const opposed = (sun.position.x * moon.position.x + sun.position.z * moon.position.z) < 0;
+            const pass = sprites.length === 2 && opposed;
+            return {pass, detail: `sprites=${sprites.length} opposed=${opposed}`};
+        }
+    },
+    {
+        name: 'sky: daytime clouds build by day and clear at deep night',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (hour) => {
+                const day = CS.prototype.computeDaylight.call({THREE, palette: {haze: 0x99aabb}}, hour);
+                const self = {
+                    THREE, day, clouds: [], scene: {add: () => {}},
+                    cloudTexture: CS.prototype.cloudTexture, buildClouds: CS.prototype.buildClouds
+                };
+                self.buildClouds();
+                return self.clouds.length;
+            };
+            const pass = mk(12) > 0 && mk(1) === 0;
+            return {pass, detail: `midday=${mk(12)} night=${mk(1)}`};
+        }
+    },
+    {
+        name: 'sky: clouds drift across the sky and wrap around',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                clouds: [{sprite: {position: {x: 479}}, speed: 10}],
+                driftClouds: CS.prototype.driftClouds
+            };
+            self.driftClouds(1); // 479 + 10 = 489 -> wraps to 489 - 960 = -471.
+            const x = self.clouds[0].sprite.position.x;
+            return {pass: Math.abs(x + 471) < 1e-6, detail: `x=${x}`};
+        }
+    },
+    {
+        name: 'space: the Void gets a small sun and moon that do not dwarf planets',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const added = [];
+            const self = {
+                THREE, scene: {background: null, add: (o) => added.push(o)}, spaceTexture: null,
+                buildStarfield: () => {}, buildPlanets: () => {},
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                buildCelestialBodies: CS.prototype.buildCelestialBodies,
+                buildSpace: CS.prototype.buildSpace
+            };
+            self.buildSpace();
+            const sprites = added.filter((o) => o.isSprite);
+            const small = sprites.every((s) => s.scale.x <= 32);
+            const pass = sprites.length === 2 && small;
+            return {pass, detail: `sprites=${sprites.length} small=${small}`};
         }
     },
     {
