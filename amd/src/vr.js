@@ -9926,6 +9926,13 @@ define('format_mnemo/vr', [], function() {
         this.reqId = 0; // Bumped per start()/stop() so stale resolutions drop.
         this.lastTime = -1; // Last processed video currentTime (frame gate).
         this.onchange = null; // Optional callback(active) for the HUD to sync.
+        // Optional MediaPipe hand-pose upgrade: when it loads, sample() reads
+        // hand gestures instead of frame motion; until then (or if it fails to
+        // load) the motion path above is the fallback.
+        this.pose = null; // A HandPose once the landmarker has loaded.
+        this.poseLoading = false; // A load attempt is in flight.
+        this.prevHand = null; // Previous frame's hand features (pull detection).
+        this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
         // Tunables (the one place to adjust the feel): a deadzone that ignores
         // frame noise, a gain that maps motion energy to a full-scale axis, and
         // the steering rate. Smoothing is asymmetric and time-based - a short
@@ -10098,6 +10105,12 @@ define('format_mnemo/vr', [], function() {
         }
         var frameDt = this.lastTime >= 0 ? v.currentTime - this.lastTime : 0;
         this.lastTime = v.currentTime;
+        // Pose mode (MediaPipe hand landmarks) once it has loaded; otherwise the
+        // frame-motion fallback.
+        if (this.pose) {
+            this.samplePose(v, frameDt);
+            return;
+        }
         var cur = this.capture();
         if (!cur) {
             this.clearIntent();
@@ -10112,6 +10125,72 @@ define('format_mnemo/vr', [], function() {
             this.intent = this.motionToIntent(this.energy);
         }
         this.prev = cur;
+    };
+
+    /**
+     * Read hand gestures for one frame via the loaded HandPose and turn them into
+     * the steering/move intent: an open palm stops, the hand's position steers,
+     * and a fisted "haul" glides forward (its target smoothed with the same
+     * attack/release easing so repeated hauls sustain momentum). No hand in view
+     * clears the intent so the rig coasts to a stop.
+     *
+     * @param {Object} v The video element.
+     * @param {Number} frameDt Seconds since the last processed frame.
+     */
+    CameraNav.prototype.samplePose = function(v, frameDt) {
+        var lm = this.pose.detect(v, window.performance ? window.performance.now() : Date.now());
+        if (!lm) {
+            this.clearIntent();
+            this.prevHand = null;
+            this.poseMove = 0;
+            return;
+        }
+        var cur = this.pose.classify(lm);
+        var it = this.pose.intent(this.prevHand, cur, frameDt);
+        this.prevHand = cur;
+        if (it.stop) {
+            this.clearIntent();
+            this.poseMove = 0;
+            return;
+        }
+        this.poseMove = this.blend(this.poseMove, it.moveTarget, frameDt);
+        this.intent = {turn: it.turn, move: this.poseMove};
+    };
+
+    /**
+     * Try to upgrade the control to MediaPipe hand-pose detection: load the
+     * vision bundle, resolve its WASM runtime and create a HandLandmarker from
+     * the vendored model. On any failure the control silently stays in motion
+     * mode (the fallback), so this never throws. Runs at most once.
+     */
+    CameraNav.prototype.initPose = function() {
+        var self = this;
+        var cfg = this.cs && this.cs.config;
+        if (this.pose || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
+            return;
+        }
+        this.poseLoading = true;
+        var mp;
+        loadMediapipe(cfg).then(function(loaded) {
+            mp = loaded;
+            return mp.FilesetResolver.forVisionTasks(cfg.mediapipewasmurl);
+        }).then(function(fileset) {
+            return mp.HandLandmarker.createFromOptions(fileset, {
+                baseOptions: {modelAssetPath: cfg.mediapipehandmodelurl, delegate: 'GPU'},
+                runningMode: 'VIDEO',
+                numHands: 1
+            });
+        }).then(function(landmarker) {
+            // A stop() (or entering XR) between request and resolution: discard.
+            if (self.active) {
+                self.pose = new HandPose(landmarker);
+            } else if (landmarker.close) {
+                landmarker.close();
+            }
+            return null;
+        }).catch(function() {
+            self.poseLoading = false; // Stay in motion mode.
+        });
     };
 
     /**
@@ -10172,6 +10251,9 @@ define('format_mnemo/vr', [], function() {
                 self.lastTime = -1;
                 self.clearIntent();
                 self.active = true;
+                // Try to upgrade to hand-pose detection; stays in motion mode if
+                // it cannot load.
+                self.initPose();
                 if (onReady) {
                     onReady();
                 }
@@ -10246,6 +10328,10 @@ define('format_mnemo/vr', [], function() {
         this.prev = null;
         this.lastTime = -1;
         this.clearIntent();
+        // Keep any loaded HandPose (the model is expensive to reload) but reset
+        // its per-stroke state so a restart begins clean.
+        this.prevHand = null;
+        this.poseMove = 0;
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
@@ -10253,6 +10339,135 @@ define('format_mnemo/vr', [], function() {
         if (this.onchange) {
             this.onchange(false);
         }
+    };
+
+    /**
+     * Hand-pose gesture reader for the camera control, built on a MediaPipe
+     * HandLandmarker. It classifies the 21 hand landmarks into the flat-screen
+     * navigation gestures: an open palm to stop, the hand's horizontal position
+     * to steer, and a closed-fist "haul" (grab and pull the hand in toward you,
+     * like hauling a rope) to glide forward. The classification is pure
+     * (landmarks in, intent out) so it is unit tested; only detect() touches the
+     * MediaPipe runtime and the video.
+     *
+     * Landmark indices follow MediaPipe's hand model (0 = wrist; each finger runs
+     * MCP, PIP, DIP, TIP).
+     *
+     * @param {Object} landmarker A MediaPipe HandLandmarker (null-safe for tests).
+     */
+    function HandPose(landmarker) {
+        this.landmarker = landmarker || null;
+        this.turnGain = 0.35; // Hand offset from centre mapped to full steering.
+        this.turnDeadzone = 0.06; // Ignore a hand near the centre line.
+        this.haulGain = 1.2; // Pull speed (frame fractions/sec) mapped to full forward.
+    }
+
+    /** @var {Array} The [tip, pip] landmark indices of the four non-thumb fingers. */
+    HandPose.FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]];
+
+    /**
+     * Planar distance between two landmarks.
+     *
+     * @param {Object} a A landmark {x, y}.
+     * @param {Object} b A landmark {x, y}.
+     * @return {Number} The distance.
+     */
+    HandPose.prototype.dist = function(a, b) {
+        var dx = a.x - b.x;
+        var dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    /**
+     * Whether a finger is extended: its tip sits farther from the wrist than its
+     * pip joint (by a margin), which holds however the hand is rotated.
+     *
+     * @param {Array} lm The 21 landmarks.
+     * @param {Number} tip The fingertip index.
+     * @param {Number} pip The pip-joint index.
+     * @return {Boolean} True when extended.
+     */
+    HandPose.prototype.fingerExtended = function(lm, tip, pip) {
+        return this.dist(lm[tip], lm[0]) > this.dist(lm[pip], lm[0]) * 1.15;
+    };
+
+    /**
+     * Reduce a hand's landmarks to the features the intent needs: how many of the
+     * four fingers are extended (so an open palm and a fist can be told apart),
+     * the wrist position (steering and pull detection) and the hand's span - its
+     * apparent size, which grows as the hand comes toward the camera.
+     *
+     * @param {Array} lm The 21 landmarks.
+     * @return {Object} {fingers, open, fist, x, y, span}.
+     */
+    HandPose.prototype.classify = function(lm) {
+        var fingers = 0;
+        for (var i = 0; i < HandPose.FINGERS.length; i++) {
+            if (this.fingerExtended(lm, HandPose.FINGERS[i][0], HandPose.FINGERS[i][1])) {
+                fingers++;
+            }
+        }
+        return {
+            fingers: fingers,
+            open: fingers >= 4,
+            fist: fingers === 0,
+            x: lm[0].x,
+            y: lm[0].y,
+            span: this.dist(lm[0], lm[9]) // Wrist to middle-finger MCP.
+        };
+    };
+
+    /**
+     * Map the current (and previous) hand features to a navigation intent:
+     *   - an open palm stops (brake);
+     *   - the wrist's offset from the centre line steers, past a small deadzone
+     *     (a hand to the mirrored right turns right);
+     *   - a closed fist that is pulling in - the wrist dropping and/or the hand
+     *     growing toward the camera - hauls forward, the target scaled by the
+     *     pull speed so a firmer haul glides faster; between hauls the caller's
+     *     smoothing coasts it.
+     * Pure: reads only the two feature objects and the elapsed time.
+     *
+     * @param {Object|null} prev The previous frame's features (or null).
+     * @param {Object} cur The current frame's features.
+     * @param {Number} frameDt Seconds since the previous frame.
+     * @return {Object} {stop, turn, moveTarget}.
+     */
+    HandPose.prototype.intent = function(prev, cur, frameDt) {
+        if (cur.open) {
+            return {stop: true, turn: 0, moveTarget: 0};
+        }
+        // Mirror: the user's right hand sits at x < 0.5, and turns right.
+        var off = 0.5 - cur.x;
+        var mag = Math.abs(off) - this.turnDeadzone;
+        var turn = 0;
+        if (mag > 0) {
+            turn = Math.max(-1, Math.min(1, (off < 0 ? -1 : 1) * mag / this.turnGain));
+        }
+        var moveTarget = 0;
+        if (cur.fist && prev && frameDt > 0) {
+            var pull = (cur.y - prev.y) + (cur.span - prev.span);
+            if (pull > 0) {
+                moveTarget = Math.max(0, Math.min(1, (pull / frameDt) / this.haulGain));
+            }
+        }
+        return {stop: false, turn: turn, moveTarget: moveTarget};
+    };
+
+    /**
+     * Run hand detection on the current video frame and return the first hand's
+     * landmarks, or null when no hand is present or the runtime is unavailable.
+     *
+     * @param {Object} video The video element.
+     * @param {Number} timestampMs A monotonically increasing timestamp (ms).
+     * @return {Array|null} The 21 landmarks, or null.
+     */
+    HandPose.prototype.detect = function(video, timestampMs) {
+        if (!this.landmarker) {
+            return null;
+        }
+        var res = this.landmarker.detectForVideo(video, timestampMs);
+        return (res && res.landmarks && res.landmarks.length) ? res.landmarks[0] : null;
     };
 
     /**
@@ -10939,6 +11154,57 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Load the MediaPipe Tasks Vision classes (FilesetResolver, HandLandmarker,
+     * FaceLandmarker) as a native ES module, the same way as Three (see
+     * loadThree): inject the unbuilt loader script, which dynamic-imports the
+     * vendored vision bundle and hands the classes back through a window event.
+     * Rejects (so the caller falls back to motion detection) if the bundle
+     * cannot load. Cached on the module so it only loads once.
+     *
+     * @param {Object} config The scene config (mediapipeloaderurl, mediapipebundleurl).
+     * @return {Promise} Resolves with {FilesetResolver, HandLandmarker, FaceLandmarker}.
+     */
+    function loadMediapipe(config) {
+        if (loadMediapipe.promise) {
+            return loadMediapipe.promise;
+        }
+        loadMediapipe.promise = new Promise(function(resolve, reject) {
+            if (!config.mediapipeloaderurl || !config.mediapipebundleurl) {
+                reject(new Error('format_mnemo: MediaPipe URLs not configured'));
+                return;
+            }
+            var settled = false;
+            window.addEventListener('format_mnemo:mediapipe-ready', function(e) {
+                settled = true;
+                resolve(e.detail);
+            }, {once: true});
+            window.addEventListener('format_mnemo:mediapipe-error', function(e) {
+                settled = true;
+                reject((e && e.detail) || new Error('MediaPipe failed to load'));
+            }, {once: true});
+            var sep = config.mediapipeloaderurl.indexOf('?') >= 0 ? '&' : '?';
+            var script = document.createElement('script');
+            script.type = 'module';
+            script.src = config.mediapipeloaderurl + sep + 'src=' +
+                encodeURIComponent(config.mediapipebundleurl);
+            script.onerror = function() {
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('MediaPipe loader script failed to load'));
+                }
+            };
+            document.head.appendChild(script);
+            window.setTimeout(function() {
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('MediaPipe load timed out'));
+                }
+            }, 30000);
+        });
+        return loadMediapipe.promise;
+    }
+
+    /**
      * Load one image URL into a Three texture, downscaled to a bounded canvas
      * before it reaches WebGL so an oversized upload cannot exceed the GPU's max
      * texture size or exhaust memory on mobile/headset browsers. crossOrigin
@@ -11273,6 +11539,7 @@ define('format_mnemo/vr', [], function() {
         _GestureManager: GestureManager,
         _GameManager: GameManager,
         _CameraNav: CameraNav,
+        _HandPose: HandPose,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,
