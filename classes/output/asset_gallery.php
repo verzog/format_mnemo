@@ -387,14 +387,21 @@ class asset_gallery {
      * @return array{threeurl: string, loaderurl: string, addonsbaseurl: string}
      */
     public static function client_config(): array {
-        $threeurl = get_config('format_mnemo', 'threeurl');
-        if (empty($threeurl)) {
-            $threeurl = (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
-        }
+        // The bundled glTF addon stack imports the bundled Three.js and is
+        // version-matched to it, so it is only offered when no threeurl override
+        // is set (mirroring scene::get_scene_config); otherwise the preview
+        // would run two Three.js instances. With an override, compressed models
+        // fall back to the built-in uncompressed-glTF parser.
+        $customthree = !empty(get_config('format_mnemo', 'threeurl'));
+        $threeurl = $customthree
+            ? get_config('format_mnemo', 'threeurl')
+            : (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
         return [
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
-            'addonsbaseurl' => (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false),
+            'addonsbaseurl' => $customthree
+                ? ''
+                : (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false),
         ];
     }
 
