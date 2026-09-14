@@ -324,6 +324,7 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
                 frameMaterial: CS.prototype.frameMaterial,
                 signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen
@@ -345,6 +346,7 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
                 frameMaterial: CS.prototype.frameMaterial,
                 signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen
@@ -366,6 +368,7 @@ const scenarios = [
             const obj = {
                 THREE: THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
                 makePosterTexture: CS.prototype.makePosterTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
                 frameMaterial: CS.prototype.frameMaterial,
                 signFontStack: CS.prototype.signFontStack,
                 makeVideoScreen: CS.prototype.makeVideoScreen,
@@ -569,6 +572,7 @@ const scenarios = [
                 const self = {
                     THREE, interactive: [], signTexture, signFontFamily: null,
                     makeTextTexture: CS.prototype.makeTextTexture,
+                    maxAnisotropy: CS.prototype.maxAnisotropy,
                     signFontStack: CS.prototype.signFontStack,
                     wrapLines: CS.prototype.wrapLines,
                     frameMaterial: CS.prototype.frameMaterial,
@@ -1541,6 +1545,7 @@ const scenarios = [
                 comfort: {turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal',
                     locomotion: 'teleport'},
                 makeTextTexture: CS.prototype.makeTextTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
                 wrapLines: CS.prototype.wrapLines,
                 signFontStack: CS.prototype.signFontStack,
                 roundRect: CS.prototype.roundRect,
