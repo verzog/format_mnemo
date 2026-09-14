@@ -2758,7 +2758,7 @@ define('format_mnemo/vr', [], function() {
             this.scene.add(m);
             this.addPickProxy(m);
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
-                m, p.x, y, p.z, type === 'lamp' || type === 'av');
+                m, p.x, y, p.z, type === 'lamp' || type === 'av', this.modelScale(type));
         }
     };
 
@@ -2898,7 +2898,8 @@ define('format_mnemo/vr', [], function() {
                 this.setShadow(m, true);
                 this.scene.add(m);
                 this.addPickProxy(m);
-                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp');
+                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp',
+                    this.modelScale(kind));
             }
         }
     };
@@ -3017,7 +3018,7 @@ define('format_mnemo/vr', [], function() {
             this.setShadow(m, true);
             this.scene.add(m);
             this.addPickProxy(m);
-            this.registerSceneEditable(objkey, label, m, px, py, pz, true);
+            this.registerSceneEditable(objkey, label, m, px, py, pz, true, this.modelScale('lamp'));
         }
     };
 
@@ -3061,7 +3062,8 @@ define('format_mnemo/vr', [], function() {
             this.addPickProxy(m);
             // Key by the side street's section number (course-stable across
             // viewers), not a filtered ordinal.
-            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false);
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false,
+                this.modelScale('kiosk'));
         }
     };
 
@@ -6521,7 +6523,7 @@ define('format_mnemo/vr', [], function() {
         this.addPickProxy(m);
         this.placedObjects.push({id: id, type: type, x: x, z: z});
         this.registerSceneEditable('placed:' + id, this.propLabel(type),
-            m, x, y, z, type === 'lamp' || type === 'av');
+            m, x, y, z, type === 'lamp' || type === 'av', this.modelScale(type));
         // With snap-to-surface on, rest the new prop on the surface beneath it
         // (e.g. a raised sidewalk) and persist that height so every learner sees
         // it there, not sunk to road level.
@@ -7068,15 +7070,19 @@ define('format_mnemo/vr', [], function() {
         var sx = t.sx > 0 ? t.sx : 1;
         var sy = t.sy > 0 ? t.sy : 1;
         var sz = t.sz > 0 ? t.sz : 1;
+        // The model's asset-viewer scale (1 for everything but a configured
+        // prop) is a base the teacher's edit scale multiplies, so a configured
+        // prop size and a hand-scaled instance compose instead of overriding.
+        var bs = editable.baseScale > 0 ? editable.baseScale : 1;
         var node = editable.scaleNode || g;
         if (node !== g) {
             // The group carries only the uniform scale (and rotation), so the
             // sign under it is never sheared; the scale node takes the
             // anisotropic stretch of the body.
-            g.scale.setScalar(t.scale);
+            g.scale.setScalar(bs * t.scale);
             node.scale.set(sx, sy, sz);
         } else {
-            g.scale.set(t.scale * sx, t.scale * sy, t.scale * sz);
+            g.scale.set(bs * t.scale * sx, bs * t.scale * sy, bs * t.scale * sz);
         }
         // Keep the signboard facing the street: counter-rotate it against the
         // building's editor rotation so its world orientation stays where it was
@@ -7256,8 +7262,10 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} baseY Default world y.
      * @param {Number} baseZ Default world z.
      * @param {Boolean} emits Whether it emits light (offer a brightness slider).
+     * @param {Number} [basescale] The model's asset-viewer scale (default 1),
+     *     the base the edit transform multiplies.
      */
-    Cyberspace.prototype.registerSceneEditable = function(objkey, name, group, baseX, baseY, baseZ, emits) {
+    Cyberspace.prototype.registerSceneEditable = function(objkey, name, group, baseX, baseY, baseZ, emits, basescale) {
         var o = this.sceneObjects[objkey] || {};
         var editable = {
             cmid: null,
@@ -7267,6 +7275,9 @@ define('format_mnemo/vr', [], function() {
             baseX: baseX, baseY: baseY, baseZ: baseZ,
             baseRotY: group.rotation.y,
             emits: !!emits,
+            // The model's asset-viewer scale, the base the edit transform builds
+            // on (1 for objects that carry no configured scale).
+            baseScale: basescale > 0 ? basescale : 1,
             transform: {
                 scale: o.scale > 0 ? o.scale : 1,
                 sx: o.sx > 0 ? o.sx : 1, sy: o.sy > 0 ? o.sy : 1, sz: o.sz > 0 ? o.sz : 1,
@@ -7276,12 +7287,16 @@ define('format_mnemo/vr', [], function() {
                 brightness: typeof o.brightness === 'number' ? o.brightness : 1
             }
         };
-        // Apply any stored override so it renders that way for every viewer.
+        // Apply any stored override so it renders that way for every viewer; with
+        // no stored edit, still apply when the model carries a base scale so the
+        // configured prop size takes effect.
         if (this.sceneObjects[objkey]) {
             this.applyTransform(editable);
             if (editable.emits) {
                 this.applyBrightness(editable);
             }
+        } else if (editable.baseScale !== 1) {
+            this.applyTransform(editable);
         }
         if (this.config.canedit) {
             group.userData.mnemoEditable = editable;

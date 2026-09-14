@@ -930,6 +930,42 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: applyTransform composes the model base scale with the edit scale',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const self = {THREE, selBox: null, renderer: null};
+            const ed = {
+                group: g, baseX: 0, baseY: 0, baseZ: 0, baseRotY: 0, baseScale: 2,
+                transform: {scale: 1.5, x: 0, y: 0, z: 0, rot: 0}
+            };
+            CS.prototype.applyTransform.call(self, ed);
+            // Base 2 times the teacher's edit scale 1.5 = 3.
+            return {pass: Math.abs(g.scale.x - 3) < 1e-6, detail: `scale=${g.scale.x}`};
+        }
+    },
+    {
+        name: 'scene-obj: registerSceneEditable applies a model base scale with no stored edit',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const self = {
+                THREE, editables: [], selBox: null, renderer: null,
+                config: {canedit: true}, sceneObjects: {},
+                registerSceneEditable: CS.prototype.registerSceneEditable,
+                applyTransform: CS.prototype.applyTransform
+            };
+            // No stored override, but the model carries an asset-viewer scale of
+            // 2.5, so the prop renders at that size for every viewer.
+            self.registerSceneEditable('placed:1', 'Kiosk', g, 3, 0, 3, false, 2.5);
+            const ed = self.editables[0];
+            return {pass: ed.baseScale === 2.5 && Math.abs(g.scale.x - 2.5) < 1e-6,
+                detail: `base=${ed.baseScale} scale=${g.scale.x}`};
+        }
+    },
+    {
         name: 'surface: retileSurface recomputes tile repeat from the multiplier',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
@@ -1168,6 +1204,8 @@ const scenarios = [
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
+                modelScale: CS.prototype.modelScale,
+                modelCfg: CS.prototype.modelCfg,
                 placeProp: CS.prototype.placeProp
             };
             self.placeProp('lamp', 7, 4, -6);
@@ -1201,6 +1239,8 @@ const scenarios = [
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
+                modelScale: CS.prototype.modelScale,
+                modelCfg: CS.prototype.modelCfg,
                 buildPlacedObjectsOfType: CS.prototype.buildPlacedObjectsOfType
             };
             self.buildPlacedObjectsOfType('kiosk', tpl);
@@ -2289,6 +2329,8 @@ const scenarios = [
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
+                modelScale: CS.prototype.modelScale,
+                modelCfg: CS.prototype.modelCfg,
                 placeLampSlots: CS.prototype.placeLampSlots
             };
             self.placeLampSlots(tpl);
@@ -2779,6 +2821,8 @@ const scenarios = [
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness,
+                modelScale: CS.prototype.modelScale,
+                modelCfg: CS.prototype.modelCfg,
                 placeLampSlots: CS.prototype.placeLampSlots
             };
             self.placeLampSlots(tpl);
