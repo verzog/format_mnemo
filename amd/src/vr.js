@@ -3248,6 +3248,30 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The cruise altitude (the origin-y band centre) for a new traffic car: a
+     * grounded model rides just above the road - its downward extent (drop) plus
+     * a small ground clearance, so a model whose origin is at its base and one
+     * that reaches well below it both rest on the street rather than floating or
+     * sinking; a jitter fleet spreads across a wide flying band so some cars
+     * weave low and some cruise above the rooftops; an authored type centres on
+     * its configured height. A little jitter keeps a fleet from a rigid sheet.
+     *
+     * @param {Object} ct The car type.
+     * @param {Boolean} grounded Whether the model hugs the street.
+     * @param {Number} drop The model's scaled downward extent below its origin.
+     * @return {Number} The cruise altitude (world y).
+     */
+    Cyberspace.prototype.trafficCruiseBand = function(ct, grounded, drop) {
+        if (grounded) {
+            return (drop || 0) + 0.3 + Math.random() * 0.6;
+        }
+        if (ct.jitter) {
+            return 4 + Math.random() * 30;
+        }
+        return Math.max(3, (ct.height || 20) + (Math.random() - 0.5) * 6);
+    };
+
+    /**
      * Build one traffic-car record: place the car within the traffic box, set
      * its velocity and heading for its path (avenue = along Z, cross = along X,
      * diagonal = both), and its vertical/landing parameters. Positioning the
@@ -3273,19 +3297,7 @@ define('format_mnemo/vr', [], function() {
         var avoid = beh.avoid !== false;
         var face = beh.face !== false;
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
-        // Cruise band: a grounded model hugs the street; otherwise it flies - the
-        // default fleet spreads wide so some cars weave low over the open streets
-        // and some cruise above the rooftops, and authored types use their
-        // configured height as the band centre, with a little jitter so a fleet
-        // does not fly in a rigid sheet.
-        var cruiseY;
-        if (grounded) {
-            cruiseY = 1.5 + Math.random() * 2.5;
-        } else if (ct.jitter) {
-            cruiseY = 4 + Math.random() * 30;
-        } else {
-            cruiseY = Math.max(3, (ct.height || 20) + (Math.random() - 0.5) * 6);
-        }
+        var cruiseY = this.trafficCruiseBand(ct, grounded, drop || 0);
         // Start somewhere in the box, lifted clear of any building beneath it
         // (unless the model is allowed to pass through buildings).
         var x = box.xMin + Math.random() * (box.xMax - box.xMin);
@@ -3306,7 +3318,9 @@ define('format_mnemo/vr', [], function() {
         // Landing cars dip toward the ground or a rooftop band and climb back.
         var low = cruiseY;
         if (land === 'ground') {
-            low = grounded ? 0.5 : 2;
+            // Touch the road: a grounded model's base already rides at its drop,
+            // so it lands on the drop; a flying model dips to a low street band.
+            low = grounded ? (drop || 0) : 2;
         } else if (land === 'rooftop') {
             low = 10;
         }

@@ -1384,6 +1384,7 @@ const scenarios = [
                 modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
             });
             const car = new THREE.Group();
@@ -1504,13 +1505,23 @@ const scenarios = [
                 modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
             };
-            const car = new THREE.Group();
             // A configured height of 40 would fly high; grounded overrides it to
-            // a low street band.
-            const rec = self.makeTrafficCar(car, {model: 'rover', speed: 12, height: 40, land: 'none'}, 1, box, 0);
-            return {pass: rec.cruiseY <= 5, detail: `cruiseY=${rec.cruiseY.toFixed(1)}`};
+            // a low street band. A model with no downward extent rides just above
+            // the road.
+            const flat = self.makeTrafficCar(new THREE.Group(),
+                {model: 'rover', speed: 12, height: 40, land: 'none'}, 1, box, 0, 0);
+            // A model whose body reaches 3 below its origin lifts the origin by
+            // that drop, so its base still rests on the street (not sunk in it).
+            const deep = self.makeTrafficCar(new THREE.Group(),
+                {model: 'rover', speed: 12, height: 40, land: 'none'}, 1, box, 0, 3);
+            const flatLow = flat.cruiseY <= 2;
+            const dropAware = deep.cruiseY >= 3 && deep.cruiseY <= 5;
+            const baseAboveRoad = (deep.cruiseY - 3) >= 0 && (deep.cruiseY - 3) <= 2;
+            return {pass: flatLow && dropAware && baseAboveRoad,
+                detail: `flat=${flat.cruiseY.toFixed(2)} deep=${deep.cruiseY.toFixed(2)}`};
         }
     },
     {
@@ -1526,6 +1537,7 @@ const scenarios = [
                 modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
             };
             const car = new THREE.Group();
@@ -1676,6 +1688,7 @@ const scenarios = [
                 trafficModelYaw: CS.prototype.trafficModelYaw,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });
