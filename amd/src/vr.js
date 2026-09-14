@@ -3828,7 +3828,8 @@ define('format_mnemo/vr', [], function() {
             width: streetHalf * 1.7,
             height: 2.4,
             imageurl: section.image || null,
-            post: false
+            post: false,
+            hires: true
         });
         plate.group.position.set(0.25 * side, top - 1.9, 0);
         group.add(plate.group);
@@ -4312,9 +4313,11 @@ define('format_mnemo/vr', [], function() {
             });
         }
 
-        // Text plane.
+        // Text plane. Topic nameplates (opts.hires) are large on screen and few
+        // in number, so they get a supersampled, extra-crisp texture; the many
+        // activity signs stay at the base resolution to bound memory.
         var textMat = new THREE.MeshBasicMaterial({
-            map: this.makeTextTexture(opts.text, opts.colour),
+            map: this.makeTextTexture(opts.text, opts.colour, opts.hires ? 2 : 1),
             transparent: true,
             depthWrite: false
         });
@@ -4528,10 +4531,13 @@ define('format_mnemo/vr', [], function() {
         ctx.fillStyle = hex;
         var clipped = name.length > 28 ? name.slice(0, 27) + '…' : name;
         ctx.fillText(clipped, 512, 470);
+        // A crisp no-blur core over the glow keeps the name sharp.
+        ctx.shadowBlur = 0;
+        ctx.fillText(clipped, 512, 470);
 
         var texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
-        texture.anisotropy = 4;
+        texture.anisotropy = this.maxAnisotropy();
         return texture;
     };
 
@@ -4699,25 +4705,34 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {String} text The label text.
      * @param {Number} colour Hex int colour.
+     * @param {Number} [ss] Supersample factor (1 default, 2 for large signs).
      * @return {Object} Three.CanvasTexture.
      */
-    Cyberspace.prototype.makeTextTexture = function(text, colour) {
+    Cyberspace.prototype.makeTextTexture = function(text, colour, ss) {
         var THREE = this.THREE;
+        // Optional supersample: the sign plane is a fixed size in the world but
+        // can be drawn very large on screen, so more texels keep the letters
+        // crisp instead of magnifying a small canvas into a blur. Doubling the
+        // canvas quadruples its memory, though, so this is opt-in (ss = 2) for
+        // the few large topic nameplates only; the many activity signs stay 1x
+        // and rely on the crisp core pass below, keeping headset memory in check.
+        ss = ss || 1;
         var canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 128;
+        canvas.width = 512 * ss;
+        canvas.height = 128 * ss;
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
         var family = this.signFontStack();
         var maxWidth = canvas.width * 0.92;
         var maxHeight = canvas.height * 0.9;
 
-        // Pick the largest font (56 -> 20px) at which the wrapped block fits the
-        // face, so short names stay big and bold while long ones wrap smaller.
+        // Pick the largest font (56 -> 20px, at supersample scale) at which the
+        // wrapped block fits the face, so short names stay big and bold while
+        // long ones wrap smaller.
         var lines = [];
-        var fontSize = 56;
+        var fontSize = 56 * ss;
         var lineHeight = fontSize * 1.18;
-        for (; fontSize >= 20; fontSize -= 2) {
+        for (; fontSize >= 20 * ss; fontSize -= 2 * ss) {
             ctx.font = 'bold ' + fontSize + 'px ' + family;
             lines = this.wrapLines(ctx, text, maxWidth);
             lineHeight = fontSize * 1.18;
@@ -4738,20 +4753,42 @@ define('format_mnemo/vr', [], function() {
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = hex;
-        ctx.shadowBlur = 22;
-        ctx.fillStyle = hex;
+        var cx = canvas.width / 2;
         var startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
+
+        // Pass 1: a soft neon glow (a blurred halo around the letters).
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 16 * ss;
+        ctx.fillStyle = hex;
         for (var l = 0; l < lines.length; l++) {
-            var y = startY + l * lineHeight;
-            // Double-draw thickens the cheap neon glow.
-            ctx.fillText(lines[l], 256, y);
-            ctx.fillText(lines[l], 256, y);
+            var gy = startY + l * lineHeight;
+            ctx.fillText(lines[l], cx, gy);
+            ctx.fillText(lines[l], cx, gy);
+        }
+        // Pass 2: a crisp core with no blur, so the letters read sharply on top
+        // of their own glow instead of smearing into it.
+        ctx.shadowBlur = 0;
+        for (var l2 = 0; l2 < lines.length; l2++) {
+            ctx.fillText(lines[l2], cx, startY + l2 * lineHeight);
         }
 
         var texture = new THREE.CanvasTexture(canvas);
-        texture.anisotropy = 4;
+        texture.anisotropy = this.maxAnisotropy();
         return texture;
+    };
+
+    /**
+     * The renderer's maximum supported texture anisotropy (cached), or a safe
+     * fallback. Used so sign lettering stays sharp when seen at a grazing angle.
+     *
+     * @return {Number} The max anisotropy level.
+     */
+    Cyberspace.prototype.maxAnisotropy = function() {
+        if (this._maxAniso === undefined) {
+            var caps = this.renderer && this.renderer.capabilities;
+            this._maxAniso = (caps && caps.getMaxAnisotropy) ? caps.getMaxAnisotropy() : 8;
+        }
+        return this._maxAniso;
     };
 
     /**
@@ -4763,24 +4800,33 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.verticalTextTexture = function(text, colour) {
         var THREE = this.THREE;
+        // Base resolution (these pylon blades exist per section, so keep their
+        // memory bounded); the crisp no-blur core below does the sharpening.
+        var ss = 1;
         var canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 512;
+        canvas.width = 128 * ss;
+        canvas.height = 512 * ss;
         var ctx = canvas.getContext('2d');
         var hex = '#' + ('000000' + colour.toString(16)).slice(-6);
-        ctx.font = 'bold 62px ' + this.signFontStack();
+        ctx.font = 'bold ' + (62 * ss) + 'px ' + this.signFontStack();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = hex;
-        ctx.shadowBlur = 18;
         ctx.fillStyle = hex;
         var chars = text.replace(/\s+/g, '').slice(0, 7);
-        var step = 512 / (chars.length + 1);
+        var step = canvas.height / (chars.length + 1);
+        var cx = canvas.width / 2;
+        // Glow pass, then a crisp no-blur core so the letters stay sharp.
+        ctx.shadowColor = hex;
+        ctx.shadowBlur = 13 * ss;
         for (var i = 0; i < chars.length; i++) {
-            ctx.fillText(chars.charAt(i), 64, step * (i + 1));
+            ctx.fillText(chars.charAt(i), cx, step * (i + 1));
+        }
+        ctx.shadowBlur = 0;
+        for (var j = 0; j < chars.length; j++) {
+            ctx.fillText(chars.charAt(j), cx, step * (j + 1));
         }
         var texture = new THREE.CanvasTexture(canvas);
-        texture.anisotropy = 4;
+        texture.anisotropy = this.maxAnisotropy();
         return texture;
     };
 
@@ -4810,9 +4856,12 @@ define('format_mnemo/vr', [], function() {
         var clipped = text.length > 26 ? text.slice(0, 25) + '…' : text;
         ctx.fillText(clipped, 256, 64);
         ctx.fillText(clipped, 256, 64);
+        // A crisp no-blur core over the glow keeps the label legible.
+        ctx.shadowBlur = 0;
+        ctx.fillText(clipped, 256, 64);
 
         var texture = new THREE.CanvasTexture(canvas);
-        texture.anisotropy = 4;
+        texture.anisotropy = this.maxAnisotropy();
         var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
             map: texture, transparent: true, depthWrite: false
         }));
