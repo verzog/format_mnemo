@@ -681,7 +681,7 @@ class scene implements renderable, templatable {
             'mediapipeloaderurl' =>
                 (new moodle_url('/course/format/mnemo/js/mediapipe-loader.js'))->out(false),
             'mediapipebundleurl' =>
-                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/vision_bundle.mjs'))->out(false),
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/vision_bundle.js'))->out(false),
             'mediapipewasmurl' =>
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/wasm'))->out(false),
             'mediapipehandmodelurl' =>

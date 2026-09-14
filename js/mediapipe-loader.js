@@ -21,9 +21,11 @@
 // JS build (rollup) rewrites a literal import() into a RequireJS call, which
 // cannot load a real ES module such as the vendored vision_bundle.mjs. Kept here
 // as a plain, unbuilt module, the browser runs its dynamic import() natively.
+// The vision bundle is vendored with a .js extension (not .mjs) so servers that
+// do not map .mjs to a JavaScript MIME type still serve it as a module.
 //
 // It is loaded by amd/src/vr.js as `<script type="module"
-// src=".../js/mediapipe-loader.js?src=<encoded vision_bundle.mjs url>">` and hands
+// src=".../js/mediapipe-loader.js?src=<encoded vision_bundle.js url>">` and hands
 // the imported classes back through a window CustomEvent. The WASM runtime and
 // the model files are loaded later by the client from the same vendored,
 // same-origin thirdparty/mediapipe/ directory (see CameraNav.initPose), so no
