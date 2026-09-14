@@ -9926,14 +9926,19 @@ define('format_mnemo/vr', [], function() {
         this.reqId = 0; // Bumped per start()/stop() so stale resolutions drop.
         this.lastTime = -1; // Last processed video currentTime (frame gate).
         this.onchange = null; // Optional callback(active) for the HUD to sync.
-        // Tunables: a deadzone that ignores frame noise, a gain that maps motion
-        // energy to a full-scale axis, an EMA smoothing factor that gives the
-        // control momentum (intermittent motion sustains movement, a stop coasts),
-        // and the steering rate.
-        this.deadzone = 0.01;
-        this.gain = 0.06;
-        this.smoothing = 0.82;
-        this.turnRate = 1.6; // Radians per second at full deflection.
+        // Tunables (the one place to adjust the feel): a deadzone that ignores
+        // frame noise, a gain that maps motion energy to a full-scale axis, and
+        // the steering rate. Smoothing is asymmetric and time-based - a short
+        // attack time constant so a gesture takes effect quickly (responsive),
+        // and a longer release so movement coasts to a stop instead of cutting
+        // out between hand movements (momentum). Both are in seconds, so the feel
+        // is the same whatever the webcam's frame rate.
+        this.deadzone = 0.008;
+        this.gain = 0.05;
+        this.attackTau = 0.08; // Fast rise: quick onset.
+        this.releaseTau = 0.35; // Slow fall: coast to a stop.
+        this.maxFrameGap = 0.4; // Ignore a frame after a longer gap (tab refocus).
+        this.turnRate = 1.8; // Radians per second at full deflection.
     }
 
     /**
@@ -10050,6 +10055,29 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Ease one zone's smoothed energy toward the latest measured value over a
+     * real time step: a short time constant when rising (a gesture takes hold
+     * fast) and a longer one when falling (movement coasts rather than cutting
+     * out between hand movements). Using the elapsed time keeps the feel constant
+     * across webcam frame rates. After a long gap (a suspended/refocused tab) the
+     * measurement is a diff against a stale frame and meaningless, so that frame
+     * is discarded (the value is held) rather than snapped almost fully to it.
+     *
+     * @param {Number} current The current smoothed energy.
+     * @param {Number} target The freshly measured energy.
+     * @param {Number} frameDt Seconds since the last processed frame.
+     * @return {Number} The updated smoothed energy.
+     */
+    CameraNav.prototype.blend = function(current, target, frameDt) {
+        if (frameDt > this.maxFrameGap) {
+            return current;
+        }
+        var tau = target > current ? this.attackTau : this.releaseTau;
+        var alpha = 1 - Math.exp(-Math.max(0, frameDt) / tau);
+        return current + (target - current) * alpha;
+    };
+
+    /**
      * Sample the webcam once and update the steering/move intent. Runs only on a
      * genuinely new camera frame: when the render rate exceeds the webcam frame
      * rate the duplicate frames are skipped (so sensitivity does not vary with
@@ -10068,6 +10096,7 @@ define('format_mnemo/vr', [], function() {
         if (v.currentTime === this.lastTime) {
             return;
         }
+        var frameDt = this.lastTime >= 0 ? v.currentTime - this.lastTime : 0;
         this.lastTime = v.currentTime;
         var cur = this.capture();
         if (!cur) {
@@ -10076,11 +10105,10 @@ define('format_mnemo/vr', [], function() {
         }
         if (this.prev) {
             var z = this.zoneMotion(this.prev, cur, this.w, this.h);
-            var k = this.smoothing;
-            this.energy.left = this.energy.left * k + z.left * (1 - k);
-            this.energy.right = this.energy.right * k + z.right * (1 - k);
-            this.energy.fwd = this.energy.fwd * k + z.fwd * (1 - k);
-            this.energy.back = this.energy.back * k + z.back * (1 - k);
+            this.energy.left = this.blend(this.energy.left, z.left, frameDt);
+            this.energy.right = this.blend(this.energy.right, z.right, frameDt);
+            this.energy.fwd = this.blend(this.energy.fwd, z.fwd, frameDt);
+            this.energy.back = this.blend(this.energy.back, z.back, frameDt);
             this.intent = this.motionToIntent(this.energy);
         }
         this.prev = cur;
