@@ -59,6 +59,12 @@ define('format_mnemo/vr', [], function() {
     // under them, and so surface-snapping rests objects on the right level.
     var SIDEWALK_HEIGHT = 0.18;
 
+    // Standard storey count per facade texture module (see MODULE_H). Building
+    // masses are quantised to a whole number of these storeys, so the skyline
+    // reads as stacked floors, window rows line up with the facade, and rooftop
+    // levels align (which also gives the flying traffic clean bands to clear).
+    var FLOORS_PER_MODULE = 6;
+
     // Per-planet size, distance from the scene centre and elevation for the
     // Void's planets, plus ring/band. Their azimuth is spread evenly around the
     // full sky by planet index at build time (see buildPlanets), so only two or
@@ -1415,10 +1421,29 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} height Body height in metres.
      * @return {Object} A Three.MeshStandardMaterial.
      */
+    /**
+     * The number of window storeys a facade of this height shows: the height in
+     * standard storeys (MODULE_H / FLOORS_PER_MODULE each), at least one. The
+     * facade texture is then repeated storeys/FLOORS_PER_MODULE times so its row
+     * pitch is the same on every building and lines up with the storey-quantised
+     * mass (see floorHeight).
+     *
+     * @param {Number} height Body height in world units.
+     * @return {Number} Whole storey count (>= 1).
+     */
+    Cyberspace.prototype.facadeStoreys = function(height) {
+        return Math.max(1, Math.round(height / (MODULE_H / FLOORS_PER_MODULE)));
+    };
+
     Cyberspace.prototype.facadeMaterial = function(style, width, height) {
         var THREE = this.THREE;
         var rx = Math.max(1, Math.round(width / MODULE_W));
-        var ry = Math.max(1, Math.round(height / MODULE_H));
+        // Repeat the facade by whole storeys, not whole modules, so every
+        // building shares the same floor pitch and window rows line up with the
+        // storey-quantised height (see floorHeight). The module has
+        // FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
+        // gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
+        var ry = this.facadeStoreys(height) / FLOORS_PER_MODULE;
         var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry;
         if (this.matCache[key]) {
             return this.matCache[key];
@@ -3942,6 +3967,21 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} style One of the STYLES recipes.
      * @return {Object} {group, panel} where panel is the raycast target.
      */
+    /**
+     * Snap a raw building height to a whole number of standard storeys (at least
+     * one), so building masses stack in consistent floors and their rooftops
+     * line up across the city. The storey pitch matches the facade texture's
+     * floors (MODULE_H / FLOORS_PER_MODULE) so window rows stay sensible.
+     *
+     * @param {Number} raw The unquantised height in world units.
+     * @return {Number} The height rounded to a whole number of storeys.
+     */
+    Cyberspace.prototype.floorHeight = function(raw) {
+        var pitch = MODULE_H / FLOORS_PER_MODULE;
+        var floors = Math.max(1, Math.round(raw / pitch));
+        return floors * pitch;
+    };
+
     Cyberspace.prototype.makeStructure = function(act, style) {
         var THREE = this.THREE;
         var group = new THREE.Group();
@@ -3956,7 +3996,9 @@ define('format_mnemo/vr', [], function() {
         scalenode.add(body);
         var w = style.footprint[0];
         var d = style.footprint[1];
-        var h = style.height[0] + Math.random() * (style.height[1] - style.height[0]);
+        // Quantise the height to whole floors so buildings stack in standard
+        // storeys and their rooftops line up across the city.
+        var h = this.floorHeight(style.height[0] + Math.random() * (style.height[1] - style.height[0]));
 
         // Mass: a lit concrete/steel volume whose windows glow at night, with a
         // crisp neon edge outline that reads strongest after dark.

@@ -344,6 +344,38 @@ const scenarios = [
         }
     },
     {
+        name: 'building: floorHeight snaps a raw height to whole storeys',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const f = CS.prototype.floorHeight;
+            const pitch = 11 / 6; // MODULE_H / FLOORS_PER_MODULE.
+            const a = f(5);
+            const b = f(0.1); // Below one storey -> clamped up to one.
+            const c = f(23);
+            const whole = (v) => Math.abs(v / pitch - Math.round(v / pitch)) < 1e-9;
+            const pass = whole(a) && whole(c) && Math.abs(b - pitch) < 1e-9 &&
+                Math.abs(a - Math.round(5 / pitch) * pitch) < 1e-9;
+            return {pass, detail: `a=${a.toFixed(2)} b=${b.toFixed(2)} c=${c.toFixed(2)} pitch=${pitch.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'building: facade repeats by whole storeys aligned to floorHeight',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const pitch = 11 / 6;
+            for (const raw of [3, 5, 9, 15, 23]) {
+                const h = CS.prototype.floorHeight(raw);
+                const storeys = CS.prototype.facadeStoreys(h);
+                // The window-row count equals the mass's storey count exactly,
+                // so rows line up with floors (no compressed module).
+                if (Math.abs(h / pitch - storeys) > 1e-9) {
+                    return {pass: false, detail: `raw=${raw} h=${h.toFixed(2)} storeys=${storeys} floors=${(h / pitch).toFixed(2)}`};
+                }
+            }
+            return {pass: true, detail: 'window rows match storeys for 3..23'};
+        }
+    },
+    {
         name: 'building: type-based URL for a confirmed module type',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
