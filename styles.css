@@ -685,3 +685,40 @@
     margin-top: 6px;
     font-size: 0.85em;
 }
+
+.format-mnemo-preview__settings {
+    margin-top: 8px;
+    font-size: 0.85em;
+}
+
+.format-mnemo-preview__settings > summary {
+    cursor: pointer;
+    color: #3a6ea5;
+}
+
+.format-mnemo-preview__form {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.format-mnemo-preview__field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.format-mnemo-preview__field-label {
+    font-weight: 600;
+}
+
+.format-mnemo-preview__check {
+    display: inline-block;
+    margin-right: 10px;
+    font-weight: normal;
+}
+
+.format-mnemo-preview__scale {
+    max-width: 6em;
+}
