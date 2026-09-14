@@ -1250,6 +1250,47 @@ const scenarios = [
         }
     },
     {
+        name: 'traffic: trafficModelYaw auto-orients wide models and honours an explicit yaw',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, trafficModelYaw: CS.prototype.trafficModelYaw};
+            // Longer along X than Z -> its length is the X axis -> quarter turn.
+            const wide = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 1.5));
+            wide.updateMatrixWorld(true);
+            // Longer along Z (or near-square) -> no turn.
+            const deep = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1, 4));
+            deep.updateMatrixWorld(true);
+            const wideYaw = self.trafficModelYaw(wide, {});
+            const deepYaw = self.trafficModelYaw(deep, {});
+            // An explicit yaw (degrees) wins and converts to radians.
+            const forced = self.trafficModelYaw(wide, {yaw: 90});
+            // The bundled av (front -X) is pinned to +90deg, not the raw axis
+            // correction, so it drives front-first not tail-first.
+            const avYaw = self.trafficModelYaw(wide, {model: 'av'});
+            const pass = Math.abs(wideYaw + Math.PI / 2) < 1e-6 &&
+                Math.abs(deepYaw) < 1e-6 &&
+                Math.abs(forced - Math.PI / 2) < 1e-6 &&
+                Math.abs(avYaw - Math.PI / 2) < 1e-6;
+            return {pass, detail: `wide=${wideYaw.toFixed(3)} deep=${deepYaw.toFixed(3)} forced=${forced.toFixed(3)} av=${avYaw.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'traffic: makeTrafficCar adds the model yaw offset to the heading',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -10, xMax: 10, zMin: -40, zMax: 40, avHalfX: 6};
+            const self = {makeTrafficCar: CS.prototype.makeTrafficCar};
+            const car = new THREE.Group();
+            // Avenue, dir +1 -> heading 0; a -pi/2 offset yaws the car to -pi/2.
+            const rec = self.makeTrafficCar(
+                car, {path: 'avenue', speed: 12, height: 20, land: 'none'}, 1, box, -Math.PI / 2);
+            const pass = Math.abs(rec.mesh.rotation.y + Math.PI / 2) < 1e-6;
+            return {pass, detail: `rotY=${rec.mesh.rotation.y.toFixed(3)}`};
+        }
+    },
+    {
         name: 'traffic: trafficLandingY cruises, holds low, and climbs back',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
@@ -1317,6 +1358,7 @@ const scenarios = [
                 THREE, traffic: pre, scene: {add: () => {}},
                 trafficBounds: () => box,
                 setShadow: CS.prototype.setShadow,
+                trafficModelYaw: CS.prototype.trafficModelYaw,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });
