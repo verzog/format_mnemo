@@ -42,7 +42,7 @@ import {
 	RGFormat,
 	SRGBColorSpace,
 	UnsignedByteType,
-} from 'three';
+} from '../../three.module.min.js';
 import { WorkerPool } from '../utils/WorkerPool.js';
 import {
 	read,
