@@ -2778,7 +2778,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Object|null} {envs, yaw, scale} or null.
      */
     Cyberspace.prototype.modelCfg = function(name) {
-        var mc = this.config.modelconfig;
+        var mc = this.config && this.config.modelconfig;
         return (mc && name && mc[name]) ? mc[name] : null;
     };
 
@@ -2791,6 +2791,20 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.modelScale = function(name) {
         var mc = this.modelCfg(name);
         return (mc && typeof mc.scale === 'number' && mc.scale > 0) ? mc.scale : 1;
+    };
+
+    /**
+     * The model's behaviour flags from its asset-viewer settings, as a map that
+     * only carries flags changed from their engine default (an empty map when
+     * none are set). Each consumer reads a flag with its own default, so an
+     * unconfigured model keeps the original behaviour.
+     *
+     * @param {String} name The model name.
+     * @return {Object} The stored behaviour map (possibly empty).
+     */
+    Cyberspace.prototype.modelBehaviour = function(name) {
+        var mc = this.modelCfg(name);
+        return (mc && mc.behaviour && typeof mc.behaviour === 'object') ? mc.behaviour : {};
     };
 
     Cyberspace.prototype.loadProp = function(name) {
@@ -3234,6 +3248,30 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The cruise altitude (the origin-y band centre) for a new traffic car: a
+     * grounded model rides just above the road - its downward extent (drop) plus
+     * a small ground clearance, so a model whose origin is at its base and one
+     * that reaches well below it both rest on the street rather than floating or
+     * sinking; a jitter fleet spreads across a wide flying band so some cars
+     * weave low and some cruise above the rooftops; an authored type centres on
+     * its configured height. A little jitter keeps a fleet from a rigid sheet.
+     *
+     * @param {Object} ct The car type.
+     * @param {Boolean} grounded Whether the model hugs the street.
+     * @param {Number} drop The model's scaled downward extent below its origin.
+     * @return {Number} The cruise altitude (world y).
+     */
+    Cyberspace.prototype.trafficCruiseBand = function(ct, grounded, drop) {
+        if (grounded) {
+            return (drop || 0) + 0.3 + Math.random() * 0.6;
+        }
+        if (ct.jitter) {
+            return 4 + Math.random() * 30;
+        }
+        return Math.max(3, (ct.height || 20) + (Math.random() - 0.5) * 6);
+    };
+
+    /**
      * Build one traffic-car record: place the car within the traffic box, set
      * its velocity and heading for its path (avenue = along Z, cross = along X,
      * diagonal = both), and its vertical/landing parameters. Positioning the
@@ -3252,27 +3290,38 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} The traffic record consumed by updateTraffic().
      */
     Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box, yawOffset, drop) {
+        // Per-model behaviour flags (the asset-viewer checkboxes), each read with
+        // its engine default so an unconfigured model is unchanged.
+        var beh = this.modelBehaviour(ct.model);
+        var grounded = beh.grounded === true;
+        var avoid = beh.avoid !== false;
+        var face = beh.face !== false;
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
-        // Cruise band: the default fleet spreads wide so some cars weave low
-        // over the open streets and some cruise above the rooftops; authored
-        // types use their configured height as the band centre, with a little
-        // jitter so a fleet does not fly in a rigid sheet.
-        var cruiseY = ct.jitter
-            ? (4 + Math.random() * 30)
-            : Math.max(3, (ct.height || 20) + (Math.random() - 0.5) * 6);
-        // Start somewhere in the box, lifted clear of any building beneath it.
+        var cruiseY = this.trafficCruiseBand(ct, grounded, drop || 0);
+        // Start somewhere in the box, lifted clear of any building beneath it
+        // (unless the model is allowed to pass through buildings).
         var x = box.xMin + Math.random() * (box.xMax - box.xMin);
         var z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        car.position.set(x, Math.max(cruiseY, this.trafficClearance(x, z, drop || 0)), z);
+        var floorY = avoid ? this.trafficClearance(x, z, drop || 0) : 0;
+        car.position.set(x, Math.max(cruiseY, floorY), z);
         var dest = this.pickTrafficDest(box, x, z);
         // Face the first destination (plus the per-model yaw offset that turns
-        // the model's length onto its heading).
-        car.rotation.y = Math.atan2(dest.x - x, dest.z - z) + (yawOffset || 0);
+        // the model's length onto its heading); a fixed-facing model keeps only
+        // the offset and never turns to its heading.
+        car.rotation.y = (face ? Math.atan2(dest.x - x, dest.z - z) : 0) + (yawOffset || 0);
+        // Landing: an authored land mode, or forced on by the take-off-and-land
+        // behaviour (a model with no authored mode then lands on the ground).
+        var land = ct.land || 'none';
+        if (beh.takeoffland === true && land === 'none') {
+            land = 'ground';
+        }
         // Landing cars dip toward the ground or a rooftop band and climb back.
         var low = cruiseY;
-        if (ct.land === 'ground') {
-            low = 2;
-        } else if (ct.land === 'rooftop') {
+        if (land === 'ground') {
+            // Touch the road: a grounded model's base already rides at its drop,
+            // so it lands on the drop; a flying model dips to a low street band.
+            low = grounded ? (drop || 0) : 2;
+        } else if (land === 'rooftop') {
             low = 10;
         }
         if (low > cruiseY - 1) {
@@ -3280,8 +3329,8 @@ define('format_mnemo/vr', [], function() {
         }
         return {
             mesh: car, box: box, speed: speed, yawOffset: yawOffset || 0,
-            drop: drop || 0,
-            cruiseY: cruiseY, dest: dest, low: low, land: ct.land || 'none',
+            drop: drop || 0, avoid: avoid, face: face,
+            cruiseY: cruiseY, dest: dest, low: low, land: land,
             bob: Math.random() * 6.28,
             landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
         };
@@ -3357,6 +3406,9 @@ define('format_mnemo/vr', [], function() {
                 dz = t.dest.z - p.z;
                 dist = Math.sqrt(dx * dx + dz * dz);
             }
+            // Whether this car treats buildings as solid (the default) or is
+            // allowed to pass through them.
+            var avoid = t.avoid !== false;
             var vx = 0;
             var vz = 0;
             if (dist > 1e-3) {
@@ -3364,30 +3416,38 @@ define('format_mnemo/vr', [], function() {
                 vz = dz / dist * t.speed;
                 p.x += vx * dt;
                 p.z += vz * dt;
-                t.mesh.rotation.y = Math.atan2(vx, vz) + t.yawOffset;
+                // A fixed-facing model keeps its facing; others turn to heading.
+                if (t.face !== false) {
+                    t.mesh.rotation.y = Math.atan2(vx, vz) + t.yawOffset;
+                }
             }
             // Altitude: the cruise band (a gentle bob, or a landing dip that is
-            // never allowed to sink into a building), then raised to clear any
-            // building under the car or just ahead of it.
+            // never allowed to sink into a building it must avoid), then raised
+            // to clear any building under the car or just ahead of it.
             var baseY;
             if (t.land === 'none') {
                 baseY = t.cruiseY + Math.sin(this.time * 0.8 + t.bob) * 0.4;
             } else {
                 var cyclePos = ((this.time + t.landPhase * t.landPeriod) / t.landPeriod) % 1;
-                var lowTarget = Math.max(t.low, this.trafficClearance(p.x, p.z, t.drop));
+                var lowTarget = avoid
+                    ? Math.max(t.low, this.trafficClearance(p.x, p.z, t.drop))
+                    : t.low;
                 baseY = this.trafficLandingY(cyclePos, t.cruiseY, lowTarget);
             }
-            var need = Math.max(
+            var need = avoid ? Math.max(
                 this.trafficClearance(p.x, p.z, t.drop),
                 this.trafficClearance(p.x + vx * lookahead, p.z + vz * lookahead, t.drop)
-            );
+            ) : 0;
             var targetY = Math.max(baseY, need);
             // Ease toward the target for a smooth climb, then hard-floor the car
-            // above the building it is over so it can never be inside one.
+            // above the building it is over so it can never be inside one (a
+            // pass-through model skips that floor).
             p.y += (targetY - p.y) * Math.min(1, dt * 3);
-            var floor = this.trafficClearance(p.x, p.z, t.drop);
-            if (p.y < floor) {
-                p.y = floor;
+            if (avoid) {
+                var floor = this.trafficClearance(p.x, p.z, t.drop);
+                if (p.y < floor) {
+                    p.y = floor;
+                }
             }
         }
     };

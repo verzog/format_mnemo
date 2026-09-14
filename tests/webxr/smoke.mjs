@@ -1379,9 +1379,12 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const box = {xMin: -50, xMax: 50, zMin: -50, zMax: 50, avHalfX: 20};
             const mk = (footprints) => ({
-                THREE, footprints,
+                THREE, footprints, config: {},
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
             });
             const car = new THREE.Group();
@@ -1478,6 +1481,120 @@ const scenarios = [
         }
     },
     {
+        name: 'model: modelBehaviour reads the stored flag map or defaults to empty',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelconfig: {tank: {behaviour: {grounded: true}}}},
+                modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour};
+            const set = self.modelBehaviour('tank');
+            const none = self.modelBehaviour('other');
+            return {pass: set.grounded === true && Object.keys(none).length === 0,
+                detail: `set=${JSON.stringify(set)} none=${JSON.stringify(none)}`};
+        }
+    },
+    {
+        name: 'behaviour: a grounded model cruises at street level, not in the flying band',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -50, zMax: 50, avHalfX: 20};
+            const self = {
+                THREE, footprints: [],
+                config: {modelconfig: {rover: {behaviour: {grounded: true}}}},
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
+                makeTrafficCar: CS.prototype.makeTrafficCar
+            };
+            // A configured height of 40 would fly high; grounded overrides it to
+            // a low street band. A model with no downward extent rides just above
+            // the road.
+            const flat = self.makeTrafficCar(new THREE.Group(),
+                {model: 'rover', speed: 12, height: 40, land: 'none'}, 1, box, 0, 0);
+            // A model whose body reaches 3 below its origin lifts the origin by
+            // that drop, so its base still rests on the street (not sunk in it).
+            const deep = self.makeTrafficCar(new THREE.Group(),
+                {model: 'rover', speed: 12, height: 40, land: 'none'}, 1, box, 0, 3);
+            const flatLow = flat.cruiseY <= 2;
+            const dropAware = deep.cruiseY >= 3 && deep.cruiseY <= 5;
+            const baseAboveRoad = (deep.cruiseY - 3) >= 0 && (deep.cruiseY - 3) <= 2;
+            return {pass: flatLow && dropAware && baseAboveRoad,
+                detail: `flat=${flat.cruiseY.toFixed(2)} deep=${deep.cruiseY.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'behaviour: take-off-and-land forces a landing cycle on a non-landing type',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -50, zMax: 50, avHalfX: 20};
+            const self = {
+                THREE, footprints: [],
+                config: {modelconfig: {dropship: {behaviour: {takeoffland: true}}}},
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
+                makeTrafficCar: CS.prototype.makeTrafficCar
+            };
+            const car = new THREE.Group();
+            const rec = self.makeTrafficCar(car, {model: 'dropship', speed: 12, height: 20, land: 'none'}, 1, box, 0);
+            return {pass: rec.land === 'ground', detail: `land=${rec.land}`};
+        }
+    },
+    {
+        name: 'behaviour: a fixed-facing car keeps its facing instead of turning to its heading',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const car = new THREE.Group();
+            car.position.set(0, 10, 0);
+            car.rotation.y = 1.23;
+            const box = {xMin: -100, xMax: 100, zMin: -100, zMax: 100};
+            const self = {
+                time: 0, footprints: [],
+                traffic: [{mesh: car, box, speed: 10, yawOffset: 0, cruiseY: 10,
+                    dest: {x: 0, z: -50}, low: 9, land: 'none', bob: 0, landPhase: 0,
+                    landPeriod: 20, face: false, avoid: true}],
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficLandingY: CS.prototype.trafficLandingY,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(1);
+            // It still moves toward the destination, but never rotates.
+            const moved = car.position.z < -5;
+            return {pass: moved && Math.abs(car.rotation.y - 1.23) < 1e-6,
+                detail: `z=${car.position.z.toFixed(1)} yaw=${car.rotation.y.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'behaviour: a pass-through car ignores building clearance',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const car = new THREE.Group();
+            car.position.set(0, 5, 0); // Low, directly over a tall building.
+            const box = {xMin: -100, xMax: 100, zMin: -100, zMax: 100};
+            const self = {
+                time: 0, footprints: [{xMin: -10, xMax: 10, zMin: -10, zMax: 10, top: 30}],
+                traffic: [{mesh: car, box, speed: 5, yawOffset: 0, cruiseY: 5,
+                    dest: {x: 0, z: -30}, low: 4, land: 'none', bob: 0, landPhase: 0,
+                    landPeriod: 20, avoid: false, face: true}],
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficLandingY: CS.prototype.trafficLandingY,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(0.1);
+            // With avoidance off it stays near its cruise band, not lifted to 30.
+            return {pass: car.position.y < 15, detail: `y=${car.position.y.toFixed(1)} (roof 30 ignored)`};
+        }
+    },
+    {
         name: 'traffic: updateTraffic steers toward the destination, adding the yaw offset',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
@@ -1567,9 +1684,11 @@ const scenarios = [
                 setShadow: CS.prototype.setShadow,
                 modelCfg: CS.prototype.modelCfg,
                 modelScale: CS.prototype.modelScale,
+                modelBehaviour: CS.prototype.modelBehaviour,
                 trafficModelYaw: CS.prototype.trafficModelYaw,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });

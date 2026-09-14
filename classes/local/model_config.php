@@ -35,6 +35,20 @@ class model_config {
     const ENVIRONMENTS = ['cyberspace', 'grid', 'void'];
 
     /**
+     * The known behaviour flags (the asset-viewer checkboxes) and the engine
+     * default each one carries when unset. Only a flag that differs from its
+     * default is stored, so an unconfigured model keeps the original behaviour.
+     *
+     * @var array<string, bool>
+     */
+    const BEHAVIOUR_DEFAULTS = [
+        'grounded' => false,
+        'takeoffland' => false,
+        'avoid' => true,
+        'face' => true,
+    ];
+
+    /**
      * Every stored model config, keyed by model name, each already normalised.
      *
      * @return array<string, array> Map of model name => normalised config.
@@ -101,7 +115,8 @@ class model_config {
     public static function for_client(): array {
         $out = [];
         foreach (self::all() as $name => $cfg) {
-            $out[$name] = ['envs' => $cfg['envs'], 'yaw' => $cfg['yaw'], 'scale' => $cfg['scale']];
+            $out[$name] = ['envs' => $cfg['envs'], 'yaw' => $cfg['yaw'],
+                'scale' => $cfg['scale'], 'behaviour' => $cfg['behaviour']];
         }
         return $out;
     }
@@ -151,19 +166,20 @@ class model_config {
         if (isset($cfg['scale']) && is_numeric($cfg['scale']) && is_finite((float)$cfg['scale'])) {
             $scale = max(0.1, min(10.0, (float)$cfg['scale']));
         }
-        // Behaviour flags (reserved for the per-model behaviour panel): a flat
-        // map of boolean/scalar toggles, string keys only, kept as-is after a
-        // shallow scalar check so a future flag needs no change here.
+        // Behaviour flags (the asset-viewer checkboxes): a fixed set of booleans.
+        // Only a known flag is kept (an unknown key is dropped), each is cast to
+        // a real bool (so a non-finite value can never make json_encode() fail
+        // and wipe the blob), and a flag left at its engine default is dropped so
+        // the stored map only ever carries genuine deviations.
         $behaviour = [];
         if (!empty($cfg['behaviour']) && is_array($cfg['behaviour'])) {
-            foreach ($cfg['behaviour'] as $key => $value) {
-                // Reject a non-finite float (INF/NAN): it passes is_scalar() but
-                // makes json_encode() of the whole blob fail, wiping every entry.
-                if (is_float($value) && !is_finite($value)) {
+            foreach (self::BEHAVIOUR_DEFAULTS as $flag => $default) {
+                if (!array_key_exists($flag, $cfg['behaviour'])) {
                     continue;
                 }
-                if (is_string($key) && (is_scalar($value) || $value === null)) {
-                    $behaviour[$key] = $value;
+                $value = (bool)$cfg['behaviour'][$flag];
+                if ($value !== $default) {
+                    $behaviour[$flag] = $value;
                 }
             }
         }
