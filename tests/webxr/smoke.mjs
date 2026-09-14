@@ -1815,6 +1815,49 @@ const scenarios = [
         }
     },
     {
+        name: 'cameranav: errorReason separates permission denial from an unavailable device',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            const denied = nav.errorReason({name: 'NotAllowedError'});
+            const sec = nav.errorReason({name: 'SecurityError'});
+            const gone = nav.errorReason({name: 'NotFoundError'});
+            const busy = nav.errorReason({name: 'NotReadableError'});
+            const pass = denied === 'denied' && sec === 'denied' &&
+                gone === 'unavailable' && busy === 'unavailable';
+            return {pass, detail: `${denied},${sec},${gone},${busy}`};
+        }
+    },
+    {
+        name: 'cameranav: sample clears the intent when no camera frame is available',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null); // No video -> the feed has stalled.
+            nav.intent = {turn: 1, move: 1};
+            nav.energy = {left: 0.5, right: 0, fwd: 0.5, back: 0};
+            nav.sample();
+            const pass = nav.intent.turn === 0 && nav.intent.move === 0 &&
+                nav.energy.left === 0 && nav.energy.fwd === 0;
+            return {pass, detail: `intent=${nav.intent.turn},${nav.intent.move}`};
+        }
+    },
+    {
+        name: 'cameranav: sample holds the intent on a duplicate video frame',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            // A ready video whose currentTime has not advanced since last sample.
+            nav.video = {readyState: 2, videoWidth: 4, currentTime: 5};
+            nav.ctx = {}; // Not touched before the frame gate returns.
+            nav.lastTime = 5;
+            nav.intent = {turn: 0.7, move: -0.3};
+            nav.sample();
+            const pass = Math.abs(nav.intent.turn - 0.7) < 1e-9 &&
+                Math.abs(nav.intent.move + 0.3) < 1e-9;
+            return {pass, detail: `intent=${nav.intent.turn},${nav.intent.move}`};
+        }
+    },
+    {
         name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

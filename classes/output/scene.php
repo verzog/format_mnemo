@@ -738,6 +738,7 @@ class scene implements renderable, templatable {
                 'cameranav_hint' => get_string('cameranav_hint', 'format_mnemo'),
                 'cameranav_denied' => get_string('cameranav_denied', 'format_mnemo'),
                 'cameranav_insecure' => get_string('cameranav_insecure', 'format_mnemo'),
+                'cameranav_unavailable' => get_string('cameranav_unavailable', 'format_mnemo'),
                 'edit' => get_string('editlayout', 'format_mnemo'),
                 'editdone' => get_string('editdone', 'format_mnemo'),
                 'editbrightness' => get_string('editbrightness', 'format_mnemo'),

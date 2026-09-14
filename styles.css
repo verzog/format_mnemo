@@ -234,6 +234,12 @@
     font-family: "Courier New", monospace;
 }
 
+/* The video + zone guides share this box so the guides line up with the
+   analysed frame, not the status row below. */
+.format-mnemo__cam-media {
+    position: relative;
+}
+
 .format-mnemo__cam-video {
     display: block;
     width: 100%;
@@ -276,7 +282,9 @@
     background: rgba(2, 6, 15, 0.8);
 }
 
-.format-mnemo__cam-status::before {
+/* The camera-live dot shows only while a stream is actually live, so an error
+   message (shown with the preview but without the live class) has no dot. */
+.format-mnemo__cam-preview--live .format-mnemo__cam-status::before {
     content: "\25CF"; /* Filled dot = camera live. */
     margin-right: 4px;
     color: #ff5470;

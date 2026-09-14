@@ -33,6 +33,7 @@ $string['cameranav'] = 'Camera navigation';
 $string['cameranav_denied'] = 'Camera access was blocked. Allow the camera in your browser to use gesture navigation.';
 $string['cameranav_hint'] = 'Move a hand: left or right to steer, low in the centre to go forward, raise it to reverse.';
 $string['cameranav_insecure'] = 'Camera navigation needs a secure (HTTPS) connection and a camera.';
+$string['cameranav_unavailable'] = 'No usable camera was found. Check it is connected and not in use by another app.';
 $string['comfort'] = 'Comfort & controls';
 $string['comfortangle'] = 'Snap angle';
 $string['comfortfast'] = 'Fast';

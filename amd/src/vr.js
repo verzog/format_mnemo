@@ -4933,6 +4933,10 @@ define('format_mnemo/vr', [], function() {
                         // list view hides; close it so its iframe stops running
                         // (and does not reappear when 3D view is restored).
                         self.closeActivityOverlay();
+                        // The 3D view (and its camera-nav controls) is now
+                        // hidden, so release the webcam rather than keep
+                        // capturing where the learner cannot reach the toggle.
+                        self.stopCameraNav();
                     }
                 });
             }
@@ -4940,8 +4944,19 @@ define('format_mnemo/vr', [], function() {
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 self.pauseVideos();
+                self.stopCameraNav();
             }
         });
+    };
+
+    /**
+     * Stop camera-gesture navigation and release the webcam, if it is running.
+     * Safe to call when the control was never built or is already off.
+     */
+    Cyberspace.prototype.stopCameraNav = function() {
+        if (this.cameraNav && this.cameraNav.active) {
+            this.cameraNav.stop();
+        }
     };
 
     /**
@@ -9907,6 +9922,10 @@ define('format_mnemo/vr', [], function() {
         this.intent = {turn: 0, move: 0};
         this.active = false;
         this.stream = null;
+        this.starting = false; // A getUserMedia request is in flight.
+        this.reqId = 0; // Bumped per start()/stop() so stale resolutions drop.
+        this.lastTime = -1; // Last processed video currentTime (frame gate).
+        this.onchange = null; // Optional callback(active) for the HUD to sync.
         // Tunables: a deadzone that ignores frame noise, a gain that maps motion
         // energy to a full-scale axis, an EMA smoothing factor that gives the
         // control momentum (intermittent motion sustains movement, a stop coasts),
@@ -10022,13 +10041,37 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Sample the webcam once: diff this frame against the last, ease the per-zone
-     * energies toward the new motion (the smoothing that gives momentum), and
-     * recompute the steering/move intent. A no-op until two frames exist.
+     * Zero the smoothed motion and the current intent, so a stalled camera can
+     * never leave the rig steering or gliding on stale input.
+     */
+    CameraNav.prototype.clearIntent = function() {
+        this.energy = {left: 0, right: 0, fwd: 0, back: 0};
+        this.intent = {turn: 0, move: 0};
+    };
+
+    /**
+     * Sample the webcam once and update the steering/move intent. Runs only on a
+     * genuinely new camera frame: when the render rate exceeds the webcam frame
+     * rate the duplicate frames are skipped (so sensitivity does not vary with
+     * monitor refresh rate and the smoothing does not decay between real frames),
+     * and if the feed stalls (track muted/suspended or no ready frame) the intent
+     * is cleared so motion stops rather than continuing on the last input.
      */
     CameraNav.prototype.sample = function() {
+        var v = this.video;
+        if (!v || !this.ctx || v.readyState < 2 || !v.videoWidth) {
+            this.clearIntent();
+            return;
+        }
+        // Only a fresh camera frame advances currentTime; hold the intent between
+        // frames rather than treating a duplicate as zero motion.
+        if (v.currentTime === this.lastTime) {
+            return;
+        }
+        this.lastTime = v.currentTime;
         var cur = this.capture();
         if (!cur) {
+            this.clearIntent();
             return;
         }
         if (this.prev) {
@@ -10062,7 +10105,8 @@ define('format_mnemo/vr', [], function() {
      * with audio off; on success shows the preview, on failure reports why
      * (permission denied, or no secure/camera support) without throwing.
      *
-     * @param {Function} [onError] Called with a reason key ('denied'|'insecure').
+     * @param {Function} [onError] Called with a reason key
+     *     ('denied'|'unavailable'|'insecure').
      * @param {Function} [onReady] Called once the stream is live.
      */
     CameraNav.prototype.start = function(onError, onReady) {
@@ -10074,27 +10118,65 @@ define('format_mnemo/vr', [], function() {
             }
             return;
         }
+        if (this.starting) {
+            return; // A request is already in flight; ignore the extra click.
+        }
+        this.starting = true;
+        // Tag this request so a resolution that arrives after a stop() or another
+        // start() (its generation superseded) is dropped and its stream closed,
+        // rather than activating the camera late or leaking a track.
+        var gen = ++this.reqId;
         md.getUserMedia({video: {facingMode: 'user', width: 320, height: 240}, audio: false})
             .then(function(stream) {
+                if (gen !== self.reqId) {
+                    stream.getTracks().forEach(function(t) {
+                        t.stop();
+                    });
+                    return null;
+                }
+                self.starting = false;
                 self.stream = stream;
                 if (self.video) {
                     self.video.srcObject = stream;
                     self.playPreview();
                 }
                 self.prev = null;
-                self.energy = {left: 0, right: 0, fwd: 0, back: 0};
-                self.intent = {turn: 0, move: 0};
+                self.lastTime = -1;
+                self.clearIntent();
                 self.active = true;
                 if (onReady) {
                     onReady();
                 }
+                if (self.onchange) {
+                    self.onchange(true);
+                }
                 return null;
             })
-            .catch(function() {
+            .catch(function(err) {
+                if (gen !== self.reqId) {
+                    return;
+                }
+                self.starting = false;
                 if (onError) {
-                    onError('denied');
+                    onError(self.errorReason(err));
                 }
             });
+    };
+
+    /**
+     * Classify a getUserMedia rejection: a denied permission (which the learner
+     * can fix by allowing the camera) versus an unavailable device (no camera, in
+     * use, or unsatisfiable constraints - allowing permission cannot fix it).
+     *
+     * @param {Object} err The rejection error.
+     * @return {String} 'denied' or 'unavailable'.
+     */
+    CameraNav.prototype.errorReason = function(err) {
+        var name = err && err.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+            return 'denied';
+        }
+        return 'unavailable';
     };
 
     /**
@@ -10119,6 +10201,10 @@ define('format_mnemo/vr', [], function() {
      * preview source, and zero the movement the rig was carrying.
      */
     CameraNav.prototype.stop = function() {
+        // Supersede any in-flight getUserMedia so a late resolution closes its
+        // own stream instead of reactivating the camera.
+        this.reqId++;
+        this.starting = false;
         if (this.stream) {
             this.stream.getTracks().forEach(function(t) {
                 t.stop();
@@ -10130,10 +10216,14 @@ define('format_mnemo/vr', [], function() {
         }
         this.active = false;
         this.prev = null;
-        this.intent = {turn: 0, move: 0};
+        this.lastTime = -1;
+        this.clearIntent();
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
+        }
+        if (this.onchange) {
+            this.onchange(false);
         }
     };
 
@@ -10155,11 +10245,15 @@ define('format_mnemo/vr', [], function() {
         button.setAttribute('aria-pressed', 'false');
         this.root.appendChild(button);
 
-        // Mirrored preview with the four control zones drawn over the live feed,
-        // a "camera on" dot, and a one-line hint or error. Hidden until on.
+        // Mirrored preview: the video and the four control-zone guides share a
+        // media box (so the drawn zones line up with the analysed frame, not the
+        // status row below it); a "camera on" dot and a one-line hint or error
+        // sit under it. Hidden until on.
         var preview = document.createElement('div');
         preview.className = 'format-mnemo__cam-preview';
         preview.hidden = true;
+        var media = document.createElement('div');
+        media.className = 'format-mnemo__cam-media';
         var video = document.createElement('video');
         video.className = 'format-mnemo__cam-video';
         video.muted = true;
@@ -10171,8 +10265,9 @@ define('format_mnemo/vr', [], function() {
         var status = document.createElement('div');
         status.className = 'format-mnemo__cam-status';
         status.setAttribute('role', 'status');
-        preview.appendChild(video);
-        preview.appendChild(zones);
+        media.appendChild(video);
+        media.appendChild(zones);
+        preview.appendChild(media);
         preview.appendChild(status);
         this.root.appendChild(preview);
 
@@ -10183,26 +10278,35 @@ define('format_mnemo/vr', [], function() {
         analysis.height = 36;
         this.cameraNav = new CameraNav(this, {video: video, canvas: analysis});
 
+        // Reflect the driver's live state in the button and preview, including
+        // when the camera is released from elsewhere (list view, tab hidden, XR).
+        // The "live" class gates the camera-on indicator, so an error message
+        // never shows the dot.
         var setOn = function(on) {
             button.setAttribute('aria-pressed', on ? 'true' : 'false');
             button.classList.toggle('format-mnemo__cam-btn--on', on);
+            preview.classList.toggle('format-mnemo__cam-preview--live', on);
             preview.hidden = !on;
         };
+        this.cameraNav.onchange = setOn;
 
         button.addEventListener('click', function() {
-            if (self.cameraNav.active) {
+            if (self.cameraNav.active || self.cameraNav.starting) {
                 self.cameraNav.stop();
-                setOn(false);
                 return;
             }
             status.textContent = s.cameranav_hint || '';
             self.cameraNav.start(function(reason) {
-                setOn(false);
-                status.textContent = reason === 'insecure'
-                    ? (s.cameranav_insecure || '') : (s.cameranav_denied || '');
-                preview.hidden = false; // Keep the message visible briefly.
+                // Failed to open: show why, without the live indicator.
+                var msg = s.cameranav_denied || '';
+                if (reason === 'insecure') {
+                    msg = s.cameranav_insecure || '';
+                } else if (reason === 'unavailable') {
+                    msg = s.cameranav_unavailable || '';
+                }
+                status.textContent = msg;
+                preview.hidden = false;
             }, function() {
-                setOn(true);
                 status.textContent = s.cameranav_hint || '';
             });
         });
@@ -10210,10 +10314,7 @@ define('format_mnemo/vr', [], function() {
         // Entering a headset takes over navigation, so release the webcam.
         if (this.renderer && this.renderer.xr && this.renderer.xr.addEventListener) {
             this.renderer.xr.addEventListener('sessionstart', function() {
-                if (self.cameraNav.active) {
-                    self.cameraNav.stop();
-                    setOn(false);
-                }
+                self.cameraNav.stop();
             });
         }
     };
