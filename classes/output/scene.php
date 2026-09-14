@@ -749,6 +749,7 @@ class scene implements renderable, templatable {
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
                 'cameranav' => get_string('cameranav', 'format_mnemo'),
                 'cameranav_hint' => get_string('cameranav_hint', 'format_mnemo'),
+                'cameranav_hint_pose' => get_string('cameranav_hint_pose', 'format_mnemo'),
                 'cameranav_denied' => get_string('cameranav_denied', 'format_mnemo'),
                 'cameranav_insecure' => get_string('cameranav_insecure', 'format_mnemo'),
                 'cameranav_unavailable' => get_string('cameranav_unavailable', 'format_mnemo'),

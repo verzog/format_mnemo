@@ -9926,6 +9926,7 @@ define('format_mnemo/vr', [], function() {
         this.reqId = 0; // Bumped per start()/stop() so stale resolutions drop.
         this.lastTime = -1; // Last processed video currentTime (frame gate).
         this.onchange = null; // Optional callback(active) for the HUD to sync.
+        this.onpose = null; // Optional callback fired once pose detection loads.
         // Optional MediaPipe hand-pose upgrade: when it loads, sample() reads
         // hand gestures instead of frame motion; until then (or if it fails to
         // load) the motion path above is the fallback.
@@ -10181,9 +10182,15 @@ define('format_mnemo/vr', [], function() {
                 numHands: 1
             });
         }).then(function(landmarker) {
+            // The load finished; clear the guard either way so a later start()
+            // can retry if this result is discarded.
+            self.poseLoading = false;
             // A stop() (or entering XR) between request and resolution: discard.
             if (self.active) {
                 self.pose = new HandPose(landmarker);
+                if (self.onpose) {
+                    self.onpose();
+                }
             } else if (landmarker.close) {
                 landmarker.close();
             }
@@ -10533,12 +10540,23 @@ define('format_mnemo/vr', [], function() {
         };
         this.cameraNav.onchange = setOn;
 
+        // Show the instructions for the active detector, and mark the preview so
+        // its motion zone guides hide in pose mode (where steering is by hand
+        // position, not the zones, and there is no reverse gesture).
+        var showHint = function() {
+            var pose = !!self.cameraNav.pose;
+            status.textContent = (pose ? s.cameranav_hint_pose : s.cameranav_hint) || '';
+            preview.classList.toggle('format-mnemo__cam-preview--pose', pose);
+        };
+        // When pose detection finishes loading mid-session, swap the guidance.
+        this.cameraNav.onpose = showHint;
+
         button.addEventListener('click', function() {
             if (self.cameraNav.active || self.cameraNav.starting) {
                 self.cameraNav.stop();
                 return;
             }
-            status.textContent = s.cameranav_hint || '';
+            showHint();
             self.cameraNav.start(function(reason) {
                 // Failed to open: show why, without the live indicator.
                 var msg = s.cameranav_denied || '';
@@ -10549,9 +10567,7 @@ define('format_mnemo/vr', [], function() {
                 }
                 status.textContent = msg;
                 preview.hidden = false;
-            }, function() {
-                status.textContent = s.cameranav_hint || '';
-            });
+            }, showHint);
         });
 
         // Entering a headset takes over navigation, so release the webcam.
