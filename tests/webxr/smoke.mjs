@@ -1829,6 +1829,21 @@ const scenarios = [
         }
     },
     {
+        name: 'cameranav: energy blend rises fast and falls slow (responsive + coasts)',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            const rise = nav.blend(0, 1, 0.033); // Attack: toward a higher target.
+            const fall = nav.blend(1, 0, 0.033); // Release: toward a lower target.
+            const riseStep = rise - 0; // Ground covered upward this frame.
+            const fallStep = 1 - fall; // Ground covered downward this frame.
+            // A long gap is clamped so it cannot jump the value.
+            const clamped = nav.blend(0, 1, 100);
+            const pass = riseStep > fallStep && rise > 0.2 && fall > 0.8 && clamped < 1;
+            return {pass, detail: `rise=${rise.toFixed(2)} fall=${fall.toFixed(2)} clamped=${clamped.toFixed(2)}`};
+        }
+    },
+    {
         name: 'cameranav: sample clears the intent when no camera frame is available',
         fn: () => {
             const CN = window.__mnemoModule._CameraNav;
