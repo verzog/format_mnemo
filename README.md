@@ -365,11 +365,30 @@ read-only and needs site-configuration access.
 
 Models load through Three's `GLTFLoader` with the bundled Draco, meshopt and
 KTX2/Basis decoders, so packs can be **compressed** to a fraction of their raw
-size. A quick recipe with [glTF-Transform](https://gltf-transform.dev):
+size.
+
+**Batch script.** The repo ships a helper that compresses a whole folder of
+`.glb` files at once:
 
 ```
-# Draco geometry + resized/compressed textures (biggest win):
-npx @gltf-transform/cli optimize in.glb av.glb --compress draco
+tools/compress-assets.sh ~/Downloads/my-pack ./compressed
+```
+
+It runs each model through [glTF-Transform](https://gltf-transform.dev)'s
+`optimize` — **Draco geometry + WebP textures, capped at 2048px** — and prints
+the size saved per file. WebP (not KTX2) is used on purpose: it is a standard
+browser image format that loads with no transcoder, so it avoids the most common
+reason a heavy Sketchfab export shows as a **blank card in the asset viewer**
+(a KTX2/Basis texture the browser's transcoder rejects). Tunables (texture size,
+geometry method, mesh simplification) are environment variables documented at the
+top of the script. It needs Node.js; glTF-Transform is fetched on demand.
+
+Or run it by hand for one model:
+
+```
+# Draco geometry + resized WebP textures (biggest safe win):
+npx @gltf-transform/cli optimize in.glb av.glb \
+    --compress draco --texture-compress webp --texture-size 2048
 
 # or meshopt geometry:
 npx @gltf-transform/cli meshopt in.glb av.glb
@@ -382,11 +401,11 @@ Aim for well under ~50k triangles per prop for headset performance. Uncompressed
 
 By default the scene loads its bundled Three.js with a dynamic ES-module
 `import()` from the **plugin's own (same) origin**, so a typical `script-src
-'self'` CSP already allows it — no external origin to allow-list. The compressed
-asset loaders are wired up with an **import map** (an inline
-`<script type="importmap">`); if your site enforces a strict CSP that blocks
-inline scripts, allow it (a nonce or `'unsafe-inline'` for `script-src`) so the
-Draco/KTX2/meshopt decoders can load. The Draco and KTX2 decoders also run in
+'self'` CSP already allows it — no external origin to allow-list. The compressed-asset
+loaders (`GLTFLoader` and the Draco/KTX2/meshopt decoders) are pulled in with a
+dynamic ES-module `import()` from the **plugin's own (same) origin**, so a
+typical `script-src 'self'` CSP already covers them — no inline script or import
+map to allow-list. The Draco and KTX2 decoders do run in
 **Web Workers created from `blob:` URLs**, so a strict CSP must additionally
 allow `worker-src blob:` (or `child-src blob:` where `worker-src` is
 unsupported) — with only `worker-src 'self'`, the import map loads but every
