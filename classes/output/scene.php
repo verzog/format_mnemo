@@ -605,10 +605,18 @@ class scene implements renderable, templatable {
 
         // Default to the Three.js copy bundled with the plugin; an admin can
         // override the URL (e.g. a CDN or a shared local copy) in settings.
-        $threeurl = get_config('format_mnemo', 'threeurl');
-        if (empty($threeurl)) {
-            $threeurl = (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
-        }
+        // The bundled glTF addon stack (GLTFLoader + Draco/KTX2/meshopt) imports
+        // the bundled Three.js and is version-matched to it, so it is only
+        // offered when no override is set - otherwise the scene would run two
+        // Three.js instances. With an override, compressed models fall back to
+        // the built-in uncompressed-glTF parser.
+        $customthree = !empty(get_config('format_mnemo', 'threeurl'));
+        $threeurl = $customthree
+            ? get_config('format_mnemo', 'threeurl')
+            : (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
+        $addonsbaseurl = $customthree
+            ? ''
+            : (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false);
 
         return [
             'courseid' => (int)$course->id,
@@ -639,9 +647,9 @@ class scene implements renderable, templatable {
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
-            // Draco/KTX2/meshopt decoders), used by the client's import map so
-            // compressed glTF asset packs load.
-            'addonsbaseurl' => (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false),
+            // Draco/KTX2/meshopt decoders) so compressed glTF asset packs load.
+            // Empty when a custom threeurl is set (see above).
+            'addonsbaseurl' => $addonsbaseurl,
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),

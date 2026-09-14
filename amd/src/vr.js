@@ -9391,45 +9391,18 @@ define('format_mnemo/vr', [], function() {
             window.addEventListener('format_mnemo:three-ready', onReady, {once: true});
             window.addEventListener('format_mnemo:three-error', onError, {once: true});
 
-            // Import map so the addon glTF loaders resolve the bare 'three'
-            // specifier to the same module the client uses, and 'three/addons/'
-            // to the bundled example modules. Must precede the loader script.
-            // Only skipped when a page already maps 'three' itself (so we do not
-            // fight an existing three provider); an unrelated import map does not
-            // stop us — modern browsers apply multiple maps, and if not, the
-            // client falls back to its built-in glTF parser.
-            var mapsThree = false;
-            var existingmaps = document.querySelectorAll('script[type="importmap"]');
-            for (var mi = 0; mi < existingmaps.length; mi++) {
-                try {
-                    var parsed = JSON.parse(existingmaps[mi].textContent || '{}');
-                    if (parsed.imports && parsed.imports.three) {
-                        mapsThree = true;
-                    }
-                } catch (e) {
-                    // Ignore an unparseable import map.
-                }
-            }
-            if (config.addonsbaseurl && !mapsThree) {
-                try {
-                    var importmap = document.createElement('script');
-                    importmap.type = 'importmap';
-                    importmap.textContent = JSON.stringify({
-                        imports: {
-                            'three': config.threeurl,
-                            'three/addons/': config.addonsbaseurl
-                        }
-                    });
-                    document.head.appendChild(importmap);
-                } catch (e) {
-                    // Import map unsupported/blocked; the built-in parser is used.
-                }
-            }
-
+            // No import map: the loader imports three from the explicit `src`
+            // URL and the addon glTF stack from the explicit `addons` base URL,
+            // and the vendored addon modules import three by a relative path to
+            // that same bundled copy. This avoids injecting an import map, which
+            // a Moodle page already carrying one would reject ("Multiple import
+            // maps are not allowed") - previously that dropped compressed
+            // (Draco/meshopt/KTX2) models to the uncompressed-only parser.
             var separator = config.loaderurl.indexOf('?') >= 0 ? '&' : '?';
             var script = document.createElement('script');
             script.type = 'module';
-            script.src = config.loaderurl + separator + 'src=' + encodeURIComponent(config.threeurl);
+            script.src = config.loaderurl + separator + 'src=' + encodeURIComponent(config.threeurl) +
+                '&addons=' + encodeURIComponent(config.addonsbaseurl || '');
             script.onerror = function() {
                 if (!settled) {
                     settled = true;

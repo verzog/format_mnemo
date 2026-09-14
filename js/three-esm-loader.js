@@ -27,33 +27,40 @@
 //
 // Three itself is imported from the explicit `src` URL, so it always loads.
 // The optional glTF loader stack (GLTFLoader + Draco/KTX2/meshopt decoders) is
-// imported through the `three/addons/` bare specifier, resolved by an import
-// map that amd/src/vr.js injects; the addons' own `import ... from 'three'`
-// resolves through the same map to the same three instance. If the import map
-// is absent (e.g. a strict CSP that blocks it) or the addons fail to load, the
-// event still carries three alone and the client falls back to its built-in
-// glTF parser.
+// imported from the explicit `addons` base URL (the plugin's thirdparty/jsm/).
+// The addon modules are vendored to import three by a relative path to the same
+// bundled three.module.min.js, so NO page-level import map is needed - this
+// avoids the "Multiple import maps are not allowed" failure on Moodle pages
+// that already carry one, which used to drop compressed (Draco/meshopt/KTX2)
+// models to the built-in uncompressed-only parser. If the addons still fail to
+// load, the event carries three alone and the client falls back to that parser.
 //
 // @package    format_mnemo
 // @copyright  2026 Vernon Spain
 // @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
 //
 
-const src = new URL(import.meta.url).searchParams.get('src');
+const params = new URL(import.meta.url).searchParams;
+const src = params.get('src');
+const addonsBase = params.get('addons');
 
 /**
- * Try to load the addon glTF loader stack. Resolves to an object of the addon
- * classes, or an empty object if they are unavailable.
+ * Try to load the addon glTF loader stack from the explicit addons base URL
+ * (no import map needed). Resolves to an object of the addon classes, or an
+ * empty object if they are unavailable.
  *
  * @returns {Promise<Object>}
  */
 async function loadAddons() {
+    if (!addonsBase) {
+        return {};
+    }
     try {
         const [gltf, draco, ktx2, meshopt] = await Promise.all([
-            import('three/addons/loaders/GLTFLoader.js'),
-            import('three/addons/loaders/DRACOLoader.js'),
-            import('three/addons/loaders/KTX2Loader.js'),
-            import('three/addons/libs/meshopt_decoder.module.js'),
+            import(addonsBase + 'loaders/GLTFLoader.js'),
+            import(addonsBase + 'loaders/DRACOLoader.js'),
+            import(addonsBase + 'loaders/KTX2Loader.js'),
+            import(addonsBase + 'libs/meshopt_decoder.module.js'),
         ]);
         return {
             GLTFLoader: gltf.GLTFLoader,
