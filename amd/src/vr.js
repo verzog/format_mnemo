@@ -263,6 +263,12 @@ define('format_mnemo/vr', [], function() {
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
         this.flyThreshold = 1.2; // Rig height above which movement is free-flight.
         this.captureMargin = 3; // Only clamp to a road within this distance.
+        // On-foot physics for learners (editing teachers keep free flight): a
+        // simple jump/gravity so desktop movement is grounded, not a fly-around.
+        this.velocityY = 0; // Current vertical speed (units/s).
+        this.onGround = true; // Whether the rig is resting on the ground.
+        this.jumpSpeed = 7; // Upward launch speed of a jump (units/s).
+        this.gravity = 22; // Downward acceleration (units/s^2).
         this.postfx = null; // On-screen bloom pipeline (built after the scene).
         this.sun = null; // Shadow-casting sun (non-void), followed to the learner.
         this.sunDir = null; // Sun direction unit vector.
@@ -8546,15 +8552,32 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Desktop locomotion: WASD to fly, R/F for vertical, arrow keys too.
+     * Desktop locomotion. Editing teachers (config.canedit) fly freely - WASD
+     * along the look direction, R/F/Space for vertical - so they can place and
+     * arrange objects at any height. Learners walk the streets instead: WASD
+     * moves horizontally (look tilts the view, not the path), with gravity and a
+     * Space jump rather than free flight. Arrow keys mirror WASD in both modes.
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateDesktop = function(dt) {
-        var THREE = this.THREE;
         // Apply look.
         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+        if (this.config.canedit) {
+            this.updateDesktopFly(dt);
+        } else {
+            this.updateDesktopWalk(dt);
+        }
+    };
 
+    /**
+     * Free-flight desktop movement for editing teachers: WASD/arrows along the
+     * camera's look direction, R or Space to rise and F to descend.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateDesktopFly = function(dt) {
+        var THREE = this.THREE;
         var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) *
             this.comfortSpeedScale() * dt;
         var forward = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
@@ -8577,6 +8600,50 @@ define('format_mnemo/vr', [], function() {
         }
         if (this.keys.KeyF) {
             this.player.position.y -= speed;
+        }
+    };
+
+    /**
+     * Grounded desktop movement for learners: WASD/arrows move horizontally
+     * (independent of look pitch), Space jumps, and gravity pulls the rig back
+     * to the ground (y = 0). No free vertical flight.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateDesktopWalk = function(dt) {
+        var THREE = this.THREE;
+        var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) *
+            this.comfortSpeedScale() * dt;
+        // Horizontal forward/right from the yaw only, so looking up or down
+        // never lifts or sinks the walker.
+        var forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        var right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+
+        if (this.keys.KeyW || this.keys.ArrowUp) {
+            this.player.position.addScaledVector(forward, speed);
+        }
+        if (this.keys.KeyS || this.keys.ArrowDown) {
+            this.player.position.addScaledVector(forward, -speed);
+        }
+        if (this.keys.KeyA || this.keys.ArrowLeft) {
+            this.player.position.addScaledVector(right, -speed);
+        }
+        if (this.keys.KeyD || this.keys.ArrowRight) {
+            this.player.position.addScaledVector(right, speed);
+        }
+
+        // Jump and gravity. A jump only launches from the ground; the apex stays
+        // just under flyThreshold so the walker keeps to the streets.
+        if (this.onGround && this.keys.Space) {
+            this.velocityY = this.jumpSpeed;
+            this.onGround = false;
+        }
+        this.velocityY -= this.gravity * dt;
+        this.player.position.y += this.velocityY * dt;
+        if (this.player.position.y <= 0) {
+            this.player.position.y = 0;
+            this.velocityY = 0;
+            this.onGround = true;
         }
     };
 

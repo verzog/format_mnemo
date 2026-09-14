@@ -41,9 +41,11 @@ off).
   - A **comfort vignette** narrows your view while you move to reduce motion
     sickness, and controllers **buzz** when a node lights up and when you open
     one.
-- **On-screen fallback** — no headset needed. Drag to look, `W`/`S` to fly,
-  `A`/`D` to strafe, `R`/`F` (or `Space`) for altitude, and click a node to open
-  it. `Shift` to boost.
+- **On-screen fallback** — no headset needed. Drag to look, `W`/`S`/`A`/`D` (or
+  the arrow keys) to move, `Shift` to boost, and click a node to open it.
+  **Learners walk the streets** — movement stays on the ground and `Space`
+  jumps — while **editing teachers fly freely** (`R`/`F`/`Space` for altitude)
+  so they can place and arrange objects at any height.
 - **Comfort settings** — a **⚙ gear button** (on screen) and a matching
   **in-headset panel** (summoned with a controller face button) let each learner
   tune the controls to their own comfort: **snap or smooth turning** (with a
@@ -265,7 +267,7 @@ Alternatively install the ZIP via
 
 | Context | Look / aim | Move | Open a node |
 | --- | --- | --- | --- |
-| Desktop / mobile | drag | `W`/`S` fly, `A`/`D` strafe, `R`/`F`/`Space` up/down, `Shift` boost | click the node |
+| Desktop / mobile | drag | `W`/`S`/`A`/`D` + `Shift` boost — learners walk (`Space` jumps), editing teachers fly (`R`/`F`/`Space` up/down) | click the node |
 | VR headset | head + point the controller/hand | point + **squeeze trigger** or **pinch** and hold to glide | point at the node and **pinch / trigger** |
 
 ## Admin settings

@@ -275,6 +275,75 @@ const scenarios = [
         }
     },
     {
+        name: 'desktop: a learner walks horizontally and never flies',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const player = new THREE.Group();
+            const self = {
+                THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
+                pitch: -0.6, yaw: 0, keys: {KeyW: true}, config: {canedit: false},
+                comfortSpeedScale: () => 1,
+                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                updateDesktop: CS.prototype.updateDesktop,
+                updateDesktopFly: CS.prototype.updateDesktopFly,
+                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            };
+            self.updateDesktop(0.1);
+            // Yaw 0 -> forward is -Z; W steps -Z. Looking down (pitch) must not
+            // change altitude: gravity keeps a grounded learner at y = 0.
+            const pass = player.position.z < -0.1 &&
+                Math.abs(player.position.x) < 1e-9 &&
+                Math.abs(player.position.y) < 1e-9;
+            return {pass, detail: `z=${player.position.z.toFixed(3)} y=${player.position.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'desktop: a learner jumps on Space and gravity returns to the ground',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const player = new THREE.Group();
+            const self = {
+                THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
+                pitch: 0, yaw: 0, keys: {Space: true}, config: {canedit: false},
+                comfortSpeedScale: () => 1,
+                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                updateDesktop: CS.prototype.updateDesktop,
+                updateDesktopFly: CS.prototype.updateDesktopFly,
+                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            };
+            self.updateDesktop(0.05); // Launch.
+            const rose = player.position.y > 0 && self.onGround === false;
+            self.keys.Space = false; // Release so it does not re-launch.
+            for (let i = 0; i < 40; i++) {
+                self.updateDesktop(0.05);
+            }
+            const landed = Math.abs(player.position.y) < 1e-6 && self.onGround === true;
+            return {pass: rose && landed, detail: `rose=${rose} landed=${landed}`};
+        }
+    },
+    {
+        name: 'desktop: an editing teacher keeps free flight',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const player = new THREE.Group();
+            const self = {
+                THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
+                pitch: 0, yaw: 0, keys: {KeyR: true}, config: {canedit: true},
+                comfortSpeedScale: () => 1,
+                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                updateDesktop: CS.prototype.updateDesktop,
+                updateDesktopFly: CS.prototype.updateDesktopFly,
+                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            };
+            self.updateDesktop(0.1);
+            // R rises with no gravity pulling back — free flight is preserved.
+            return {pass: player.position.y > 0.1, detail: `y=${player.position.y.toFixed(3)}`};
+        }
+    },
+    {
         name: 'building: type-based URL for a confirmed module type',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
