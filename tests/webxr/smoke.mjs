@@ -1874,6 +1874,67 @@ const scenarios = [
         }
     },
     {
+        name: 'handpose: classify tells an open palm from a fist',
+        fn: () => {
+            const HP = window.__mnemoModule._HandPose;
+            const hp = new HP(null);
+            // Build a 21-landmark hand: wrist at (x,y), middle-MCP a span above,
+            // and `count` of the four fingers extended (tip well past the pip).
+            const hand = (x, y, count, span) => {
+                const lm = [];
+                for (let i = 0; i < 21; i++) {
+                    lm.push({x: x, y: y, z: 0});
+                }
+                lm[9] = {x: x, y: y - span, z: 0};
+                const f = [[8, 6], [12, 10], [16, 14], [20, 18]];
+                for (let i = 0; i < 4; i++) {
+                    lm[f[i][1]] = {x: x, y: y - 0.15, z: 0};
+                    lm[f[i][0]] = {x: x, y: (i < count ? y - 0.30 : y - 0.02), z: 0};
+                }
+                return lm;
+            };
+            window.__mnemoTest.mkHand = hand; // Shared by the pose tests below.
+            const open = hp.classify(hand(0.5, 0.5, 4, 0.2));
+            const fist = hp.classify(hand(0.5, 0.5, 0, 0.2));
+            const pass = open.open && !open.fist && open.fingers === 4 &&
+                fist.fist && !fist.open && fist.fingers === 0 &&
+                hp.detect(null, 0) === null;
+            return {pass, detail: `open=${open.fingers} fist=${fist.fingers}`};
+        }
+    },
+    {
+        name: 'handpose: open palm stops, hand position steers past a deadzone',
+        fn: () => {
+            const HP = window.__mnemoModule._HandPose;
+            const hp = new HP(null);
+            const hand = window.__mnemoTest.mkHand;
+            const stop = hp.intent(null, hp.classify(hand(0.5, 0.5, 4, 0.2)), 0.033);
+            // Two fingers up = neither open nor fist, so steering is active.
+            const right = hp.intent(null, hp.classify(hand(0.2, 0.5, 2, 0.2)), 0.033);
+            const left = hp.intent(null, hp.classify(hand(0.8, 0.5, 2, 0.2)), 0.033);
+            const centre = hp.intent(null, hp.classify(hand(0.5, 0.5, 2, 0.2)), 0.033);
+            const pass = stop.stop === true && stop.turn === 0 &&
+                right.turn > 0 && left.turn < 0 && centre.turn === 0 &&
+                right.moveTarget === 0;
+            return {pass, detail: `stop=${stop.stop} r=${right.turn.toFixed(2)} l=${left.turn.toFixed(2)} c=${centre.turn}`};
+        }
+    },
+    {
+        name: 'handpose: a fisted pull hauls forward, a still fist does not',
+        fn: () => {
+            const HP = window.__mnemoModule._HandPose;
+            const hp = new HP(null);
+            const hand = window.__mnemoTest.mkHand;
+            // Fist dropping and growing = pulling the hand in toward the camera.
+            const prev = hp.classify(hand(0.5, 0.40, 0, 0.20));
+            const cur = hp.classify(hand(0.5, 0.52, 0, 0.28));
+            const haul = hp.intent(prev, cur, 0.033);
+            const still = hp.intent(prev, prev, 0.033);
+            const pass = haul.stop === false && haul.moveTarget > 0 && still.moveTarget === 0;
+            return {pass, detail: `haul=${haul.moveTarget.toFixed(2)} still=${still.moveTarget}`};
+        }
+    },
+    {
         name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

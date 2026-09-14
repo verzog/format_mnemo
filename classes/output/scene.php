@@ -673,6 +673,19 @@ class scene implements renderable, templatable {
             // flat-screen viewers. Site-wide admin setting, on unless explicitly
             // turned off (so an unset value defaults to available).
             'cameranav' => get_config('format_mnemo', 'cameranav') !== '0',
+            // Same-origin URLs for the optional MediaPipe pose detection the
+            // camera control upgrades to when it loads (the ES module loader, the
+            // vision bundle, the WASM runtime directory and the hand model). All
+            // vendored under the plugin, so the browser contacts no external host;
+            // if any fail to load the control falls back to motion detection.
+            'mediapipeloaderurl' =>
+                (new moodle_url('/course/format/mnemo/js/mediapipe-loader.js'))->out(false),
+            'mediapipebundleurl' =>
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/vision_bundle.mjs'))->out(false),
+            'mediapipewasmurl' =>
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/wasm'))->out(false),
+            'mediapipehandmodelurl' =>
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/hand_landmarker.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
             'game' => !empty($options['mnemogame']),
@@ -736,6 +749,7 @@ class scene implements renderable, templatable {
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
                 'cameranav' => get_string('cameranav', 'format_mnemo'),
                 'cameranav_hint' => get_string('cameranav_hint', 'format_mnemo'),
+                'cameranav_hint_pose' => get_string('cameranav_hint_pose', 'format_mnemo'),
                 'cameranav_denied' => get_string('cameranav_denied', 'format_mnemo'),
                 'cameranav_insecure' => get_string('cameranav_insecure', 'format_mnemo'),
                 'cameranav_unavailable' => get_string('cameranav_unavailable', 'format_mnemo'),

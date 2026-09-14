@@ -421,10 +421,22 @@ off site-wide with the *Camera gesture navigation* admin setting) calls
 `getUserMedia`, which requires a **secure context** (HTTPS) and a
 `Permissions-Policy: camera=(self)` that allows the page's origin — if the page
 is embedded in an iframe, that frame also needs `allow="camera"`. The webcam is
-read only while the learner has the control switched on, analysed on a small
-offscreen canvas **on the device**, and never uploaded, recorded, or sent
-anywhere; when permission is denied or the context is insecure the control shows
-a short message and the scene keeps its mouse/keyboard/touch controls.
+read only while the learner has the control switched on, analysed **on the
+device**, and never uploaded, recorded, or sent anywhere; when permission is
+denied or the context is insecure the control shows a short message and the
+scene keeps its mouse/keyboard/touch controls.
+
+When it can, the control upgrades from simple frame-motion detection to
+**on-device hand-pose recognition** using MediaPipe Tasks Vision, all vendored
+same-origin under `thirdparty/mediapipe/` (the ES module bundle, the WASM
+runtime and the landmark model), so **no external host is contacted**. This adds
+CSP surface beyond `script-src 'self'`: the WASM runtime needs
+**`script-src 'wasm-unsafe-eval'`** (or `'unsafe-eval'`) to instantiate, loads
+its `.wasm`/model over **`connect-src 'self'`**, and may run in a
+**`worker-src blob:`** worker (already required by the Draco/KTX2 decoders).
+Where a strict CSP forbids `wasm-unsafe-eval`, or the browser lacks WASM SIMD,
+the pose model simply fails to load and the control falls back to the
+frame-motion detection — nothing else is affected.
 
 A sign font, sign/road/ground texture **uploaded into Moodle** is served from
 the plugin's own origin, so `font-src 'self'` / `img-src 'self'` already cover

@@ -255,6 +255,12 @@
     pointer-events: none;
 }
 
+/* In pose mode steering is by hand position, not the motion thirds, and there
+   is no reverse zone - so hide the motion guides. */
+.format-mnemo__cam-preview--pose .format-mnemo__cam-zones {
+    display: none;
+}
+
 .format-mnemo__cam-zones::before {
     content: "";
     position: absolute;

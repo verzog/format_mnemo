@@ -22,4 +22,15 @@
       <copyright>2010-2023 three.js authors</copyright>
     </copyrights>
   </library>
+  <library>
+    <location>thirdparty/mediapipe</location>
+    <name>MediaPipe Tasks Vision (hand/face landmarkers + models)</name>
+    <description>On-device hand and face landmark detection (WASM runtime, ES module bundle and the hand/face landmarker model files) powering the optional pose-based camera navigation for flat-screen viewers.</description>
+    <version>0.10.18</version>
+    <license>Apache-2.0</license>
+    <repository>https://github.com/google-ai-edge/mediapipe</repository>
+    <copyrights>
+      <copyright>2019-2024 The MediaPipe Authors</copyright>
+    </copyrights>
+  </library>
 </libraries>
