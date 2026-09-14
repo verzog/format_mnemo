@@ -8557,15 +8557,15 @@ define('format_mnemo/vr', [], function() {
                 this.gestures.updateVignette(travelled / Math.max(dt, 0.0001), dt);
             }
         } else {
-            // Arcade mode suspends flight so the mouse only aims and clicks
-            // only shoot; look (drag) still works.
-            if (!(this.game && this.game.isPlaying())) {
-                // Camera-gesture navigation feeds the same desktop movement path
-                // (steering yaw + an analog forward/back term), so it composes
-                // with the mouse/keyboard and shares the road/ground clamping.
-                this.updateCameraNav(dt);
-                this.updateDesktop(dt);
-            }
+            // Flat screen: drive look and movement from the mouse/keyboard and,
+            // when it is on, camera-gesture navigation (which feeds the same
+            // desktop movement path - steering yaw plus an analog forward/back
+            // term - so it composes with them and shares the road/ground
+            // clamping). This runs during the arcade game too, so the learner
+            // can fly and look while playing; a click then shoots along the
+            // crosshair instead of opening a node (see clickOpen).
+            this.updateCameraNav(dt);
+            this.updateDesktop(dt);
             this.updateDesktopHighlight();
             if (this.gestures) {
                 this.gestures.updateVignette(0, dt);
