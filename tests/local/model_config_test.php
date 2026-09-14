@@ -111,17 +111,49 @@ final class model_config_test extends \advanced_testcase {
     }
 
     /**
-     * A non-finite behaviour value is dropped, so it can never make the whole
-     * blob fail to encode and wipe every other model's settings.
+     * Behaviour flags: a known flag changed from its default is stored, an
+     * unknown key or a value left at the default is dropped, and a non-encodable
+     * value can never wipe another model's settings.
      */
-    public function test_non_finite_behaviour_does_not_wipe(): void {
+    public function test_behaviour_flags(): void {
         $this->resetAfterTest();
         model_config::set('a', ['envs' => ['grid']]);
-        model_config::set('b', ['behaviour' => ['bad' => INF, 'ok' => true]]);
-        // The earlier model survived, and the bad value was dropped.
+        model_config::set('b', ['behaviour' => [
+            // Known flag, differs from default -> stored.
+            'grounded' => true,
+            // Known flag, equals its default -> dropped.
+            'avoid' => true,
+            // Unknown key -> dropped.
+            'bogus' => 'x',
+            // A non-finite value casts to bool and differs from the default -> stored true.
+            'takeoffland' => INF,
+        ]]);
+        // The earlier model survived the write.
         $this->assertEquals(['grid'], model_config::get('a')['envs']);
         $b = model_config::get('b');
-        $this->assertArrayNotHasKey('bad', $b['behaviour']);
-        $this->assertTrue($b['behaviour']['ok']);
+        $this->assertTrue($b['behaviour']['grounded']);
+        $this->assertTrue($b['behaviour']['takeoffland']);
+        $this->assertArrayNotHasKey('avoid', $b['behaviour']);
+        $this->assertArrayNotHasKey('bogus', $b['behaviour']);
+    }
+
+    /**
+     * A config whose only setting is an all-default behaviour map is not stored.
+     */
+    public function test_default_behaviour_not_stored(): void {
+        $this->resetAfterTest();
+        model_config::set('c', ['behaviour' => ['grounded' => false, 'avoid' => true, 'face' => true]]);
+        $this->assertArrayNotHasKey('c', model_config::all());
+    }
+
+    /**
+     * for_client() exposes the behaviour map so the scene can read the flags.
+     */
+    public function test_for_client_includes_behaviour(): void {
+        $this->resetAfterTest();
+        model_config::set('d', ['behaviour' => ['grounded' => true]]);
+        $client = model_config::for_client();
+        $this->assertArrayHasKey('d', $client);
+        $this->assertTrue($client['d']['behaviour']['grounded']);
     }
 }

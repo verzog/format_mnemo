@@ -50,12 +50,18 @@ if ($savemodel !== '' && confirm_sesskey()) {
         }
         $yawraw = optional_param('yaw', '', PARAM_RAW_TRIMMED);
         $scaleraw = optional_param('scale', '', PARAM_RAW_TRIMMED);
+        // Behaviour checkboxes: read every known flag (an unchecked box does not
+        // post), so the saved state matches the form. The store drops any flag
+        // left at its engine default.
+        $behaviour = [];
+        foreach (array_keys(model_config::BEHAVIOUR_DEFAULTS) as $flag) {
+            $behaviour[$flag] = (bool)optional_param('beh_' . $flag, 0, PARAM_BOOL);
+        }
         model_config::set($savemodel, [
             'envs' => $envs,
             'yaw' => ($yawraw === '' || !is_numeric($yawraw)) ? null : (float)$yawraw,
             'scale' => ($scaleraw === '' || !is_numeric($scaleraw)) ? null : (float)$scaleraw,
-            // Preserve any behaviour flags set elsewhere until that panel lands.
-            'behaviour' => model_config::get($savemodel)['behaviour'],
+            'behaviour' => $behaviour,
         ]);
         redirect(
             $PAGE->url,
@@ -74,7 +80,7 @@ $rootid = 'mnemo-preview-' . uniqid();
 
 /**
  * The per-model settings panel: a collapsible form to set the model's
- * environments, facing and scale, saved back to this page.
+ * environments, facing, scale and behaviour, saved back to this page.
  *
  * @param string $name The model name (.glb basename).
  * @param array $cfg The model's current normalised config.
@@ -156,6 +162,33 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
             'min' => '0.1', 'max' => '10', 'step' => 'any', 'class' => 'format-mnemo-preview__scale',
             'value' => $cfg['scale'] === null ? '' : rtrim(rtrim(sprintf('%.2f', $cfg['scale']), '0'), '.'),
         ]),
+        'format-mnemo-preview__field'
+    );
+
+    // Behaviour checkboxes: each shows the model's effective flag (its stored
+    // value, or the engine default when unset). Only a change from the default
+    // is stored on save.
+    $behboxes = '';
+    foreach (model_config::BEHAVIOUR_DEFAULTS as $flag => $default) {
+        $id = 'beh_' . $name . '_' . $flag;
+        $attrs = ['type' => 'checkbox', 'name' => 'beh_' . $flag, 'value' => 1, 'id' => $id];
+        $on = array_key_exists($flag, $cfg['behaviour']) ? $cfg['behaviour'][$flag] : $default;
+        if ($on) {
+            $attrs['checked'] = 'checked';
+        }
+        $behboxes .= html_writer::tag(
+            'label',
+            html_writer::empty_tag('input', $attrs) . ' ' .
+            get_string('preview_beh_' . $flag, 'format_mnemo'),
+            ['class' => 'format-mnemo-preview__check']
+        );
+    }
+    $rows .= html_writer::div(
+        html_writer::tag(
+            'span',
+            get_string('preview_behaviour', 'format_mnemo'),
+            ['class' => 'format-mnemo-preview__field-label']
+        ) . $behboxes,
         'format-mnemo-preview__field'
     );
 
