@@ -1837,10 +1837,11 @@ const scenarios = [
             const fall = nav.blend(1, 0, 0.033); // Release: toward a lower target.
             const riseStep = rise - 0; // Ground covered upward this frame.
             const fallStep = 1 - fall; // Ground covered downward this frame.
-            // A long gap is clamped so it cannot jump the value.
-            const clamped = nav.blend(0, 1, 100);
-            const pass = riseStep > fallStep && rise > 0.2 && fall > 0.8 && clamped < 1;
-            return {pass, detail: `rise=${rise.toFixed(2)} fall=${fall.toFixed(2)} clamped=${clamped.toFixed(2)}`};
+            // A frame after a long gap (tab refocus) is discarded: the value is
+            // held, not snapped toward the stale diff.
+            const gap = nav.blend(0, 1, 100);
+            const pass = riseStep > fallStep && rise > 0.2 && fall > 0.8 && gap === 0;
+            return {pass, detail: `rise=${rise.toFixed(2)} fall=${fall.toFixed(2)} gap=${gap}`};
         }
     },
     {

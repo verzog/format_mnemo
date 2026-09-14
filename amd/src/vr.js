@@ -9937,6 +9937,7 @@ define('format_mnemo/vr', [], function() {
         this.gain = 0.05;
         this.attackTau = 0.08; // Fast rise: quick onset.
         this.releaseTau = 0.35; // Slow fall: coast to a stop.
+        this.maxFrameGap = 0.4; // Ignore a frame after a longer gap (tab refocus).
         this.turnRate = 1.8; // Radians per second at full deflection.
     }
 
@@ -10058,8 +10059,9 @@ define('format_mnemo/vr', [], function() {
      * real time step: a short time constant when rising (a gesture takes hold
      * fast) and a longer one when falling (movement coasts rather than cutting
      * out between hand movements). Using the elapsed time keeps the feel constant
-     * across webcam frame rates; the step is clamped so a long gap (a refocused
-     * tab) cannot jump the value.
+     * across webcam frame rates. After a long gap (a suspended/refocused tab) the
+     * measurement is a diff against a stale frame and meaningless, so that frame
+     * is discarded (the value is held) rather than snapped almost fully to it.
      *
      * @param {Number} current The current smoothed energy.
      * @param {Number} target The freshly measured energy.
@@ -10067,9 +10069,11 @@ define('format_mnemo/vr', [], function() {
      * @return {Number} The updated smoothed energy.
      */
     CameraNav.prototype.blend = function(current, target, frameDt) {
+        if (frameDt > this.maxFrameGap) {
+            return current;
+        }
         var tau = target > current ? this.attackTau : this.releaseTau;
-        var dt = Math.max(0, Math.min(0.25, frameDt));
-        var alpha = 1 - Math.exp(-dt / tau);
+        var alpha = 1 - Math.exp(-Math.max(0, frameDt) / tau);
         return current + (target - current) * alpha;
     };
 
