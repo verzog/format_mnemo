@@ -83,10 +83,11 @@ off).
   streets float among a starfield, drifting nebulae and lit planets under a
   distant star. The whole planet field revolves slowly (one turn an hour) and
   each planet also **turns on its own axis** (about once every two minutes), so
-  a textured world visibly rotates. A planet is **ringed** when its uploaded
-  planet-texture filename contains the word *ring* (e.g. `saturn-ring.png`); an
-  optional site-wide **ring image** (a radial strip, inner edge → outer edge)
-  skins those rings as concentric bands, or they fall back to a plain band.
+  a textured world visibly rotates. Some planets are **ringed** by default; an
+  uploaded planet is additionally ringed when its texture filename contains the
+  word *ring* (e.g. `saturn-ring.png`). An optional site-wide **ring image** (a
+  radial strip, inner edge → outer edge) skins those rings as concentric bands,
+  or they fall back to a plain band.
 - **Road-constrained movement** — on foot (and gliding) the learner is kept on
   the avenue and side streets; **flying** (rising off the ground) releases the
   constraint so the whole city is free to explore.
@@ -315,9 +316,10 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
 - **Upload planet textures** — upload up to **nine** equirectangular (2:1
   lat-long) images to use as the surfaces of the Void's planets; each is applied
   to one planet in filename order (so the Void shows as many planets as you
-  upload, up to nine). Include the word **`ring`** in a file's name (e.g.
-  `saturn-ring.png`) to give that planet a **ring**. **Leave empty** to keep the
-  procedural banded planets. Only used in the Void.
+  upload, up to nine). Some planets are **ringed** by default; include the word
+  **`ring`** in a file's name (e.g. `saturn-ring.png`) to add a **ring** to that
+  planet as well. **Leave empty** to keep the procedural banded planets. Only
+  used in the Void.
 - **Ring texture URL** / **Upload ring texture** — skin the ringed planets with
   your own ring image: a **radial strip** read from the inner edge (left) to the
   outer edge (right) and wrapped once around the ring, so it reads as concentric

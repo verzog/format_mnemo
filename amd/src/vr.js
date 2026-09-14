@@ -738,7 +738,6 @@ define('format_mnemo/vr', [], function() {
         this.planetField = new this.THREE.Group();
         this.scene.add(this.planetField);
         this.planets = [];
-        var textured = texs.length > 0;
         for (var i = 0; i < count; i++) {
             var s = PLANET_SLOTS[i];
             // Spread the planets evenly around the full sky by index, so only
@@ -750,10 +749,12 @@ define('format_mnemo/vr', [], function() {
                 y: s.y,
                 z: -s.dist * Math.cos(az)
             };
-            // With uploaded planets, a ring is chosen per texture by its filename
-            // (planetRings, from the server); the procedural default keeps the
-            // slot's own ring flag.
-            var ringed = textured ? !!this.planetRings[i] : s.ring;
+            // A planet's built-in slot ring flag always applies, so the Void
+            // shows rings by default whether or not planet textures are
+            // uploaded. An uploaded planet can additionally be ringed by naming
+            // its file with "ring" (planetRings, from the server). Either way a
+            // ringed planet is skinned by the uploaded ring image when present.
+            var ringed = s.ring || !!this.planetRings[i];
             this.makePlanet(s.r, at, s.band, ringed, texs[i] || null);
         }
     };

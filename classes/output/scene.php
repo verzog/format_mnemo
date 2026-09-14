@@ -677,8 +677,9 @@ class scene implements renderable, templatable {
             // only uses these in the void environment.
             'spacetextureurl' => $this->resolve_asset_url('spacetextureurl', 'spacetexture'),
             'planettextureurls' => $this->stored_asset_urls('planettextures', 9),
-            // Per-planet ring flags (aligned with planettextureurls): a planet
-            // whose uploaded filename contains the word "ring" gets a ring.
+            // Per-planet ring flags (aligned with planettextureurls): an uploaded
+            // planet whose filename contains the word "ring" is additionally
+            // ringed (the built-in slots are ringed by default regardless).
             'planetrings' => $this->planet_ring_flags('planettextures', 9),
             // Optional ring image (a radial strip) that skins ringed planets.
             'ringtextureurl' => $this->resolve_asset_url('ringtextureurl', 'ringtexture'),
