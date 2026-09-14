@@ -653,6 +653,9 @@ class scene implements renderable, templatable {
             'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
             'palette' => $options['mnemopalette'] ?? 'cyan',
             'invertlook' => !empty($options['mnemoinvertlook']),
+            // Optional arcade game mode (off by default): a light-hearted
+            // shoot-the-targets mini-game overlaid on the scene.
+            'game' => !empty($options['mnemogame']),
             // Street-lamp layout: the resolved spacing (world units between
             // lamps, 0 = no auto lamps) and whether to light the side-street
             // corners. Resolved from the per-course option, falling back to the
@@ -742,6 +745,12 @@ class scene implements renderable, templatable {
                 'comfortmovement' => get_string('comfortmovement', 'format_mnemo'),
                 'comfortglide' => get_string('comfortglide', 'format_mnemo'),
                 'comfortteleport' => get_string('comfortteleport', 'format_mnemo'),
+                'gamestart' => get_string('gamestart', 'format_mnemo'),
+                'gameexit' => get_string('gameexit', 'format_mnemo'),
+                'gamescore' => get_string('gamescore', 'format_mnemo'),
+                'gamehealth' => get_string('gamehealth', 'format_mnemo'),
+                'gameover' => get_string('gameover', 'format_mnemo'),
+                'gamehint' => get_string('gamehint', 'format_mnemo'),
                 'editroadsurface' => get_string('editroadsurface', 'format_mnemo'),
                 'editgroundsurface' => get_string('editgroundsurface', 'format_mnemo'),
                 'editsidewalksurface' => get_string('editsidewalksurface', 'format_mnemo'),

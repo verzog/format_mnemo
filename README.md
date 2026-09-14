@@ -213,6 +213,15 @@ off).
   section's settings) that appears on its street sign.
 - **Per-course look** — teachers choose the environment (Cyberspace / Grid /
   Void) and the neon palette (Cyan / Amber / Magenta / Green) in course settings.
+- **Arcade / game mode** *(optional, off by default)* — a per-course toggle adds
+  a small **Start Game** button to the scene. It drops shootable targets into the
+  city and gives the learner a crosshair HUD (score and shields): **click** (or
+  **squeeze the VR trigger**) to fire a hitscan shot, hit a target to score, and
+  hit **Exit** to return to browsing. This first release is the arcade harness —
+  the shoot / hit / score loop, the HUD and the VR + desktop firing paths;
+  question billboards and enemy robots build on top of it. While a game is
+  running, normal locomotion and node-opening are suspended so the trigger only
+  shoots.
 - **No framework, self-contained** — the scene is hand-rolled on
   [Three.js](https://threejs.org) with the browser's native WebXR API. Three.js
   is the only third-party dependency; it is **bundled with the plugin**
@@ -246,7 +255,8 @@ Alternatively install the ZIP via
 1. In a course, open **Settings → Course format** and choose
    **Mnemo (VR cyberspace)**.
 2. Pick the **Environment**, **Neon palette** and **Street lighting**.
-   Optionally add a **topic image** in each section's settings.
+   Optionally enable **Arcade / game mode** (off by default) to add the in-scene
+   shooting game, and add a **topic image** in each section's settings.
 3. With editing **on**, add sections and activities as usual (standard 2D UI).
 4. Turn editing **off** to fly through the course. Click **Enter VR** to jack in
    with a headset.

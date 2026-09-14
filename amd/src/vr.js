@@ -236,6 +236,7 @@ define('format_mnemo/vr', [], function() {
         this.time = 0; // Accumulated seconds, for cheap animation.
         this.brake = false; // Open-palm brake: suppress locomotion this frame.
         this.gestures = null; // XR gesture manager (built after the renderer).
+        this.game = null; // Optional arcade game manager (built when enabled).
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.planets = []; // The Void's planet spheres, each self-rotating.
@@ -397,6 +398,10 @@ define('format_mnemo/vr', [], function() {
         this.buildFullscreenButton();
         this.buildComfort();
         this.buildVrComfortPanel();
+        if (this.config.game) {
+            this.game = new GameManager(this);
+            this.buildGameButton();
+        }
         if (this.config.canedit) {
             this.buildEditor();
         }
@@ -4934,6 +4939,12 @@ define('format_mnemo/vr', [], function() {
 
     Cyberspace.prototype.onSelectEnd = function(controller) {
         controller.userData.selecting = false;
+        // While the game is running, a trigger pull shoots along the controller
+        // ray instead of opening a node or flying.
+        if (this.game && this.game.isPlaying()) {
+            this.game.shootFromController(controller);
+            return;
+        }
         // A pinch/trigger that started (or ended) on a node opens it; otherwise
         // it was a flight gesture and we simply stop thrusting.
         var hit = this.intersectController(controller);
@@ -5007,6 +5018,31 @@ define('format_mnemo/vr', [], function() {
             button.title = full ? self.config.strings.exitfullscreen : self.config.strings.fullscreen;
             button.setAttribute('aria-label', button.title);
             self.onResize();
+        });
+    };
+
+    /**
+     * Build the arcade-game launch button (only when the course enables the
+     * optional game mode). It toggles the game on and off; the in-game HUD
+     * carries its own Exit control too.
+     */
+    Cyberspace.prototype.buildGameButton = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__game-btn';
+        btn.textContent = '▶'; // A play triangle.
+        btn.title = s.gamestart || 'Play';
+        btn.setAttribute('aria-label', btn.title);
+        this.root.appendChild(btn);
+        this.gameButton = btn;
+        btn.addEventListener('click', function() {
+            if (self.game.isPlaying()) {
+                self.game.stop();
+            } else {
+                self.game.start();
+            }
         });
     };
 
@@ -6473,6 +6509,12 @@ define('format_mnemo/vr', [], function() {
      * Handle a desktop click: open whatever node is under the pointer.
      */
     Cyberspace.prototype.clickOpen = function() {
+        // While the game is running, a click fires along the crosshair instead
+        // of opening a node.
+        if (this.game && this.game.isPlaying()) {
+            this.game.shootFromCamera();
+            return;
+        }
         // In place mode a click drops the selected prop on the grid.
         if (this.placeMode) {
             this.placeAtPointer();
@@ -8137,6 +8179,12 @@ define('format_mnemo/vr', [], function() {
         // Keep the sun/moon pinned at a fixed direction and distance from the eye.
         this.updateCelestials();
 
+        // Advance the optional arcade game (targets, spawns); a no-op unless it
+        // is running.
+        if (this.game) {
+            this.game.update(dt);
+        }
+
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort
             // vignette can respond to real motion from every locomotion path.
@@ -8152,7 +8200,11 @@ define('format_mnemo/vr', [], function() {
                 this.gestures.updateVignette(travelled / Math.max(dt, 0.0001), dt);
             }
         } else {
-            this.updateDesktop(dt);
+            // Arcade mode suspends flight so the mouse only aims and clicks
+            // only shoot; look (drag) still works.
+            if (!(this.game && this.game.isPlaying())) {
+                this.updateDesktop(dt);
+            }
             this.updateDesktopHighlight();
             if (this.gestures) {
                 this.gestures.updateVignette(0, dt);
@@ -8408,6 +8460,10 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.updateXrLocomotion = function(dt) {
         var THREE = this.THREE;
+        if (this.game && this.game.isPlaying()) {
+            // In the game the trigger shoots, so a held trigger must not fly.
+            return;
+        }
         if (this.brake) {
             // An open palm this frame is an explicit stop; hold position.
             return;
@@ -8596,6 +8652,7 @@ define('format_mnemo/vr', [], function() {
         this.snapArmed = true; // Debounce so one flick is one snap.
         this.recenterArmed = true; // Debounce the recenter chord.
         this.menuArmed = true; // Debounce the in-VR menu toggle.
+        this.gameArmed = true; // Debounce the in-VR game start/exit toggle.
         this.grabbing = false; // Mid grab-the-world pull.
         this.grabCount = 0; // How many grips were active last frame.
         this.grabAnchor = new THREE.Vector3();
@@ -8767,8 +8824,22 @@ define('format_mnemo/vr', [], function() {
         var ctrl = this.readControllers();
         var grabCount = hands.grabCount + ctrl.grabCount;
 
+        // Arcade mode owns the controllers: B/Y starts or exits the game, and
+        // while it runs every locomotion path is suspended so the trigger only
+        // shoots. Exit stays reachable from inside the headset.
+        if (this.cs.game) {
+            this.handleGameToggle(ctrl.menuSecondary);
+            if (this.cs.game.isPlaying()) {
+                this.grabbing = false;
+                this.hideTeleport();
+                return;
+            }
+        }
+
         this.handleRecenter(ctrl.thumbClicks);
-        this.handleMenu(ctrl.menuPress);
+        // With arcade mode on, B/Y is the game toggle, so only A/X opens the
+        // comfort menu; otherwise either face button opens it.
+        this.handleMenu(this.cs.game ? ctrl.menuPrimary : ctrl.menuPress);
         this.handleTurn(ctrl.turnX, dt);
 
         if (this.cs.brake) {
@@ -8831,7 +8902,8 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} {glideX, glideZ, turnX, thumbClicks, grabCount}.
      */
     GestureManager.prototype.readControllers = function() {
-        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0, menuPress: 0};
+        var out = {glideX: 0, glideZ: 0, turnX: 0, thumbClicks: 0, grabCount: 0,
+            menuPress: 0, menuPrimary: 0, menuSecondary: 0};
         var controllers = this.cs.controllers;
         for (var c = 0; c < controllers.length; c++) {
             var ctrl = controllers[c];
@@ -8859,8 +8931,15 @@ define('format_mnemo/vr', [], function() {
                 this.vSum.add(this.ctrlPos[c]);
                 out.grabCount++;
             }
-            // Either face button (A/X or B/Y) summons the in-VR comfort menu.
-            if (this.buttonPressed(gp, 4) || this.buttonPressed(gp, 5)) {
+            // Face buttons: A/X (4) and B/Y (5). Either summons the in-VR
+            // comfort menu; when arcade mode is on, B/Y is reserved to start /
+            // exit the game, so the two are tracked separately as well.
+            if (this.buttonPressed(gp, 4)) {
+                out.menuPrimary++;
+                out.menuPress++;
+            }
+            if (this.buttonPressed(gp, 5)) {
+                out.menuSecondary++;
                 out.menuPress++;
             }
         }
@@ -8896,6 +8975,28 @@ define('format_mnemo/vr', [], function() {
             this.menuArmed = false;
         } else if (menuPress === 0) {
             this.menuArmed = true;
+        }
+    };
+
+    /**
+     * Start or exit the arcade game from inside VR, debounced so one press is
+     * one toggle. Bound to the B/Y face button when arcade mode is on.
+     *
+     * @param {Number} press How many controllers report the B/Y button down.
+     */
+    GestureManager.prototype.handleGameToggle = function(press) {
+        if (press > 0 && this.gameArmed) {
+            var game = this.cs.game;
+            if (game) {
+                if (game.isPlaying()) {
+                    game.stop();
+                } else {
+                    game.start();
+                }
+            }
+            this.gameArmed = false;
+        } else if (press === 0) {
+            this.gameArmed = true;
         }
     };
 
@@ -9335,6 +9436,511 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The optional arcade game: a light-hearted shoot-the-targets mini-game
+     * overlaid on the scene, enabled per course (off by default). This scaffold
+     * owns the core loop - start/stop, a HUD (score + shields), crosshair
+     * shooting (desktop click or XR trigger, a hitscan raycast), and
+     * destructible targets that respawn to keep the field full. Later work
+     * layers question billboards, answer targets and enemy robots on top.
+     *
+     * The shoot/hit/score logic works on plain vectors and meshes, so it is unit
+     * testable without a DOM or a renderer.
+     *
+     * @param {Object} cs The owning Cyberspace instance.
+     */
+    function GameManager(cs) {
+        var THREE = cs.THREE;
+        this.cs = cs;
+        this.THREE = THREE;
+        this.scene = cs.scene;
+        this.camera = cs.camera;
+        this.state = 'idle'; // 'idle' | 'playing' | 'over'.
+        this.score = 0;
+        this.health = 100;
+        this.time = 0;
+        this.maxTargets = 5;
+        this.targets = [];
+        this.accent = (cs.palette && cs.palette.primary) || 0x39d0ff;
+        this.raycaster = new THREE.Raycaster();
+        this.tmpOrigin = new THREE.Vector3();
+        this.tmpDir = new THREE.Vector3();
+        this.tmpQuat = new THREE.Quaternion();
+        this.hudPos = new THREE.Vector3();
+        this.hudDir = new THREE.Vector3();
+
+        // A group holding every game object, in the world but hidden until play.
+        this.group = new THREE.Group();
+        this.group.visible = false;
+        if (this.scene) {
+            this.scene.add(this.group);
+        }
+        this.buildHud();
+        this.buildVrHud();
+    }
+
+    /**
+     * Whether the game is currently running (accepting shots).
+     *
+     * @return {Boolean} True while playing.
+     */
+    GameManager.prototype.isPlaying = function() {
+        return this.state === 'playing';
+    };
+
+    /**
+     * Start (or restart) the game: reset the score and shields, fill the field
+     * with targets and show the HUD.
+     */
+    GameManager.prototype.start = function() {
+        this.state = 'playing';
+        this.score = 0;
+        this.health = 100;
+        this.time = 0;
+        this.clearTargets();
+        for (var i = 0; i < this.maxTargets; i++) {
+            this.spawnTarget();
+        }
+        this.group.visible = true;
+        this.showHud(true);
+        this.updateHud();
+        this.layoutVrHud();
+        this.markButton(true);
+    };
+
+    /**
+     * Stop the game and return to normal browsing: clear the targets and hide
+     * the HUD.
+     */
+    GameManager.prototype.stop = function() {
+        this.state = 'idle';
+        this.clearTargets();
+        this.group.visible = false;
+        this.showHud(false);
+        if (this.vrHud) {
+            this.vrHud.visible = false;
+        }
+        this.markButton(false);
+    };
+
+    /**
+     * Reflect the running state on the launch button (play vs stop glyph).
+     *
+     * @param {Boolean} playing Whether the game is running.
+     */
+    GameManager.prototype.markButton = function(playing) {
+        var btn = this.cs.gameButton;
+        if (!btn) {
+            return;
+        }
+        var s = this.cs.config.strings || {};
+        btn.textContent = playing ? '■' : '▶'; // ■ stop / ▶ play.
+        btn.title = playing ? (s.gameexit || 'Exit game') : (s.gamestart || 'Play');
+        btn.setAttribute('aria-label', btn.title);
+    };
+
+    /**
+     * Fire a hitscan ray; destroy the first target it hits and score it.
+     *
+     * @param {Object} origin World-space ray origin (Three.Vector3).
+     * @param {Object} dir World-space ray direction (Three.Vector3).
+     * @return {Object|null} The hit target mesh, or null on a miss.
+     */
+    GameManager.prototype.shoot = function(origin, dir) {
+        if (this.state !== 'playing' || !this.targets.length) {
+            return null;
+        }
+        this.tmpDir.copy(dir).normalize();
+        this.raycaster.set(origin, this.tmpDir);
+        var hits = this.raycaster.intersectObjects(this.targets, false);
+        if (!hits.length) {
+            return null;
+        }
+        var mesh = hits[0].object;
+        this.hitTarget(mesh);
+        return mesh;
+    };
+
+    /**
+     * Fire along the desktop camera's forward direction (the crosshair aims it).
+     */
+    GameManager.prototype.shootFromCamera = function() {
+        this.camera.getWorldPosition(this.tmpOrigin);
+        this.camera.getWorldDirection(this.tmpDir);
+        this.shoot(this.tmpOrigin, this.tmpDir);
+    };
+
+    /**
+     * Fire along an XR controller's ray, with a confirming haptic pulse.
+     *
+     * @param {Object} controller The XR controller.
+     */
+    GameManager.prototype.shootFromController = function(controller) {
+        controller.getWorldPosition(this.tmpOrigin);
+        var q = controller.getWorldQuaternion(this.tmpQuat);
+        this.shoot(this.tmpOrigin, new this.THREE.Vector3(0, 0, -1).applyQuaternion(q));
+        if (this.cs.gestures) {
+            this.cs.gestures.pulse(controller.userData.handedness, 0.6, 30);
+        }
+    };
+
+    /**
+     * Register a hit: remove the target, add to the score, and spawn a fresh one
+     * so the field stays full.
+     *
+     * @param {Object} mesh The target mesh.
+     */
+    GameManager.prototype.hitTarget = function(mesh) {
+        var idx = this.targets.indexOf(mesh);
+        if (idx === -1) {
+            return;
+        }
+        this.targets.splice(idx, 1);
+        this.disposeTarget(mesh);
+        this.score += 10;
+        this.updateHud();
+        this.spawnTarget();
+    };
+
+    /**
+     * Remove a target from the scene and release its GPU resources. Three.js
+     * does not free the geometry/material buffers just because a mesh leaves the
+     * graph, so each unique target must be disposed or a long game leaks VRAM.
+     *
+     * @param {Object} mesh The target mesh.
+     */
+    GameManager.prototype.disposeTarget = function(mesh) {
+        if (mesh.parent) {
+            mesh.parent.remove(mesh);
+        }
+        if (mesh.geometry && mesh.geometry.dispose) {
+            mesh.geometry.dispose();
+        }
+        if (mesh.material && mesh.material.dispose) {
+            mesh.material.dispose();
+        }
+    };
+
+    /**
+     * Add one glowing target at a random spot ahead of the viewer.
+     *
+     * @return {Object|null} The target mesh, or null when the field is full.
+     */
+    GameManager.prototype.spawnTarget = function() {
+        if (!this.scene || this.targets.length >= this.maxTargets) {
+            return null;
+        }
+        var THREE = this.THREE;
+        var mesh = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(1.1, 0),
+            new THREE.MeshStandardMaterial({
+                color: this.accent, emissive: this.accent, emissiveIntensity: 0.6,
+                roughness: 0.4, metalness: 0.3
+            })
+        );
+        // Place it ahead of where the viewer faces, spread across the view, but
+        // reject spots that sit on or behind a building so a target is never
+        // hidden inside geometry or only reachable by shooting through a wall.
+        this.camera.getWorldPosition(this.tmpOrigin);
+        this.camera.getWorldDirection(this.tmpDir);
+        this.tmpDir.y = 0;
+        if (this.tmpDir.lengthSq() < 1e-4) {
+            this.tmpDir.set(0, 0, -1);
+        }
+        this.tmpDir.normalize();
+        var right = new THREE.Vector3().crossVectors(this.tmpDir, new THREE.Vector3(0, 1, 0)).normalize();
+        var px = this.tmpOrigin.x;
+        var pz = this.tmpOrigin.z;
+        var y = 1.5 + Math.random() * 6;
+        for (var attempt = 0; attempt < 8; attempt++) {
+            var dist = 16 + Math.random() * 18;
+            var side = (Math.random() * 2 - 1) * 10;
+            px = this.tmpOrigin.x + this.tmpDir.x * dist + right.x * side;
+            pz = this.tmpOrigin.z + this.tmpDir.z * dist + right.z * side;
+            if (this.hasLineOfSight(this.tmpOrigin.x, this.tmpOrigin.z, px, pz)) {
+                break;
+            }
+        }
+        mesh.position.set(px, y, pz);
+        mesh.userData.gameTarget = true;
+        mesh.userData.spin = 0.6 + Math.random() * 1.2;
+        mesh.userData.bobPhase = Math.random() * Math.PI * 2;
+        mesh.userData.baseY = mesh.position.y;
+        this.group.add(mesh);
+        this.targets.push(mesh);
+        return mesh;
+    };
+
+    /**
+     * Whether the straight line from the viewer (ax, az) to a candidate target
+     * spot (bx, bz) is clear of every recorded building footprint, so the target
+     * is neither inside a building nor hidden behind one. Falls back to true when
+     * the scene keeps no footprints (e.g. the Grid/Void environments or tests).
+     *
+     * @param {Number} ax Viewer X.
+     * @param {Number} az Viewer Z.
+     * @param {Number} bx Candidate target X.
+     * @param {Number} bz Candidate target Z.
+     * @return {Boolean} True when nothing blocks the line.
+     */
+    GameManager.prototype.hasLineOfSight = function(ax, az, bx, bz) {
+        var cs = this.cs;
+        if (!cs.footprintClear || !cs.footprints || !cs.footprints.length) {
+            return true;
+        }
+        var steps = 10;
+        for (var i = 1; i <= steps; i++) {
+            var t = i / steps;
+            if (!cs.footprintClear(ax + (bx - ax) * t, az + (bz - az) * t, 0.5)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /**
+     * Remove every target from the scene.
+     */
+    GameManager.prototype.clearTargets = function() {
+        for (var i = 0; i < this.targets.length; i++) {
+            this.disposeTarget(this.targets[i]);
+        }
+        this.targets = [];
+    };
+
+    /**
+     * Per-frame update: gently spin and bob the targets so they read as live.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    GameManager.prototype.update = function(dt) {
+        if (this.state !== 'playing') {
+            return;
+        }
+        this.time += dt;
+        for (var i = 0; i < this.targets.length; i++) {
+            var t = this.targets[i];
+            t.rotation.y += t.userData.spin * dt;
+            t.position.y = t.userData.baseY + Math.sin(this.time * 1.6 + t.userData.bobPhase) * 0.5;
+        }
+        this.layoutVrHud();
+    };
+
+    /**
+     * Build the HUD overlay (crosshair, score/shields, hint and an Exit button),
+     * hidden until play. A no-op without a DOM root (unit tests), where the
+     * shoot/score logic still works.
+     */
+    GameManager.prototype.buildHud = function() {
+        var self = this;
+        var s = this.cs.config.strings || {};
+        var root = this.cs.root;
+        if (!root || !root.appendChild) {
+            return;
+        }
+        var wrap = document.createElement('div');
+        wrap.className = 'format-mnemo__game';
+        wrap.hidden = true;
+
+        var cross = document.createElement('div');
+        cross.className = 'format-mnemo__game-crosshair';
+        cross.textContent = '+';
+        wrap.appendChild(cross);
+
+        var hud = document.createElement('div');
+        hud.className = 'format-mnemo__game-hud';
+        var scoreLabel = document.createElement('span');
+        scoreLabel.textContent = (s.gamescore || 'Score') + ': ';
+        this.scoreEl = document.createElement('span');
+        var healthLabel = document.createElement('span');
+        healthLabel.textContent = '  ·  ' + (s.gamehealth || 'Shields') + ': ';
+        this.healthEl = document.createElement('span');
+        hud.appendChild(scoreLabel);
+        hud.appendChild(this.scoreEl);
+        hud.appendChild(healthLabel);
+        hud.appendChild(this.healthEl);
+        wrap.appendChild(hud);
+
+        var hint = document.createElement('div');
+        hint.className = 'format-mnemo__game-hint';
+        hint.textContent = s.gamehint || '';
+        wrap.appendChild(hint);
+
+        var exit = document.createElement('button');
+        exit.type = 'button';
+        exit.className = 'format-mnemo__game-exit';
+        exit.textContent = s.gameexit || 'Exit game';
+        exit.addEventListener('click', function() {
+            self.stop();
+        });
+        wrap.appendChild(exit);
+
+        root.appendChild(wrap);
+        this.hud = wrap;
+    };
+
+    /**
+     * Show or hide the HUD overlay.
+     *
+     * @param {Boolean} show Whether to show it.
+     */
+    GameManager.prototype.showHud = function(show) {
+        if (this.hud) {
+            this.hud.hidden = !show;
+        }
+    };
+
+    /**
+     * Refresh the score/shields readout.
+     */
+    GameManager.prototype.updateHud = function() {
+        if (this.scoreEl) {
+            this.scoreEl.textContent = String(this.score);
+        }
+        if (this.healthEl) {
+            this.healthEl.textContent = String(this.health);
+        }
+        this.drawVrScore();
+    };
+
+    /**
+     * Build the in-world (WebXR) HUD: a reticle plus a readout panel that the
+     * headset can actually see, since the DOM overlay is not visible in an
+     * immersive session. Head-anchored each frame by layoutVrHud(). A no-op when
+     * there is no scene (unit tests), where the score logic still runs.
+     */
+    GameManager.prototype.buildVrHud = function() {
+        if (!this.scene || !this.THREE) {
+            return;
+        }
+        var THREE = this.THREE;
+        var accent = this.accent;
+        var group = new THREE.Group();
+        group.visible = false;
+
+        // No head reticle: in VR the shot follows the controller's own aim ray
+        // (see buildControllers), so the HUD is just a head-anchored readout.
+
+        // Score / shields panel, redrawn from a canvas on every change.
+        this.vrScoreCanvas = document.createElement('canvas');
+        this.vrScoreCanvas.width = 512;
+        this.vrScoreCanvas.height = 128;
+        this.vrScoreTex = new THREE.CanvasTexture(this.vrScoreCanvas);
+        if (this.vrScoreTex.colorSpace !== undefined) {
+            this.vrScoreTex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var panel = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.5, 0.125),
+            new THREE.MeshBasicMaterial({
+                map: this.vrScoreTex, transparent: true, depthTest: false, depthWrite: false
+            })
+        );
+        panel.position.set(0, 0.22, 0);
+        panel.renderOrder = 999;
+        group.add(panel);
+
+        // Static hint line: how to exit from inside the headset.
+        var s = this.cs.config.strings || {};
+        var hintTex = this.bakeHudText(s.gameexit ? ('B / Y — ' + s.gameexit) : 'B / Y — Exit', accent, 0.8);
+        var hint = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.44, 0.11),
+            new THREE.MeshBasicMaterial({
+                map: hintTex, transparent: true, depthTest: false, depthWrite: false
+            })
+        );
+        hint.position.set(0, -0.22, 0);
+        hint.renderOrder = 999;
+        group.add(hint);
+
+        this.scene.add(group);
+        this.vrHud = group;
+        this.drawVrScore();
+    };
+
+    /**
+     * Bake a line of centred text to a CanvasTexture for the in-world HUD.
+     *
+     * @param {String} text The text to draw.
+     * @param {Number} accent The neon primary colour (hex int).
+     * @param {Number} [scale] Font scale factor (1 = default).
+     * @return {Object} A Three.CanvasTexture.
+     */
+    GameManager.prototype.bakeHudText = function(text, accent, scale) {
+        var THREE = this.THREE;
+        var accentCss = '#' + ('000000' + accent.toString(16)).slice(-6);
+        var canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 512, 128);
+        ctx.fillStyle = accentCss;
+        ctx.font = '600 ' + Math.round(56 * (scale || 1)) + 'px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 256, 70);
+        var tex = new THREE.CanvasTexture(canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        return tex;
+    };
+
+    /**
+     * Redraw the in-world score / shields panel from the current values.
+     */
+    GameManager.prototype.drawVrScore = function() {
+        if (!this.vrScoreCanvas || !this.vrScoreTex) {
+            return;
+        }
+        var s = this.cs.config.strings || {};
+        var accentCss = '#' + ('000000' + this.accent.toString(16)).slice(-6);
+        var ctx = this.vrScoreCanvas.getContext('2d');
+        ctx.clearRect(0, 0, 512, 128);
+        // Backing plate for legibility over a bright skyline.
+        ctx.fillStyle = 'rgba(2,6,15,0.6)';
+        if (this.cs.roundRect) {
+            this.cs.roundRect(ctx, 6, 26, 500, 76, 16);
+            ctx.fill();
+        } else {
+            ctx.fillRect(6, 26, 500, 76);
+        }
+        ctx.fillStyle = accentCss;
+        ctx.font = '600 40px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        var line = (s.gamescore || 'Score') + ': ' + this.score
+            + '   ' + (s.gamehealth || 'Shields') + ': ' + this.health;
+        ctx.fillText(line, 256, 64);
+        this.vrScoreTex.needsUpdate = true;
+    };
+
+    /**
+     * Anchor the in-world HUD a short way in front of the headset each frame so
+     * the reticle stays centred and the readout stays legible. Shown only while
+     * playing in an immersive session (the DOM HUD covers desktop).
+     */
+    GameManager.prototype.layoutVrHud = function() {
+        var hud = this.vrHud;
+        if (!hud) {
+            return;
+        }
+        var xr = this.cs.renderer && this.cs.renderer.xr;
+        var presenting = !!(xr && xr.isPresenting);
+        var show = this.isPlaying() && presenting;
+        hud.visible = show;
+        if (!show) {
+            return;
+        }
+        this.camera.getWorldPosition(this.hudPos);
+        this.camera.getWorldDirection(this.hudDir);
+        if (this.hudDir.lengthSq() < 1e-6) {
+            this.hudDir.set(0, 0, -1);
+        }
+        this.hudDir.normalize();
+        hud.position.copy(this.hudPos).addScaledVector(this.hudDir, 1.4);
+        hud.lookAt(this.hudPos.x, this.hudPos.y, this.hudPos.z);
+    };
+
+    /**
      * Wire up the list / 3D view toggle (works even if the scene fails).
      *
      * @param {HTMLElement} container The outer .format-mnemo element.
@@ -9753,6 +10359,7 @@ define('format_mnemo/vr', [], function() {
         // scene class so a render harness can screenshot it. Not used by the
         // plugin itself.
         _GestureManager: GestureManager,
+        _GameManager: GameManager,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,

@@ -194,6 +194,90 @@
     background: rgba(0, 229, 255, 0.18);
 }
 
+/* Optional arcade game: launch button (left of the comfort gear) + HUD overlay. */
+.format-mnemo__game-btn {
+    position: absolute;
+    top: 12px;
+    right: 108px;
+    z-index: 5;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    line-height: 1;
+    color: #ff5470;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(255, 84, 112, 0.6);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__game-btn:hover {
+    background: rgba(255, 84, 112, 0.18);
+}
+
+.format-mnemo__game {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    pointer-events: none;
+    font-family: "Courier New", monospace;
+    color: #eaf6ff;
+}
+
+.format-mnemo__game-crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 28px;
+    line-height: 1;
+    color: #ff5470;
+    text-shadow: 0 0 6px rgba(255, 84, 112, 0.8);
+}
+
+.format-mnemo__game-hud {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    padding: 6px 12px;
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    background: rgba(2, 6, 15, 0.55);
+    border: 1px solid rgba(255, 84, 112, 0.5);
+    border-radius: 4px;
+}
+
+.format-mnemo__game-hint {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 80%;
+    padding: 6px 12px;
+    font-size: 13px;
+    text-align: center;
+    background: rgba(2, 6, 15, 0.55);
+    border-radius: 4px;
+}
+
+.format-mnemo__game-exit {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    font: inherit;
+    color: #ff5470;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(255, 84, 112, 0.6);
+    border-radius: 4px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.format-mnemo__game-exit:hover {
+    background: rgba(255, 84, 112, 0.18);
+}
+
 .format-mnemo__comfort {
     position: absolute;
     top: 60px;
