@@ -370,7 +370,13 @@ class scene implements renderable, templatable {
             $count = (isset($parts[5]) && is_numeric($parts[5])) ? (int)$parts[5] : 4;
             // Optional 7th field: a manual facing in degrees, added to the
             // travel heading. Left null lets the client auto-orient the model.
+            // is_numeric() accepts out-of-range exponents (e.g. 1e309) that cast
+            // to INF and would make json_encode() of the whole config fail, so a
+            // non-finite value is treated as "not set".
             $yaw = (isset($parts[6]) && is_numeric($parts[6])) ? (float)$parts[6] : null;
+            if ($yaw !== null && !is_finite($yaw)) {
+                $yaw = null;
+            }
             $out[] = [
                 'model' => $model,
                 'path' => $path,

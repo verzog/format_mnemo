@@ -1265,10 +1265,14 @@ const scenarios = [
             const deepYaw = self.trafficModelYaw(deep, {});
             // An explicit yaw (degrees) wins and converts to radians.
             const forced = self.trafficModelYaw(wide, {yaw: 90});
+            // The bundled av (front -X) is pinned to +90deg, not the raw axis
+            // correction, so it drives front-first not tail-first.
+            const avYaw = self.trafficModelYaw(wide, {model: 'av'});
             const pass = Math.abs(wideYaw + Math.PI / 2) < 1e-6 &&
                 Math.abs(deepYaw) < 1e-6 &&
-                Math.abs(forced - Math.PI / 2) < 1e-6;
-            return {pass, detail: `wide=${wideYaw.toFixed(3)} deep=${deepYaw.toFixed(3)} forced=${forced.toFixed(3)}`};
+                Math.abs(forced - Math.PI / 2) < 1e-6 &&
+                Math.abs(avYaw - Math.PI / 2) < 1e-6;
+            return {pass, detail: `wide=${wideYaw.toFixed(3)} deep=${deepYaw.toFixed(3)} forced=${forced.toFixed(3)} av=${avYaw.toFixed(3)}`};
         }
     },
     {

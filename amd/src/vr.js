@@ -3120,11 +3120,14 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * The extra yaw (radians) that turns a car model to face its direction of
-     * travel. An authored `yaw` (degrees, in the car type) wins; otherwise it is
-     * auto-detected from the model's footprint — a vehicle is usually longer
-     * along its travel axis, so a model clearly wider along local X than Z has
-     * its length (its "forward") on X and needs a quarter turn to point the way
-     * the heading (measured from +Z) assumes. Near-square models are left as-is.
+     * travel. An authored `yaw` (degrees, in the car type) wins. Bundled models
+     * whose authored front is known are turned by that known offset (the
+     * footprint heuristic can find the length axis but not which end is the
+     * front). Otherwise it is auto-detected from the model's footprint — a
+     * vehicle is usually longer along its travel axis, so a model clearly wider
+     * along local X than Z has its length (its "forward") on X and needs a
+     * quarter turn to point the way the heading (measured from +Z) assumes.
+     * Near-square models are left as-is.
      *
      * @param {Object} tpl The loaded model template.
      * @param {Object} ct The car type (may carry an authored `yaw` in degrees).
@@ -3133,6 +3136,13 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.trafficModelYaw = function(tpl, ct) {
         if (ct && typeof ct.yaw === 'number' && isFinite(ct.yaw)) {
             return ct.yaw * Math.PI / 180;
+        }
+        // Bundled models with a known front (the box heuristic finds the long
+        // axis, not the front, so these are pinned): av's front is -X, which a
+        // bare axis correction would send tail-first.
+        var known = {av: Math.PI / 2};
+        if (ct && Object.prototype.hasOwnProperty.call(known, ct.model)) {
+            return known[ct.model];
         }
         var THREE = this.THREE;
         var size = new THREE.Box3().setFromObject(tpl).getSize(new THREE.Vector3());
