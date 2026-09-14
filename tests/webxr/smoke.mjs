@@ -2211,6 +2211,9 @@ const scenarios = [
             const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
                 config: {strings: {}}, root: null, gestures: null, gameButton: null};
             const gm = new GM(cs);
+            // Deterministic: a single target on the ray, so no other randomly
+            // placed target can intercept the shot first.
+            gm.maxTargets = 1;
             gm.start();
             scene.updateMatrixWorld(true);
             const t = gm.targets[0];
@@ -2240,6 +2243,129 @@ const scenarios = [
             const idle = gm.shoot(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
             return {pass: idle === null && gm.isPlaying() === false && gm.score === 0,
                 detail: `idle=${idle} playing=${gm.isPlaying()}`};
+        }
+    },
+    {
+        name: 'game: a scored target disposes its geometry and material',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null};
+            const gm = new GM(cs);
+            gm.maxTargets = 1;
+            gm.start();
+            scene.updateMatrixWorld(true);
+            const t = gm.targets[0];
+            let geoDisposed = false;
+            let matDisposed = false;
+            const g0 = t.geometry.dispose.bind(t.geometry);
+            t.geometry.dispose = () => {
+                geoDisposed = true;
+                g0();
+            };
+            const m0 = t.material.dispose.bind(t.material);
+            t.material.dispose = () => {
+                matDisposed = true;
+                m0();
+            };
+            const origin = new THREE.Vector3(t.position.x, t.position.y, t.position.z + 10);
+            gm.shoot(origin, new THREE.Vector3(0, 0, -1));
+            return {pass: geoDisposed && matDisposed && t.parent === null,
+                detail: `geo=${geoDisposed} mat=${matDisposed} parent=${t.parent}`};
+        }
+    },
+    {
+        name: 'game: hasLineOfSight rejects a target behind a building footprint',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const CS = window.__mnemoModule._Cyberspace;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const cs = {THREE, scene, camera, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null,
+                footprints: [{xMin: -2, xMax: 2, zMin: -12, zMax: -8}],
+                footprintClear: CS.prototype.footprintClear};
+            const gm = new GM(cs);
+            // A block sits at z ~ -10 dead ahead: a target at z = -20 is behind it.
+            const blocked = gm.hasLineOfSight(0, 0, 0, -20) === false;
+            const clear = gm.hasLineOfSight(0, 0, 12, 0) === true;
+            // With no recorded footprints (Grid/Void), everything is reachable.
+            const gm2 = new GM({...cs, footprints: []});
+            const emptyClear = gm2.hasLineOfSight(0, 0, 0, -20) === true;
+            return {pass: blocked && clear && emptyClear,
+                detail: `blocked=${blocked} clear=${clear} emptyClear=${emptyClear}`};
+        }
+    },
+    {
+        name: 'game: the in-world VR HUD shows while presenting and hides on stop',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const GM = window.__mnemoModule._GameManager;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(72, 1, 0.1, 1000);
+            scene.add(camera);
+            const renderer = {xr: {isPresenting: true}};
+            const cs = {THREE, scene, camera, renderer, palette: {primary: 0x39d0ff},
+                config: {strings: {}}, root: null, gestures: null, gameButton: null};
+            const gm = new GM(cs);
+            const built = !!gm.vrHud;
+            gm.start();
+            scene.updateMatrixWorld(true);
+            gm.layoutVrHud();
+            const shown = gm.vrHud.visible === true;
+            // Anchored ahead of the camera (which looks down -Z from the origin).
+            const inFront = gm.vrHud.position.z < 0;
+            gm.stop();
+            const hidden = gm.vrHud.visible === false;
+            return {pass: built && shown && inFront && hidden,
+                detail: `built=${built} shown=${shown} z=${gm.vrHud.position.z.toFixed(2)} hidden=${hidden}`};
+        }
+    },
+    {
+        name: 'game: while a game runs, VR locomotion is suspended',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            c.cs.game = {isPlaying: () => true, start() {}, stop() {}};
+            // Full forward on the left stick would normally glide the player.
+            c.controllers[0].userData.inputSource.gamepad.axes = [0, 0, 0, -1];
+            T.frame(c, 0.1);
+            const s = T.state(c);
+            const pass = Math.abs(s.x) < 1e-6 && Math.abs(s.z) < 1e-6;
+            return {pass, detail: `x=${s.x.toFixed(4)} z=${s.z.toFixed(4)}`};
+        }
+    },
+    {
+        name: 'game: the B/Y face button starts then exits the game in VR',
+        fn: () => {
+            const T = window.__mnemoTest;
+            const c = T.make();
+            const game = {playing: false, isPlaying() {
+                return this.playing;
+            }, start() {
+                this.playing = true;
+            }, stop() {
+                this.playing = false;
+            }};
+            c.cs.game = game;
+            const press = (on) => {
+                c.controllers[0].userData.inputSource.gamepad.buttons[5].pressed = on;
+            };
+            press(true);
+            T.frame(c, 0.016);
+            const started = game.playing === true;
+            press(false); // Release re-arms the toggle.
+            T.frame(c, 0.016);
+            press(true);
+            T.frame(c, 0.016);
+            const exited = game.playing === false;
+            return {pass: started && exited, detail: `started=${started} exited=${exited}`};
         }
     },
     {
