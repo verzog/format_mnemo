@@ -20,6 +20,7 @@ use completion_info;
 use context_course;
 use context_module;
 use core_courseformat\base as course_format;
+use format_mnemo\local\model_config;
 use moodle_url;
 use renderable;
 use renderer_base;
@@ -651,6 +652,9 @@ class scene implements renderable, templatable {
             // Admin-authored flying-car types (model + path/speed/height/landing
             // behaviour). Empty lets the client use its default avenue vehicle.
             'cartypes' => $this->car_types(),
+            // Per-model settings from the asset viewer, keyed by model name:
+            // the environments it appears in, and its facing/scale overrides.
+            'modelconfig' => model_config::for_client(),
             // The grid the generated layout snaps to and the placer/editor use.
             'gridsize' => 2,
             // Per-learner comfort settings (turn mode/angle, motion vignette,

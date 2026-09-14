@@ -92,6 +92,21 @@ class model_config {
     }
 
     /**
+     * The stored config trimmed for the scene client: each configured model's
+     * environments, facing and scale (the behaviour map is left server-side
+     * until it drives anything). Only models with a stored entry appear.
+     *
+     * @return array<string, array{envs: string[], yaw: ?float, scale: ?float}>
+     */
+    public static function for_client(): array {
+        $out = [];
+        foreach (self::all() as $name => $cfg) {
+            $out[$name] = ['envs' => $cfg['envs'], 'yaw' => $cfg['yaw'], 'scale' => $cfg['scale']];
+        }
+        return $out;
+    }
+
+    /**
      * Whether a model is enabled for an environment: a model with no environment
      * tags is available everywhere; otherwise only in its tagged environments.
      *

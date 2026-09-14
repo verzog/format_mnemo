@@ -525,6 +525,7 @@ const scenarios = [
             const self = {
                 config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/'},
                 joinBase: CS.prototype.joinBase,
+                modelCfg: CS.prototype.modelCfg,
                 loadModel: (url) => {
                     calls.push(url);
                     return url.indexOf('pack/') === 0
@@ -546,6 +547,7 @@ const scenarios = [
             const self = {
                 config: {modelsbaseurl: 'm/', modelsfallbackurl: 'm/'},
                 joinBase: CS.prototype.joinBase,
+                modelCfg: CS.prototype.modelCfg,
                 loadModel: (url) => {
                     calls.push(url);
                     return Promise.resolve({});
@@ -1399,7 +1401,8 @@ const scenarios = [
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const self = {THREE, trafficModelYaw: CS.prototype.trafficModelYaw};
+            const self = {THREE, config: {}, modelCfg: CS.prototype.modelCfg,
+                trafficModelYaw: CS.prototype.trafficModelYaw};
             // Longer along X than Z -> its length is the X axis -> quarter turn.
             const wide = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 1.5));
             wide.updateMatrixWorld(true);
@@ -1418,6 +1421,60 @@ const scenarios = [
                 Math.abs(forced - Math.PI / 2) < 1e-6 &&
                 Math.abs(avYaw - Math.PI / 2) < 1e-6;
             return {pass, detail: `wide=${wideYaw.toFixed(3)} deep=${deepYaw.toFixed(3)} forced=${forced.toFixed(3)} av=${avYaw.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'model: modelScale reads the asset-viewer scale or defaults to 1',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelconfig: {car: {scale: 2}}}, modelCfg: CS.prototype.modelCfg};
+            const scaled = CS.prototype.modelScale.call(self, 'car');
+            const dflt = CS.prototype.modelScale.call(self, 'other');
+            return {pass: scaled === 2 && dflt === 1, detail: `car=${scaled} other=${dflt}`};
+        }
+    },
+    {
+        name: 'traffic: the asset-viewer facing overrides the auto orientation',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, config: {modelconfig: {hovercar: {yaw: 180}}},
+                modelCfg: CS.prototype.modelCfg, trafficModelYaw: CS.prototype.trafficModelYaw};
+            const wide = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 1.5));
+            wide.updateMatrixWorld(true);
+            // Without config a wide model auto-corrects to -90deg; the stored 180
+            // facing must win instead.
+            const yaw = self.trafficModelYaw(wide, {model: 'hovercar'});
+            return {pass: Math.abs(yaw - Math.PI) < 1e-6, detail: `yaw=${yaw.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'model: loadProp gates a model to its tagged environments',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                config: {environment: 'void', modelsbaseurl: 'm/',
+                    modelconfig: {gridonly: {envs: ['grid']}}},
+                modelCfg: CS.prototype.modelCfg,
+                joinBase: () => 'x',
+                loadModel: () => Promise.resolve({}),
+                loadProp: CS.prototype.loadProp
+            };
+            let rejected = false;
+            try {
+                await self.loadProp('gridonly');
+            } catch (e) {
+                rejected = true;
+            }
+            // An untagged model still loads everywhere.
+            let untagged = false;
+            try {
+                await self.loadProp('anything');
+                untagged = true;
+            } catch (e) {
+                untagged = false;
+            }
+            return {pass: rejected && untagged, detail: `rejected=${rejected} untagged=${untagged}`};
         }
     },
     {
@@ -1505,9 +1562,11 @@ const scenarios = [
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
             const mk = (pre) => ({
-                THREE, traffic: pre, scene: {add: () => {}}, footprints: [],
+                THREE, traffic: pre, scene: {add: () => {}}, footprints: [], config: {},
                 trafficBounds: () => box,
                 setShadow: CS.prototype.setShadow,
+                modelCfg: CS.prototype.modelCfg,
+                modelScale: CS.prototype.modelScale,
                 trafficModelYaw: CS.prototype.trafficModelYaw,
                 trafficClearance: CS.prototype.trafficClearance,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
