@@ -344,6 +344,21 @@ const scenarios = [
         }
     },
     {
+        name: 'building: floorHeight snaps a raw height to whole storeys',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const f = CS.prototype.floorHeight;
+            const pitch = 11 / 6; // MODULE_H / FLOORS_PER_MODULE.
+            const a = f(5);
+            const b = f(0.1); // Below one storey -> clamped up to one.
+            const c = f(23);
+            const whole = (v) => Math.abs(v / pitch - Math.round(v / pitch)) < 1e-9;
+            const pass = whole(a) && whole(c) && Math.abs(b - pitch) < 1e-9 &&
+                Math.abs(a - Math.round(5 / pitch) * pitch) < 1e-9;
+            return {pass, detail: `a=${a.toFixed(2)} b=${b.toFixed(2)} c=${c.toFixed(2)} pitch=${pitch.toFixed(2)}`};
+        }
+    },
+    {
         name: 'building: type-based URL for a confirmed module type',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
