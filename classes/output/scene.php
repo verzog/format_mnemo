@@ -331,12 +331,14 @@ class scene implements renderable, templatable {
     /**
      * The admin-authored flying-car types, parsed from the 'cartypes' setting.
      * Each non-empty, non-comment line is "model | path | speed | height | land
-     * [| count]"; malformed lines and lines naming an unknown/unplaceable model
-     * are skipped, and numeric fields are clamped to sane ranges. An empty
-     * result lets the client fall back to its single default avenue vehicle.
+     * [| count [| yaw]]"; malformed lines and lines naming an unknown/unplaceable
+     * model are skipped, and numeric fields are clamped to sane ranges. The
+     * optional yaw (degrees) manually turns the model to face its heading; left
+     * off, the client auto-orients it. An empty result lets the client fall back
+     * to its single default avenue vehicle.
      *
      * @return array<int, array{model: string, path: string, speed: float,
-     *     height: float, land: string, count: int}>
+     *     height: float, land: string, count: int, yaw: float|null}>
      */
     protected function car_types(): array {
         $raw = get_config('format_mnemo', 'cartypes');
@@ -366,6 +368,9 @@ class scene implements renderable, templatable {
                 continue;
             }
             $count = (isset($parts[5]) && is_numeric($parts[5])) ? (int)$parts[5] : 4;
+            // Optional 7th field: a manual facing in degrees, added to the
+            // travel heading. Left null lets the client auto-orient the model.
+            $yaw = (isset($parts[6]) && is_numeric($parts[6])) ? (float)$parts[6] : null;
             $out[] = [
                 'model' => $model,
                 'path' => $path,
@@ -373,6 +378,7 @@ class scene implements renderable, templatable {
                 'height' => (float)max(4, min(60, (float)$height)),
                 'land' => $land,
                 'count' => (int)max(1, min(16, $count)),
+                'yaw' => $yaw,
             ];
             if (count($out) >= 12) {
                 break;

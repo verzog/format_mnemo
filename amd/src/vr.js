@@ -3097,6 +3097,10 @@ define('format_mnemo/vr', [], function() {
         if (count === undefined) {
             count = Math.max(1, Math.min(ct.count || 4, 16));
         }
+        // Work out once, per model, how much to turn it so it faces the way it
+        // travels (models come from many sources and do not share a forward
+        // axis); every car of this type reuses the same offset.
+        var yawOffset = this.trafficModelYaw(tpl, ct);
         for (var i = 0; i < count; i++) {
             if (this.traffic.length >= TRAFFIC_MAX) {
                 break;
@@ -3104,7 +3108,7 @@ define('format_mnemo/vr', [], function() {
             var car = tpl.clone();
             car.scale.setScalar(0.9 + Math.random() * 0.5);
             var dir = i % 2 === 0 ? 1 : -1;
-            var rec = this.makeTrafficCar(car, ct, dir, box);
+            var rec = this.makeTrafficCar(car, ct, dir, box, yawOffset);
             // No shadow casting on traffic: outside the void the shadow map is
             // only refreshed when the learner moves, so a moving car's shadow
             // would freeze in place and detach. (The original traffic cast no
@@ -3112,6 +3116,30 @@ define('format_mnemo/vr', [], function() {
             this.scene.add(car);
             this.traffic.push(rec);
         }
+    };
+
+    /**
+     * The extra yaw (radians) that turns a car model to face its direction of
+     * travel. An authored `yaw` (degrees, in the car type) wins; otherwise it is
+     * auto-detected from the model's footprint — a vehicle is usually longer
+     * along its travel axis, so a model clearly wider along local X than Z has
+     * its length (its "forward") on X and needs a quarter turn to point the way
+     * the heading (measured from +Z) assumes. Near-square models are left as-is.
+     *
+     * @param {Object} tpl The loaded model template.
+     * @param {Object} ct The car type (may carry an authored `yaw` in degrees).
+     * @return {Number} Yaw offset in radians, added to the travel heading.
+     */
+    Cyberspace.prototype.trafficModelYaw = function(tpl, ct) {
+        if (ct && typeof ct.yaw === 'number' && isFinite(ct.yaw)) {
+            return ct.yaw * Math.PI / 180;
+        }
+        var THREE = this.THREE;
+        var size = new THREE.Box3().setFromObject(tpl).getSize(new THREE.Vector3());
+        if (size.x > size.z * 1.15) {
+            return -Math.PI / 2;
+        }
+        return 0;
     };
 
     /**
@@ -3125,9 +3153,11 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} ct The car type.
      * @param {Number} dir Travel sign along the primary axis (+1 or -1).
      * @param {Object} box The traffic bounds.
+     * @param {Number} [yawOffset] Extra yaw (radians) to face the model's length
+     *     along its travel direction (see trafficModelYaw).
      * @return {Object} The traffic record consumed by updateTraffic().
      */
-    Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box) {
+    Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box, yawOffset) {
         // The default fleet jitters each car's speed and altitude (matching the
         // original 10-26 u/s, 13-33 u ranges); authored types use exact values.
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
@@ -3154,10 +3184,10 @@ define('format_mnemo/vr', [], function() {
             z = box.zMin + Math.random() * (box.zMax - box.zMin);
         }
         car.position.set(x, height, z);
-        // Face the direction of travel. The model's forward is +Z at yaw 0, so
-        // yaw = atan2(vx, vz) turns it onto its heading (avenue -Z reads as pi,
-        // cross +X as +pi/2, matching the placed vehicles and side props).
-        car.rotation.y = Math.atan2(vx, vz);
+        // Face the direction of travel: atan2(vx, vz) is the heading measured
+        // from +Z (avenue -Z reads as pi, cross +X as +pi/2), plus the per-model
+        // yaw offset that turns the model's length onto that heading.
+        car.rotation.y = Math.atan2(vx, vz) + (yawOffset || 0);
         // Landing cars descend toward a low altitude (the ground, or a rooftop
         // band) and climb back; cruising cars keep a gentle bob at height.
         var low = height;
