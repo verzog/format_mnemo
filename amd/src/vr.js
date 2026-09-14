@@ -240,6 +240,7 @@ define('format_mnemo/vr', [], function() {
         this.spinners = []; // Rooftop holo elements that rotate.
         this.planets = []; // The Void's planet spheres, each self-rotating.
         this.clouds = []; // Daytime cloud billboards that drift across the sky.
+        this.celestials = []; // Sun/moon disc(s), kept at a fixed distance from the eye.
         // Activities keyed by course-module id, each with its group, sign,
         // completion tick and sign frame material, so their state can be
         // refreshed live (colour + tick) when the learner finishes one.
@@ -618,41 +619,44 @@ define('format_mnemo/vr', [], function() {
         );
         this.scene.add(dome);
 
-        // Both the sun and the moon hang in the sky, all day and all night. The
-        // sun leads by day (bright, warm, larger) and the moon leads by night,
-        // but each stays faintly visible in the other's half of the cycle - a
-        // pale daytime moon, a low sun glow at dusk - sitting across the sky
-        // from one another.
-        var sunColour = new THREE.Color(0xfff2d8).lerp(new THREE.Color(0xff9550), d.warm);
-        this.buildCelestialBodies([
-            {
-                dir: d.sunDir, colour: sunColour, size: 58 + d.day * 40,
-                opacity: 0.35 + 0.6 * d.day, core: 0.25
-            },
-            {
-                dir: this.moonDirection(d.sunDir), colour: new THREE.Color(0xcdd8ff),
-                size: 44, opacity: 0.3 + 0.55 * d.night, core: 0.55, maria: true
-            }
-        ]);
+        // A single celestial body that follows the Moodle site clock: the sun
+        // by day, the moon by night. It rides the sun's path (so the disc and
+        // the scene light always agree) and, like all celestial bodies, follows
+        // the camera so it stays "at infinity" and never clips as the learner
+        // moves (see updateCelestials).
+        this.addCelestialBody(d, {distance: 480});
     };
 
     /**
-     * A sky direction for the moon: across the sky from the sun (opposite
-     * azimuth) at a gentle fixed elevation, so the two are rarely in the same
-     * part of the sky and the moon sits comfortably above the skyline.
+     * Add the one celestial body for a given daylight state: a warm sun disc
+     * when the sun is up, otherwise a cooler, maria-flecked moon. Shared by the
+     * city, the Grid and the Void so exactly one of the two shows per the clock.
      *
-     * @param {Object} sunDir The sun's unit direction.
-     * @return {Object} A unit Three.Vector3 for the moon.
+     * @param {Object} day A computeDaylight() result choosing sun vs moon.
+     * @param {Object} opts {dir, distance, scale, opacity} overrides.
      */
-    Cyberspace.prototype.moonDirection = function(sunDir) {
+    Cyberspace.prototype.addCelestialBody = function(day, opts) {
         var THREE = this.THREE;
-        var m = new THREE.Vector3(-sunDir.x, 0, -sunDir.z);
-        if (m.lengthSq() < 1e-4) {
-            m.set(0.3, 0, 0.6);
+        opts = opts || {};
+        var dir = opts.dir || day.sunDir;
+        var distance = opts.distance || 480;
+        var scale = opts.scale || 1;
+        var body;
+        if (day.day > 0.12) {
+            // Daytime: the sun, warming toward orange near sunrise/sunset.
+            var sunColour = new THREE.Color(0xfff2d8).lerp(new THREE.Color(0xff9550), day.warm);
+            body = {
+                dir: dir, colour: sunColour, size: (58 + day.day * 40) * scale,
+                opacity: opts.opacity || 0.95, core: 0.25, distance: distance
+            };
+        } else {
+            // Nighttime: the moon, low and cool.
+            body = {
+                dir: dir, colour: new THREE.Color(0xcdd8ff), size: 46 * scale,
+                opacity: opts.opacity || 0.9, core: 0.55, maria: true, distance: distance
+            };
         }
-        m.normalize().multiplyScalar(0.8);
-        m.y = 0.52; // A gentle, steady elevation.
-        return m.normalize();
+        this.buildCelestialBodies([body]);
     };
 
     /**
@@ -713,11 +717,36 @@ define('format_mnemo/vr', [], function() {
                 transparent: true, depthWrite: false, fog: false, opacity: b.opacity
             }));
             sprite.scale.set(b.size, b.size, 1);
-            sprite.position.copy(b.dir).multiplyScalar(b.distance || 480);
+            var distance = b.distance || 480;
+            sprite.position.copy(b.dir).multiplyScalar(distance);
             this.scene.add(sprite);
+            // Track it so it can be kept at a fixed direction and distance from
+            // the eye each frame (see updateCelestials), so it never clips.
+            this.celestials.push({sprite: sprite, dir: b.dir.clone(), distance: distance});
             made.push(sprite);
         }
         return made;
+    };
+
+    /**
+     * Keep every celestial body at a fixed direction and distance from the
+     * camera, so the sun or moon sits effectively at infinity and stays visible
+     * however far the learner travels (the camera far plane would otherwise clip
+     * a world-fixed disc once they moved away from it).
+     */
+    Cyberspace.prototype.updateCelestials = function() {
+        if (!this.celestials.length) {
+            return;
+        }
+        var cam = this.camera.getWorldPosition(this.tmp);
+        for (var i = 0; i < this.celestials.length; i++) {
+            var c = this.celestials[i];
+            c.sprite.position.set(
+                cam.x + c.dir.x * c.distance,
+                cam.y + c.dir.y * c.distance,
+                cam.z + c.dir.z * c.distance
+            );
+        }
     };
 
     /**
@@ -840,36 +869,39 @@ define('format_mnemo/vr', [], function() {
             this.spaceTexture.mapping = THREE.EquirectangularReflectionMapping;
             this.scene.background = this.spaceTexture;
         } else {
-            this.buildStarfield(starDir);
+            this.buildStarfield();
         }
 
         this.buildPlanets();
 
-        // A small sun (the local star) and a moon, so the Void also has a sun
-        // and a moon like the other environments. Deliberately kept small and
-        // dim, and set farther out than the planets, so they read as distant
-        // sky and never outshine or overshadow the planets themselves.
-        this.buildCelestialBodies([
-            {
-                dir: starDir, colour: new THREE.Color(0xfff2d8), size: 30,
-                opacity: 0.7, core: 0.22, distance: 590
-            },
-            {
-                dir: new THREE.Vector3(-0.5, 0.24, 0.55).normalize(),
-                colour: new THREE.Color(0xbcd0ff), size: 22, opacity: 0.55,
-                core: 0.55, maria: true, distance: 590
-            }
-        ]);
+        // The Void's single celestial body (the local star): a small sun by day
+        // or a small moon by night, following the Moodle site clock like the
+        // other environments. It shares the key light's direction, so lighting
+        // and disc agree, and is kept small and dim so it never outshines or
+        // overshadows the planets.
+        this.addVoidCelestial(starDir);
+    };
+
+    /**
+     * Add the Void's one celestial body along the key-light direction, choosing
+     * sun or moon from the real site clock (the Void's own lighting is a fixed
+     * night preset, so the disc is driven from the clock separately). Small and
+     * dim, so the planets stay the brightest things in the sky.
+     *
+     * @param {Object} dir The unit direction to the local star (key light).
+     */
+    Cyberspace.prototype.addVoidCelestial = function(dir) {
+        var real = this.computeDaylight(this.hour);
+        this.addCelestialBody(real, {dir: dir, distance: 520, scale: 0.42, opacity: 0.7});
     };
 
     /**
      * Build the procedural Void backdrop used when no sky image is uploaded: a
-     * near-black sky, a dense starfield on a far shell, palette-tinted nebulae
-     * and a bright star halo.
-     *
-     * @param {Object} starDir The unit direction to the star.
+     * near-black sky, a dense starfield on a far shell and palette-tinted
+     * nebulae. The star itself is drawn separately as the Void's celestial body
+     * (see addVoidCelestial), so there is no duplicate star halo here.
      */
-    Cyberspace.prototype.buildStarfield = function(starDir) {
+    Cyberspace.prototype.buildStarfield = function() {
         var THREE = this.THREE;
         this.scene.background = new THREE.Color(0x03040a);
 
@@ -907,15 +939,10 @@ define('format_mnemo/vr', [], function() {
             );
             this.scene.add(neb);
         }
-
-        // The star itself as a bright halo sprite.
-        var star = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: this.radialTexture(0xfff4e0), transparent: true, opacity: 0.95,
-            depthWrite: false, blending: THREE.AdditiveBlending, fog: false
-        }));
-        star.scale.set(70, 70, 1);
-        star.position.copy(starDir).multiplyScalar(520);
-        this.scene.add(star);
+        // The star itself is drawn once, as the Void's celestial body (a small
+        // sun or moon per the clock); see buildSpace/addVoidCelestial. Drawing a
+        // separate halo here too would stack a second, larger glow at the same
+        // direction, so it is intentionally left to that single body.
     };
 
     /**
@@ -8057,6 +8084,9 @@ define('format_mnemo/vr', [], function() {
 
         // Drift the daytime clouds across the city sky (no-op elsewhere).
         this.driftClouds(dt);
+
+        // Keep the sun/moon pinned at a fixed direction and distance from the eye.
+        this.updateCelestials();
 
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort
