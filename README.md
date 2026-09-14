@@ -88,6 +88,13 @@ off).
   word *ring* (e.g. `saturn-ring.png`). An optional site-wide **ring image** (a
   radial strip, inner edge → outer edge) skins those rings as concentric bands,
   or they fall back to a plain band.
+- **Sun, moon and clouds** — a single **sun or moon** hangs in the sky of every
+  environment, following the **Moodle site clock**: the sun by day, the moon by
+  night. It stays pinned at a fixed direction and distance from the viewer (so it
+  never clips as you move), and in the **Void** it is small and dim so it never
+  outshines the planets. The daytime city also gets a layer of soft **clouds**
+  drifting slowly overhead, which fade out at night so the neon skyline stays
+  clear.
 - **Road-constrained movement** — on foot (and gliding) the learner is kept on
   the avenue and side streets; **flying** (rising off the ground) releases the
   constraint so the whole city is free to explore.

@@ -239,6 +239,8 @@ define('format_mnemo/vr', [], function() {
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.planets = []; // The Void's planet spheres, each self-rotating.
+        this.clouds = []; // Daytime cloud billboards that drift across the sky.
+        this.celestials = []; // Sun/moon disc(s), kept at a fixed distance from the eye.
         // Activities keyed by course-module id, each with its group, sign,
         // completion tick and sign frame material, so their state can be
         // refreshed live (colour + tick) when the learner finishes one.
@@ -585,6 +587,8 @@ define('format_mnemo/vr', [], function() {
         this.buildElevatedHighways();
         this.buildHoloAds();
         this.buildBeams();
+        // Drifting daytime clouds over the city (fade out at night).
+        this.buildClouds();
     };
 
     /**
@@ -615,27 +619,231 @@ define('format_mnemo/vr', [], function() {
         );
         this.scene.add(dome);
 
-        // The sun (or moon) disc with a soft halo.
-        var disc = document.createElement('canvas');
-        disc.width = 128;
-        disc.height = 128;
-        var dctx = disc.getContext('2d');
-        var col = d.sunColor;
-        var rgb = Math.round(col.r * 255) + ',' + Math.round(col.g * 255) + ',' + Math.round(col.b * 255);
-        var rg = dctx.createRadialGradient(64, 64, 4, 64, 64, 64);
+        // A single celestial body that follows the Moodle site clock: the sun
+        // by day, the moon by night. It rides the sun's path (so the disc and
+        // the scene light always agree) and, like all celestial bodies, follows
+        // the camera so it stays "at infinity" and never clips as the learner
+        // moves (see updateCelestials).
+        this.addCelestialBody(d, {distance: 480});
+    };
+
+    /**
+     * Add the one celestial body for a given daylight state: a warm sun disc
+     * when the sun is up, otherwise a cooler, maria-flecked moon. Shared by the
+     * city, the Grid and the Void so exactly one of the two shows per the clock.
+     *
+     * @param {Object} day A computeDaylight() result choosing sun vs moon.
+     * @param {Object} opts {dir, distance, scale, opacity} overrides.
+     */
+    Cyberspace.prototype.addCelestialBody = function(day, opts) {
+        var THREE = this.THREE;
+        opts = opts || {};
+        var dir = opts.dir || day.sunDir;
+        var distance = opts.distance || 480;
+        var scale = opts.scale || 1;
+        var body;
+        if (day.day > 0.12) {
+            // Daytime: the sun, warming toward orange near sunrise/sunset.
+            var sunColour = new THREE.Color(0xfff2d8).lerp(new THREE.Color(0xff9550), day.warm);
+            body = {
+                dir: dir, colour: sunColour, size: (58 + day.day * 40) * scale,
+                opacity: opts.opacity || 0.95, core: 0.25, distance: distance
+            };
+        } else {
+            // Nighttime: the moon, low and cool.
+            body = {
+                dir: dir, colour: new THREE.Color(0xcdd8ff), size: 46 * scale,
+                opacity: opts.opacity || 0.9, core: 0.55, maria: true, distance: distance
+            };
+        }
+        this.buildCelestialBodies([body]);
+    };
+
+    /**
+     * A soft celestial disc texture (sun or moon): a radial glow, optionally
+     * with a few faint darker maria for the moon.
+     *
+     * @param {Object} colour A Three.Color for the disc.
+     * @param {Object} opts {core: mid gradient stop, maria: draw lunar seas}.
+     * @return {Object} A Three.CanvasTexture.
+     */
+    Cyberspace.prototype.celestialDiscTexture = function(colour, opts) {
+        var THREE = this.THREE;
+        opts = opts || {};
+        var ctx = this.newCanvasCtx(128);
+        var rgb = Math.round(colour.r * 255) + ',' +
+            Math.round(colour.g * 255) + ',' + Math.round(colour.b * 255);
+        var core = opts.core || 0.25;
+        var rg = ctx.createRadialGradient(64, 64, 4, 64, 64, 64);
         rg.addColorStop(0, 'rgba(' + rgb + ',1)');
-        rg.addColorStop(0.25, 'rgba(' + rgb + ',0.8)');
+        rg.addColorStop(core, 'rgba(' + rgb + ',0.85)');
         rg.addColorStop(1, 'rgba(' + rgb + ',0)');
-        dctx.fillStyle = rg;
-        dctx.fillRect(0, 0, 128, 128);
-        var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: new THREE.CanvasTexture(disc), transparent: true,
-            depthWrite: false, fog: false, opacity: 0.95
-        }));
-        var size = 60 + d.day * 40;
-        sprite.scale.set(size, size, 1);
-        sprite.position.copy(d.sunDir).multiplyScalar(480);
-        this.scene.add(sprite);
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, 0, 128, 128);
+        if (opts.maria) {
+            // Faint darker seas, painted only over the disc that already exists.
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = 'rgba(70,90,140,0.30)';
+            var blobs = [[54, 52, 13], [80, 70, 9], [62, 84, 8]];
+            for (var i = 0; i < blobs.length; i++) {
+                ctx.beginPath();
+                ctx.arc(blobs[i][0], blobs[i][1], blobs[i][2], 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        var tex = new THREE.CanvasTexture(ctx.canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        return tex;
+    };
+
+    /**
+     * Add celestial disc sprites (sun, moon, star) to the sky. Each body is
+     * {dir, colour, size, opacity, core, maria, distance}. Shared by every
+     * environment so a sun and a moon appear in all of them.
+     *
+     * @param {Array} bodies The bodies to place.
+     * @return {Array} The created sprites.
+     */
+    Cyberspace.prototype.buildCelestialBodies = function(bodies) {
+        var THREE = this.THREE;
+        var made = [];
+        for (var i = 0; i < bodies.length; i++) {
+            var b = bodies[i];
+            var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: this.celestialDiscTexture(b.colour, {core: b.core, maria: b.maria}),
+                transparent: true, depthWrite: false, fog: false, opacity: b.opacity
+            }));
+            sprite.scale.set(b.size, b.size, 1);
+            var distance = b.distance || 480;
+            sprite.position.copy(b.dir).multiplyScalar(distance);
+            this.scene.add(sprite);
+            // Track it so it can be kept at a fixed direction and distance from
+            // the eye each frame (see updateCelestials), so it never clips.
+            this.celestials.push({sprite: sprite, dir: b.dir.clone(), distance: distance});
+            made.push(sprite);
+        }
+        return made;
+    };
+
+    /**
+     * Keep every celestial body at a fixed direction and distance from the
+     * camera, so the sun or moon sits effectively at infinity and stays visible
+     * however far the learner travels (the camera far plane would otherwise clip
+     * a world-fixed disc once they moved away from it).
+     */
+    Cyberspace.prototype.updateCelestials = function() {
+        if (!this.celestials.length) {
+            return;
+        }
+        var cam = this.camera.getWorldPosition(this.tmp);
+        for (var i = 0; i < this.celestials.length; i++) {
+            var c = this.celestials[i];
+            c.sprite.position.set(
+                cam.x + c.dir.x * c.distance,
+                cam.y + c.dir.y * c.distance,
+                cam.z + c.dir.z * c.distance
+            );
+        }
+    };
+
+    /**
+     * A soft, puffy cloud sprite texture: a handful of overlapping white radial
+     * blobs with soft edges, so a billboard reads as a fair-weather cloud.
+     *
+     * @return {Object} A Three.CanvasTexture (256x128).
+     */
+    Cyberspace.prototype.cloudTexture = function() {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        var ctx = canvas.getContext('2d');
+        var puffs = [[70, 84, 42], [118, 62, 54], [174, 86, 40], [100, 96, 34], [150, 98, 32]];
+        for (var i = 0; i < puffs.length; i++) {
+            var p = puffs[i];
+            var g = ctx.createRadialGradient(p[0], p[1], 2, p[0], p[1], p[2]);
+            g.addColorStop(0, 'rgba(255,255,255,0.98)');
+            g.addColorStop(0.6, 'rgba(255,255,255,0.55)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 256, 128);
+        }
+        // Shade the cloud so it reads as a volume against a pale, hazy sky:
+        // bright, sunlit tops fading to a cool steel-blue shadowed base. Painted
+        // only over the puffs that already exist (source-atop).
+        ctx.globalCompositeOperation = 'source-atop';
+        var lin = ctx.createLinearGradient(0, 0, 0, 128);
+        lin.addColorStop(0, 'rgba(255,255,255,0)');
+        lin.addColorStop(0.55, 'rgba(150,168,196,0.18)');
+        lin.addColorStop(1, 'rgba(96,116,150,0.62)');
+        ctx.fillStyle = lin;
+        ctx.fillRect(0, 0, 256, 128);
+        ctx.globalCompositeOperation = 'source-over';
+        var tex = new THREE.CanvasTexture(canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        return tex;
+    };
+
+    /**
+     * Build the daytime cloud layer: a scatter of soft billboards high over the
+     * city that drift slowly across the sky (see driftClouds). They are a
+     * daytime feature - tinted toward the sky/dusk colour and faded by the day
+     * amount - so the night city stays clear and neon-lit. The move-time fog
+     * haze is unchanged; clouds sit above it. Cyberspace only.
+     */
+    Cyberspace.prototype.buildClouds = function() {
+        var THREE = this.THREE;
+        var d = this.day;
+        this.clouds = [];
+        // Nothing to show in deep night; skip the draw calls entirely.
+        if (d.day < 0.06) {
+            return;
+        }
+        // Warm-white by day, drifting toward the dusk tint near sunrise/sunset.
+        var tint = new THREE.Color(0xffffff).lerp(d.horizon, 0.12 + d.warm * 0.35);
+        var tex = this.cloudTexture();
+        var count = 12;
+        for (var i = 0; i < count; i++) {
+            var mat = new THREE.SpriteMaterial({
+                map: tex, color: tint.getHex(), transparent: true,
+                depthWrite: false, fog: false,
+                opacity: (0.34 + 0.32 * d.day) * (0.75 + Math.random() * 0.5)
+            });
+            var cloud = new THREE.Sprite(mat);
+            var w = 150 + Math.random() * 190;
+            cloud.scale.set(w, w * 0.5, 1);
+            // High in the sky (the bluer band, above the white horizon haze) and
+            // spread around and ahead of the avenue mouth.
+            cloud.position.set(
+                (Math.random() * 2 - 1) * 460,
+                190 + Math.random() * 150,
+                -60 - Math.random() * 540
+            );
+            this.scene.add(cloud);
+            this.clouds.push({sprite: cloud, speed: 1.4 + Math.random() * 2.6});
+        }
+    };
+
+    /**
+     * Drift the daytime clouds slowly across the sky, wrapping them back around
+     * so the layer never runs out. A no-op when there are no clouds (night,
+     * Grid or the Void).
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.driftClouds = function(dt) {
+        for (var i = 0; i < this.clouds.length; i++) {
+            var c = this.clouds[i];
+            c.sprite.position.x += c.speed * dt;
+            if (c.sprite.position.x > 480) {
+                c.sprite.position.x -= 960;
+            }
+        }
     };
 
     /**
@@ -661,20 +869,39 @@ define('format_mnemo/vr', [], function() {
             this.spaceTexture.mapping = THREE.EquirectangularReflectionMapping;
             this.scene.background = this.spaceTexture;
         } else {
-            this.buildStarfield(starDir);
+            this.buildStarfield();
         }
 
         this.buildPlanets();
+
+        // The Void's single celestial body (the local star): a small sun by day
+        // or a small moon by night, following the Moodle site clock like the
+        // other environments. It shares the key light's direction, so lighting
+        // and disc agree, and is kept small and dim so it never outshines or
+        // overshadows the planets.
+        this.addVoidCelestial(starDir);
+    };
+
+    /**
+     * Add the Void's one celestial body along the key-light direction, choosing
+     * sun or moon from the real site clock (the Void's own lighting is a fixed
+     * night preset, so the disc is driven from the clock separately). Small and
+     * dim, so the planets stay the brightest things in the sky.
+     *
+     * @param {Object} dir The unit direction to the local star (key light).
+     */
+    Cyberspace.prototype.addVoidCelestial = function(dir) {
+        var real = this.computeDaylight(this.hour);
+        this.addCelestialBody(real, {dir: dir, distance: 520, scale: 0.42, opacity: 0.7});
     };
 
     /**
      * Build the procedural Void backdrop used when no sky image is uploaded: a
-     * near-black sky, a dense starfield on a far shell, palette-tinted nebulae
-     * and a bright star halo.
-     *
-     * @param {Object} starDir The unit direction to the star.
+     * near-black sky, a dense starfield on a far shell and palette-tinted
+     * nebulae. The star itself is drawn separately as the Void's celestial body
+     * (see addVoidCelestial), so there is no duplicate star halo here.
      */
-    Cyberspace.prototype.buildStarfield = function(starDir) {
+    Cyberspace.prototype.buildStarfield = function() {
         var THREE = this.THREE;
         this.scene.background = new THREE.Color(0x03040a);
 
@@ -712,15 +939,10 @@ define('format_mnemo/vr', [], function() {
             );
             this.scene.add(neb);
         }
-
-        // The star itself as a bright halo sprite.
-        var star = new THREE.Sprite(new THREE.SpriteMaterial({
-            map: this.radialTexture(0xfff4e0), transparent: true, opacity: 0.95,
-            depthWrite: false, blending: THREE.AdditiveBlending, fog: false
-        }));
-        star.scale.set(70, 70, 1);
-        star.position.copy(starDir).multiplyScalar(520);
-        this.scene.add(star);
+        // The star itself is drawn once, as the Void's celestial body (a small
+        // sun or moon per the clock); see buildSpace/addVoidCelestial. Drawing a
+        // separate halo here too would stack a second, larger glow at the same
+        // direction, so it is intentionally left to that single body.
     };
 
     /**
@@ -7859,6 +8081,12 @@ define('format_mnemo/vr', [], function() {
 
         // Slowly revolve the Void's planet field (one turn per hour).
         this.spinPlanets(dt);
+
+        // Drift the daytime clouds across the city sky (no-op elsewhere).
+        this.driftClouds(dt);
+
+        // Keep the sun/moon pinned at a fixed direction and distance from the eye.
+        this.updateCelestials();
 
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort

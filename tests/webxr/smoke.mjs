@@ -2077,6 +2077,7 @@ const scenarios = [
                     spaceTexture,
                     buildStarfield: () => { starfield++; },
                     buildPlanets: () => {},
+                    addVoidCelestial: () => {},
                     buildSpace: CS.prototype.buildSpace
                 };
                 self.buildSpace();
@@ -2088,6 +2089,91 @@ const scenarios = [
             const pass = withSky.bg === tex && withSky.starfield === 0 &&
                 without.starfield === 1;
             return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
+    },
+    {
+        name: 'sky: one celestial body follows the clock (a big sun by day, a small moon by night)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (hour) => {
+                const day = CS.prototype.computeDaylight.call({THREE, palette: {haze: 0x99aabb}}, hour);
+                const added = [];
+                const self = {
+                    THREE, day, celestials: [], scene: {add: (o) => added.push(o)},
+                    newCanvasCtx: CS.prototype.newCanvasCtx,
+                    celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                    buildCelestialBodies: CS.prototype.buildCelestialBodies,
+                    addCelestialBody: CS.prototype.addCelestialBody,
+                    buildSky: CS.prototype.buildSky
+                };
+                self.buildSky();
+                const sp = added.filter((o) => o.isSprite);
+                return {n: sp.length, cel: self.celestials.length, size: sp.length ? sp[0].scale.x : 0};
+            };
+            const day = mk(12);
+            const night = mk(23);
+            // Exactly one disc either way; the daytime sun is large, the night moon small.
+            const pass = day.n === 1 && night.n === 1 && day.cel === 1 && night.cel === 1 &&
+                day.size > 60 && Math.abs(night.size - 46) < 1;
+            return {pass, detail: `day{n:${day.n},size:${day.size.toFixed(0)}} night{n:${night.n},size:${night.size.toFixed(0)}}`};
+        }
+    },
+    {
+        name: 'sky: daytime clouds build by day and clear at deep night',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (hour) => {
+                const day = CS.prototype.computeDaylight.call({THREE, palette: {haze: 0x99aabb}}, hour);
+                const self = {
+                    THREE, day, clouds: [], scene: {add: () => {}},
+                    cloudTexture: CS.prototype.cloudTexture, buildClouds: CS.prototype.buildClouds
+                };
+                self.buildClouds();
+                return self.clouds.length;
+            };
+            const pass = mk(12) > 0 && mk(1) === 0;
+            return {pass, detail: `midday=${mk(12)} night=${mk(1)}`};
+        }
+    },
+    {
+        name: 'sky: clouds drift across the sky and wrap around',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                clouds: [{sprite: {position: {x: 479}}, speed: 10}],
+                driftClouds: CS.prototype.driftClouds
+            };
+            self.driftClouds(1); // 479 + 10 = 489 -> wraps to 489 - 960 = -471.
+            const x = self.clouds[0].sprite.position.x;
+            return {pass: Math.abs(x + 471) < 1e-6, detail: `x=${x}`};
+        }
+    },
+    {
+        name: 'space: the Void gets one small clock-driven sun/moon that does not dwarf planets',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const added = [];
+            const self = {
+                THREE, hour: 22, palette: {haze: 0x99aabb}, celestials: [],
+                scene: {background: null, add: (o) => added.push(o)}, spaceTexture: null,
+                buildStarfield: () => {}, buildPlanets: () => {},
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                buildCelestialBodies: CS.prototype.buildCelestialBodies,
+                addCelestialBody: CS.prototype.addCelestialBody,
+                computeDaylight: CS.prototype.computeDaylight,
+                addVoidCelestial: CS.prototype.addVoidCelestial,
+                buildSpace: CS.prototype.buildSpace
+            };
+            self.buildSpace();
+            const sprites = added.filter((o) => o.isSprite);
+            // Exactly one disc, and small (a night moon is 46 * 0.42 ~ 19 units).
+            const pass = sprites.length === 1 && self.celestials.length === 1 &&
+                sprites[0].scale.x <= 42;
+            return {pass, detail: `sprites=${sprites.length} size=${sprites.length ? sprites[0].scale.x.toFixed(1) : '-'}`};
         }
     },
     {
