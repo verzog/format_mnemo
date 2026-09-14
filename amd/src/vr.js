@@ -1421,10 +1421,29 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} height Body height in metres.
      * @return {Object} A Three.MeshStandardMaterial.
      */
+    /**
+     * The number of window storeys a facade of this height shows: the height in
+     * standard storeys (MODULE_H / FLOORS_PER_MODULE each), at least one. The
+     * facade texture is then repeated storeys/FLOORS_PER_MODULE times so its row
+     * pitch is the same on every building and lines up with the storey-quantised
+     * mass (see floorHeight).
+     *
+     * @param {Number} height Body height in world units.
+     * @return {Number} Whole storey count (>= 1).
+     */
+    Cyberspace.prototype.facadeStoreys = function(height) {
+        return Math.max(1, Math.round(height / (MODULE_H / FLOORS_PER_MODULE)));
+    };
+
     Cyberspace.prototype.facadeMaterial = function(style, width, height) {
         var THREE = this.THREE;
         var rx = Math.max(1, Math.round(width / MODULE_W));
-        var ry = Math.max(1, Math.round(height / MODULE_H));
+        // Repeat the facade by whole storeys, not whole modules, so every
+        // building shares the same floor pitch and window rows line up with the
+        // storey-quantised height (see floorHeight). The module has
+        // FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
+        // gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
+        var ry = this.facadeStoreys(height) / FLOORS_PER_MODULE;
         var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry;
         if (this.matCache[key]) {
             return this.matCache[key];
