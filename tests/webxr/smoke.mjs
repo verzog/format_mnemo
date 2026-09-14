@@ -1331,23 +1331,40 @@ const scenarios = [
         }
     },
     {
-        name: 'traffic: makeTrafficCar sets velocity, heading and altitude per path',
+        name: 'traffic: trafficClearance lifts over a building and is zero on open ground',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {footprints: [{xMin: -3, xMax: 3, zMin: -3, zMax: 3, top: 20}]};
+            const over = CS.prototype.trafficClearance.call(self, 0, 0);
+            const off = CS.prototype.trafficClearance.call(self, 40, 40);
+            // Over the building: at least the 20-unit roof plus a clearance gap;
+            // open ground: zero (cars may fly low there).
+            const pass = over >= 20 && over <= 25 && off === 0;
+            return {pass, detail: `over=${over} off=${off}`};
+        }
+    },
+    {
+        name: 'traffic: makeTrafficCar makes a roaming record started clear of buildings',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const box = {xMin: -50, xMax: 50, zMin: -100, zMax: 12, avHalfX: 20};
-            const self = {makeTrafficCar: CS.prototype.makeTrafficCar};
-            const av = new THREE.Group();
-            const avrec = self.makeTrafficCar(av, {path: 'avenue', speed: 12, height: 20, land: 'none'}, 1, box);
-            const cross = new THREE.Group();
-            const crec = self.makeTrafficCar(cross, {path: 'cross', speed: 8, height: 26, land: 'rooftop'}, -1, box);
-            // Avenue: travels along +Z at yaw 0; cross: along -X at yaw -pi/2.
-            const avok = avrec.vz === 12 && avrec.vx === 0 && Math.abs(av.rotation.y) < 1e-9 &&
-                av.position.y === 20 && avrec.land === 'none';
-            const crossok = crec.vx === -8 && crec.vz === 0 &&
-                Math.abs(cross.rotation.y + Math.PI / 2) < 1e-9 &&
-                cross.position.y === 26 && crec.low === 10;
-            return {pass: avok && crossok, detail: `avYaw=${av.rotation.y} crossYaw=${cross.rotation.y} low=${crec.low}`};
+            const box = {xMin: -50, xMax: 50, zMin: -50, zMax: 50, avHalfX: 20};
+            const mk = (footprints) => ({
+                THREE, footprints,
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                makeTrafficCar: CS.prototype.makeTrafficCar
+            });
+            const car = new THREE.Group();
+            const rec = mk([]).makeTrafficCar(car, {speed: 12, height: 20, land: 'none'}, 1, box, 0);
+            const okShape = rec.speed === 12 && rec.dest && rec.cruiseY >= 3 &&
+                car.position.x >= box.xMin && car.position.x <= box.xMax;
+            // A car spawned over a tall building starts above its roof.
+            const car2 = new THREE.Group();
+            mk([{xMin: -60, xMax: 60, zMin: -60, zMax: 60, top: 25}])
+                .makeTrafficCar(car2, {jitter: true}, 1, box, 0);
+            const lifted = car2.position.y >= 25;
+            return {pass: okShape && lifted, detail: `y1=${car.position.y.toFixed(1)} y2=${car2.position.y.toFixed(1)}`};
         }
     },
     {
@@ -1377,18 +1394,51 @@ const scenarios = [
         }
     },
     {
-        name: 'traffic: makeTrafficCar adds the model yaw offset to the heading',
+        name: 'traffic: updateTraffic steers toward the destination, adding the yaw offset',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const box = {xMin: -10, xMax: 10, zMin: -40, zMax: 40, avHalfX: 6};
-            const self = {makeTrafficCar: CS.prototype.makeTrafficCar};
             const car = new THREE.Group();
-            // Avenue, dir +1 -> heading 0; a -pi/2 offset yaws the car to -pi/2.
-            const rec = self.makeTrafficCar(
-                car, {path: 'avenue', speed: 12, height: 20, land: 'none'}, 1, box, -Math.PI / 2);
-            const pass = Math.abs(rec.mesh.rotation.y + Math.PI / 2) < 1e-6;
-            return {pass, detail: `rotY=${rec.mesh.rotation.y.toFixed(3)}`};
+            car.position.set(0, 10, 0);
+            const box = {xMin: -100, xMax: 100, zMin: -100, zMax: 100};
+            const self = {
+                time: 0, footprints: [],
+                traffic: [{mesh: car, box, speed: 10, yawOffset: -Math.PI / 2, cruiseY: 10,
+                    dest: {x: 0, z: -50}, low: 9, land: 'none', bob: 0, landPhase: 0, landPeriod: 20}],
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficLandingY: CS.prototype.trafficLandingY,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(1);
+            // Dest is straight -Z: the car steps -Z and faces -Z (heading pi)
+            // plus the -pi/2 model offset -> yaw pi/2.
+            const movedZ = car.position.z < -5;
+            const yaw = ((car.rotation.y % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const facing = Math.abs(yaw - Math.PI / 2) < 0.05;
+            return {pass: movedZ && facing, detail: `z=${car.position.z.toFixed(1)} yaw=${yaw.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'traffic: updateTraffic keeps a car above the building it flies over',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const car = new THREE.Group();
+            car.position.set(0, 5, 0); // Low, directly over a tall building.
+            const box = {xMin: -100, xMax: 100, zMin: -100, zMax: 100};
+            const self = {
+                time: 0, footprints: [{xMin: -10, xMax: 10, zMin: -10, zMax: 10, top: 30}],
+                traffic: [{mesh: car, box, speed: 5, yawOffset: 0, cruiseY: 5,
+                    dest: {x: 0, z: -30}, low: 4, land: 'none', bob: 0, landPhase: 0, landPeriod: 20}],
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficLandingY: CS.prototype.trafficLandingY,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(0.1);
+            // The hard floor lifts it above the 30-unit roof, never inside it.
+            return {pass: car.position.y >= 30, detail: `y=${car.position.y.toFixed(1)} (roof 30)`};
         }
     },
     {
@@ -1403,34 +1453,6 @@ const scenarios = [
             const pass = cruise === 20 && hold === 2 && end === 20 &&
                 mid < 20 && mid > 2;
             return {pass, detail: `cruise=${cruise} hold=${hold} end=${end} mid=${mid.toFixed(2)}`};
-        }
-    },
-    {
-        name: 'traffic: updateTraffic advances and wraps within the box',
-        fn: () => {
-            const THREE = window.__mnemoTest.THREE;
-            const CS = window.__mnemoModule._Cyberspace;
-            const box = {xMin: -50, xMax: 50, zMin: -100, zMax: 12, avHalfX: 20};
-            const zcar = new THREE.Group();
-            zcar.position.set(0, 20, 0);
-            const xcar = new THREE.Group();
-            xcar.position.set(49, 26, 0);
-            const self = {
-                time: 0,
-                traffic: [
-                    {mesh: zcar, vx: 0, vz: 20, box: box, height: 20, low: 20, land: 'none', bob: 0},
-                    {mesh: xcar, vx: 20, vz: 0, box: box, height: 26, low: 2, land: 'ground',
-                        bob: 0, landPhase: 0, landPeriod: 20}
-                ],
-                trafficLandingY: CS.prototype.trafficLandingY,
-                updateTraffic: CS.prototype.updateTraffic
-            };
-            self.updateTraffic(1);
-            // z-car: 0+20 = 20 > zMax 12 -> wraps to zMin -100; cruise y stays ~20.
-            const zok = Math.abs(zcar.position.z + 100) < 1e-6 && Math.abs(zcar.position.y - 20) < 0.5;
-            // x-car: 49+20 = 69 > xMax 50 -> wraps to xMin -50.
-            const xok = Math.abs(xcar.position.x + 50) < 1e-6;
-            return {pass: zok && xok, detail: `z=${zcar.position.z} x=${xcar.position.x} y=${zcar.position.y.toFixed(2)}`};
         }
     },
     {
@@ -1456,10 +1478,12 @@ const scenarios = [
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
             const mk = (pre) => ({
-                THREE, traffic: pre, scene: {add: () => {}},
+                THREE, traffic: pre, scene: {add: () => {}}, footprints: [],
                 trafficBounds: () => box,
                 setShadow: CS.prototype.setShadow,
                 trafficModelYaw: CS.prototype.trafficModelYaw,
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });

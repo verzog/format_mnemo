@@ -3199,55 +3199,57 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} The traffic record consumed by updateTraffic().
      */
     Cyberspace.prototype.makeTrafficCar = function(car, ct, dir, box, yawOffset) {
-        // The default fleet jitters each car's speed and altitude (matching the
-        // original 10-26 u/s, 13-33 u ranges); authored types use exact values.
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
-        var height = ct.jitter ? (13 + Math.random() * 20) : (ct.height || 20);
-        var vx = 0;
-        var vz = 0;
-        var x;
-        var z;
-        if (ct.path === 'cross') {
-            vx = dir * speed;
-            x = box.xMin + Math.random() * (box.xMax - box.xMin);
-            z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        } else if (ct.path === 'diagonal') {
-            var sgn = Math.random() < 0.5 ? 1 : -1;
-            var c = Math.SQRT1_2;
-            vx = dir * speed * c;
-            vz = sgn * speed * c;
-            x = box.xMin + Math.random() * (box.xMax - box.xMin);
-            z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        } else {
-            // Avenue (default): travel along Z, spread laterally near the avenue.
-            vz = dir * speed;
-            x = (Math.random() - 0.5) * 2 * box.avHalfX;
-            z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        }
-        car.position.set(x, height, z);
-        // Face the direction of travel: atan2(vx, vz) is the heading measured
-        // from +Z (avenue -Z reads as pi, cross +X as +pi/2), plus the per-model
-        // yaw offset that turns the model's length onto that heading.
-        car.rotation.y = Math.atan2(vx, vz) + (yawOffset || 0);
-        // Landing cars descend toward a low altitude (the ground, or a rooftop
-        // band) and climb back; cruising cars keep a gentle bob at height.
-        var low = height;
+        // Cruise band: the default fleet spreads wide so some cars weave low
+        // over the open streets and some cruise above the rooftops; authored
+        // types use their configured height as the band centre, with a little
+        // jitter so a fleet does not fly in a rigid sheet.
+        var cruiseY = ct.jitter
+            ? (4 + Math.random() * 30)
+            : Math.max(3, (ct.height || 20) + (Math.random() - 0.5) * 6);
+        // Start somewhere in the box, lifted clear of any building beneath it.
+        var x = box.xMin + Math.random() * (box.xMax - box.xMin);
+        var z = box.zMin + Math.random() * (box.zMax - box.zMin);
+        car.position.set(x, Math.max(cruiseY, this.trafficClearance(x, z)), z);
+        var dest = this.pickTrafficDest(box, x, z);
+        // Face the first destination (plus the per-model yaw offset that turns
+        // the model's length onto its heading).
+        car.rotation.y = Math.atan2(dest.x - x, dest.z - z) + (yawOffset || 0);
+        // Landing cars dip toward the ground or a rooftop band and climb back.
+        var low = cruiseY;
         if (ct.land === 'ground') {
             low = 2;
         } else if (ct.land === 'rooftop') {
             low = 10;
         }
-        // Keep the landing target below the cruise altitude so a low-flying car
-        // dips down (never climbs) during its "descent" - e.g. a rooftop car
-        // whose configured height is at or below the rooftop band.
-        if (low > height - 1) {
-            low = Math.max(0, height - 1);
+        if (low > cruiseY - 1) {
+            low = Math.max(0, cruiseY - 1);
         }
         return {
-            mesh: car, vx: vx, vz: vz, box: box,
-            height: height, low: low, land: ct.land || 'none',
+            mesh: car, box: box, speed: speed, yawOffset: yawOffset || 0,
+            cruiseY: cruiseY, dest: dest, low: low, land: ct.land || 'none',
             bob: Math.random() * 6.28,
             landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
+        };
+    };
+
+    /**
+     * Pick a new destination for a roaming car: a random point inside the
+     * traffic box, at a near or far distance from where it is now, so the
+     * traffic mixes short hops and long crossings ("some near, some far").
+     *
+     * @param {Object} box The traffic bounds.
+     * @param {Number} fromX Current x.
+     * @param {Number} fromZ Current z.
+     * @return {Object} {x, z} destination, clamped inside the box.
+     */
+    Cyberspace.prototype.pickTrafficDest = function(box, fromX, fromZ) {
+        var near = Math.random() < 0.5;
+        var range = near ? (15 + Math.random() * 30) : (70 + Math.random() * 160);
+        var ang = Math.random() * Math.PI * 2;
+        return {
+            x: Math.max(box.xMin, Math.min(box.xMax, fromX + Math.cos(ang) * range)),
+            z: Math.max(box.zMin, Math.min(box.zMax, fromZ + Math.sin(ang) * range))
         };
     };
 
@@ -3279,34 +3281,59 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Advance flying traffic each frame: move each car along its velocity,
-     * wrap it within the traffic box on both axes, and set its altitude (a
-     * gentle cruise bob, or a landing cycle for cars that touch down).
+     * Advance flying traffic each frame: steer each car toward its destination
+     * (picking a new one on arrival), face it that way, and set its altitude to
+     * its cruise band - lifted so it clears any building it is over or about to
+     * reach, so the city reads as solid and cars never fly through it.
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateTraffic = function(dt) {
+        var lookahead = 1; // Seconds ahead to test for a taller building.
         for (var i = 0; i < this.traffic.length; i++) {
             var t = this.traffic[i];
             var p = t.mesh.position;
-            p.x += t.vx * dt;
-            p.z += t.vz * dt;
-            var box = t.box;
-            if (p.x > box.xMax) {
-                p.x = box.xMin;
-            } else if (p.x < box.xMin) {
-                p.x = box.xMax;
+            // Steer horizontally toward the destination; on arrival, roam on.
+            var dx = t.dest.x - p.x;
+            var dz = t.dest.z - p.z;
+            var dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < 6) {
+                t.dest = this.pickTrafficDest(t.box, p.x, p.z);
+                dx = t.dest.x - p.x;
+                dz = t.dest.z - p.z;
+                dist = Math.sqrt(dx * dx + dz * dz);
             }
-            if (p.z > box.zMax) {
-                p.z = box.zMin;
-            } else if (p.z < box.zMin) {
-                p.z = box.zMax;
+            var vx = 0;
+            var vz = 0;
+            if (dist > 1e-3) {
+                vx = dx / dist * t.speed;
+                vz = dz / dist * t.speed;
+                p.x += vx * dt;
+                p.z += vz * dt;
+                t.mesh.rotation.y = Math.atan2(vx, vz) + t.yawOffset;
             }
+            // Altitude: the cruise band (a gentle bob, or a landing dip that is
+            // never allowed to sink into a building), then raised to clear any
+            // building under the car or just ahead of it.
+            var baseY;
             if (t.land === 'none') {
-                p.y = t.height + Math.sin(this.time * 0.8 + t.bob) * 0.4;
+                baseY = t.cruiseY + Math.sin(this.time * 0.8 + t.bob) * 0.4;
             } else {
                 var cyclePos = ((this.time + t.landPhase * t.landPeriod) / t.landPeriod) % 1;
-                p.y = this.trafficLandingY(cyclePos, t.height, t.low);
+                var lowTarget = Math.max(t.low, this.trafficClearance(p.x, p.z));
+                baseY = this.trafficLandingY(cyclePos, t.cruiseY, lowTarget);
+            }
+            var need = Math.max(
+                this.trafficClearance(p.x, p.z),
+                this.trafficClearance(p.x + vx * lookahead, p.z + vz * lookahead)
+            );
+            var targetY = Math.max(baseY, need);
+            // Ease toward the target for a smooth climb, then hard-floor the car
+            // above the building it is over so it can never be inside one.
+            p.y += (targetY - p.y) * Math.min(1, dt * 3);
+            var floor = this.trafficClearance(p.x, p.z);
+            if (p.y < floor) {
+                p.y = floor;
             }
         }
     };
@@ -3500,8 +3527,9 @@ define('format_mnemo/vr', [], function() {
             // deepened building's footprint keeps scattered props clear of it.
             var tsx = tf.sx > 0 ? tf.sx : 1;
             var tsz = tf.sz > 0 ? tf.sz : 1;
+            var tsy = tf.sy > 0 ? tf.sy : 1;
             self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
-                built.w * ts * tsx, built.d * ts * tsz);
+                built.w * ts * tsx, built.d * ts * tsz, built.h * ts * tsy);
             // Swap in an attached building model for this activity, if any.
             self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
@@ -3787,18 +3815,21 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Record a building's world-space XZ footprint so scattered props can avoid
-     * dropping on top of it.
+     * Record a building's world-space XZ footprint (and its roof height) so
+     * scattered props can avoid dropping on top of it and flying traffic can
+     * treat it as solid and clear its rooftop.
      *
      * @param {Number} cx Centre x.
      * @param {Number} cz Centre z.
      * @param {Number} w Footprint width (x).
      * @param {Number} d Footprint depth (z).
+     * @param {Number} [top] Roof height (world y); 0/omitted for ground props.
      */
-    Cyberspace.prototype.recordFootprint = function(cx, cz, w, d) {
+    Cyberspace.prototype.recordFootprint = function(cx, cz, w, d, top) {
         this.footprints.push({
             xMin: cx - w / 2, xMax: cx + w / 2,
-            zMin: cz - d / 2, zMax: cz + d / 2
+            zMin: cz - d / 2, zMax: cz + d / 2,
+            top: top || 0
         });
     };
 
@@ -3820,6 +3851,30 @@ define('format_mnemo/vr', [], function() {
             }
         }
         return true;
+    };
+
+    /**
+     * The minimum safe flying altitude at (x, z): the roof of the tallest
+     * building whose footprint covers the point, plus a clearance gap, so
+     * traffic can treat buildings as solid and ride over their rooftops. Zero
+     * over open ground. A small margin widens each footprint so a car climbs
+     * before it reaches the wall rather than clipping the edge.
+     *
+     * @param {Number} x Point x.
+     * @param {Number} z Point z.
+     * @return {Number} Minimum altitude (world y), or 0 over open ground.
+     */
+    Cyberspace.prototype.trafficClearance = function(x, z) {
+        var margin = 2;
+        var top = 0;
+        for (var i = 0; i < this.footprints.length; i++) {
+            var f = this.footprints[i];
+            if (x >= f.xMin - margin && x <= f.xMax + margin &&
+                    z >= f.zMin - margin && z <= f.zMax + margin && f.top > top) {
+                top = f.top;
+            }
+        }
+        return top > 0 ? top + 2.5 : 0;
     };
 
     /**
