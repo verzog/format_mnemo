@@ -47,8 +47,10 @@ class model_config {
         }
         $out = [];
         foreach ($decoded as $name => $cfg) {
-            if (is_string($name) && is_array($cfg)) {
-                $out[$name] = self::normalise($cfg);
+            // A numeric key like "123" is decoded as an int, so cast it back to
+            // a string rather than dropping numeric-named models.
+            if (is_array($cfg)) {
+                $out[(string)$name] = self::normalise($cfg);
             }
         }
         return $out;
@@ -80,7 +82,13 @@ class model_config {
         } else {
             $all[$name] = $normal;
         }
-        set_config('modelconfig', json_encode($all), 'format_mnemo');
+        // Never overwrite the shared blob with a failed encode (which would wipe
+        // every model's settings); normalise() already rejects non-encodable
+        // values, so this is a belt-and-braces guard.
+        $encoded = json_encode($all);
+        if ($encoded !== false) {
+            set_config('modelconfig', $encoded, 'format_mnemo');
+        }
     }
 
     /**
@@ -134,6 +142,11 @@ class model_config {
         $behaviour = [];
         if (!empty($cfg['behaviour']) && is_array($cfg['behaviour'])) {
             foreach ($cfg['behaviour'] as $key => $value) {
+                // Reject a non-finite float (INF/NAN): it passes is_scalar() but
+                // makes json_encode() of the whole blob fail, wiping every entry.
+                if (is_float($value) && !is_finite($value)) {
+                    continue;
+                }
                 if (is_string($key) && (is_scalar($value) || $value === null)) {
                     $behaviour[$key] = $value;
                 }

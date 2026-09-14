@@ -98,4 +98,30 @@ final class model_config_test extends \advanced_testcase {
         set_config('modelconfig', 'not json', 'format_mnemo');
         $this->assertSame([], model_config::all());
     }
+
+    /**
+     * A numeric model name (e.g. from 123.glb) round-trips, even though JSON
+     * decodes its key as an integer.
+     */
+    public function test_numeric_name(): void {
+        $this->resetAfterTest();
+        model_config::set('123', ['envs' => ['grid']]);
+        $this->assertArrayHasKey('123', model_config::all());
+        $this->assertEquals(['grid'], model_config::get('123')['envs']);
+    }
+
+    /**
+     * A non-finite behaviour value is dropped, so it can never make the whole
+     * blob fail to encode and wipe every other model's settings.
+     */
+    public function test_non_finite_behaviour_does_not_wipe(): void {
+        $this->resetAfterTest();
+        model_config::set('a', ['envs' => ['grid']]);
+        model_config::set('b', ['behaviour' => ['bad' => INF, 'ok' => true]]);
+        // The earlier model survived, and the bad value was dropped.
+        $this->assertEquals(['grid'], model_config::get('a')['envs']);
+        $b = model_config::get('b');
+        $this->assertArrayNotHasKey('bad', $b['behaviour']);
+        $this->assertTrue($b['behaviour']['ok']);
+    }
 }

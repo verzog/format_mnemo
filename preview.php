@@ -108,19 +108,27 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
         'format-mnemo-preview__field'
     );
 
-    // Facing radios: Auto, or a cardinal preset (degrees).
-    $current = $cfg['yaw'] === null ? '' : (string)(int)round($cfg['yaw']);
-    $dirs = ['' => 'auto', '0' => '0', '90' => '90', '180' => '180', '270' => '270'];
+    // Facing radios: Auto, or a cardinal preset (degrees). A stored non-cardinal
+    // facing (e.g. a hand-edited 45) is kept as its own checked option so saving
+    // a change to another field does not silently clear it.
+    $current = $cfg['yaw'] === null ? '' : rtrim(rtrim(sprintf('%.2f', $cfg['yaw']), '0'), '.');
+    $dirs = ['' => get_string('preview_dir_auto', 'format_mnemo'),
+        '0' => get_string('preview_dir_0', 'format_mnemo'),
+        '90' => get_string('preview_dir_90', 'format_mnemo'),
+        '180' => get_string('preview_dir_180', 'format_mnemo'),
+        '270' => get_string('preview_dir_270', 'format_mnemo')];
+    if ($current !== '' && !array_key_exists($current, $dirs)) {
+        $dirs[$current] = $current . '°';
+    }
     $radios = '';
-    foreach ($dirs as $value => $key) {
+    foreach ($dirs as $value => $label) {
         $attrs = ['type' => 'radio', 'name' => 'yaw', 'value' => $value];
         if ($value === $current) {
             $attrs['checked'] = 'checked';
         }
         $radios .= html_writer::tag(
             'label',
-            html_writer::empty_tag('input', $attrs) . ' ' .
-            get_string('preview_dir_' . $key, 'format_mnemo'),
+            html_writer::empty_tag('input', $attrs) . ' ' . $label,
             ['class' => 'format-mnemo-preview__check']
         );
     }
@@ -142,7 +150,10 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
         ) .
         html_writer::empty_tag('input', [
             'type' => 'number', 'name' => 'scale', 'id' => 'scale_' . $name,
-            'min' => '0.1', 'max' => '10', 'step' => '0.1', 'class' => 'format-mnemo-preview__scale',
+            // A step of "any" so an already-stored value like 1.25 is not
+            // rejected by the browser's step constraint (the store accepts any
+            // finite scale).
+            'min' => '0.1', 'max' => '10', 'step' => 'any', 'class' => 'format-mnemo-preview__scale',
             'value' => $cfg['scale'] === null ? '' : rtrim(rtrim(sprintf('%.2f', $cfg['scale']), '0'), '.'),
         ]),
         'format-mnemo-preview__field'
