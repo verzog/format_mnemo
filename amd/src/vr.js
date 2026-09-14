@@ -2756,7 +2756,7 @@ define('format_mnemo/vr', [], function() {
             }
             this.setShadow(m, true);
             this.scene.add(m);
-            this.addPickProxy(m);
+            this.addPickProxy(m, this.modelScale(type));
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
                 m, p.x, y, p.z, type === 'lamp' || type === 'av', this.modelScale(type));
         }
@@ -2866,6 +2866,10 @@ define('format_mnemo/vr', [], function() {
         var step = kind === 'lamp' ? 24 : 16;
         var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
         var label = kind === 'lamp' ? 'Street lamp' : 'Barrier';
+        // The model's asset-viewer scale: enlarge the footprint clearance by it
+        // so a scaled-up prop still keeps clear of buildings, and pass it on for
+        // the pick proxy and the editable base scale.
+        var scale = this.modelScale(kind);
         // A physical slot index, advanced for every candidate position along the
         // avenue (from a fixed start, by a fixed step) whether or not the prop is
         // actually placed. This keeps each prop's key tied to its physical spot
@@ -2884,7 +2888,7 @@ define('format_mnemo/vr', [], function() {
                 var px = this.snapBase(s * edge, stored);
                 var pz = this.snapBase(z, stored);
                 // Skip a prop that would drop on a building footprint.
-                if (!this.footprintClear(px, pz, 0.8)) {
+                if (!this.footprintClear(px, pz, 0.8 * scale)) {
                     continue;
                 }
                 var m = tpl.clone();
@@ -2897,9 +2901,8 @@ define('format_mnemo/vr', [], function() {
                 }
                 this.setShadow(m, true);
                 this.scene.add(m);
-                this.addPickProxy(m);
-                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp',
-                    this.modelScale(kind));
+                this.addPickProxy(m, scale);
+                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp', scale);
             }
         }
     };
@@ -2991,6 +2994,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.placeLampSlots = function(tpl) {
         var label = (this.config.strings && this.config.strings.placelamp) || 'Street lamp';
+        var scale = this.modelScale('lamp');
         for (var i = 0; i < this.lampSlots.length; i++) {
             var slot = this.lampSlots[i];
             var objkey = 'lamp:' + i;
@@ -3005,7 +3009,7 @@ define('format_mnemo/vr', [], function() {
             // only exempts it when it carries a positional move (a
             // brightness/scale/rotation-only edit still respects the footprint).
             var moved = stored && (stored.x || stored.y || stored.z);
-            if (!moved && !this.footprintClear(px, pz, 0.8)) {
+            if (!moved && !this.footprintClear(px, pz, 0.8 * scale)) {
                 continue;
             }
             // Rest the lamp on the surface beneath it so an avenue lamp on the
@@ -3017,8 +3021,8 @@ define('format_mnemo/vr', [], function() {
             this.addLampLight(m);
             this.setShadow(m, true);
             this.scene.add(m);
-            this.addPickProxy(m);
-            this.registerSceneEditable(objkey, label, m, px, py, pz, true, this.modelScale('lamp'));
+            this.addPickProxy(m, scale);
+            this.registerSceneEditable(objkey, label, m, px, py, pz, true, scale);
         }
     };
 
@@ -3028,6 +3032,7 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} tpl The kiosk template group.
      */
     Cyberspace.prototype.scatterKiosks = function(tpl) {
+        var scale = this.modelScale('kiosk');
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
             // A kiosk a teacher deleted stays gone.
@@ -3042,7 +3047,7 @@ define('format_mnemo/vr', [], function() {
             var kz = r.zMin - 2;
             var placed = false;
             for (var t = 0; t < 4; t++) {
-                if (this.footprintClear(kx, kz - t * 1.5, 1.6)) {
+                if (this.footprintClear(kx, kz - t * 1.5, 1.6 * scale)) {
                     kz = kz - t * 1.5;
                     placed = true;
                     break;
@@ -3059,11 +3064,10 @@ define('format_mnemo/vr', [], function() {
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
             this.scene.add(m);
-            this.addPickProxy(m);
+            this.addPickProxy(m, scale);
             // Key by the side street's section number (course-stable across
             // viewers), not a filtered ordinal.
-            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false,
-                this.modelScale('kiosk'));
+            this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false, scale);
         }
     };
 
@@ -4311,9 +4315,15 @@ define('format_mnemo/vr', [], function() {
      * rendered (visible=false) but still raycast, like a building's editProxy.
      *
      * @param {Object} group The prop group (a loaded model clone).
+     * @param {Number} [basescale] The model's asset-viewer scale that the group
+     *     will be scaled by after this proxy is parented (default 1). The minimum
+     *     clickable volume is divided by it so it stays a fixed size in world
+     *     units once the group scales, instead of being multiplied along with it
+     *     (a tiny model blown up 10x would otherwise get a huge hit box).
      */
-    Cyberspace.prototype.addPickProxy = function(group) {
+    Cyberspace.prototype.addPickProxy = function(group, basescale) {
         var THREE = this.THREE;
+        var bs = basescale > 0 ? basescale : 1;
         group.updateWorldMatrix(true, true);
         var box = new THREE.Box3().setFromObject(group);
         if (box.isEmpty()) {
@@ -4323,7 +4333,7 @@ define('format_mnemo/vr', [], function() {
         var center = box.getCenter(new THREE.Vector3());
         var proxy = new THREE.Mesh(
             new THREE.BoxGeometry(
-                Math.max(size.x, 1.2), Math.max(size.y, 1.4), Math.max(size.z, 1.2)),
+                Math.max(size.x, 1.2 / bs), Math.max(size.y, 1.4 / bs), Math.max(size.z, 1.2 / bs)),
             new THREE.MeshBasicMaterial()
         );
         // Convert the world-space centre into the group's local frame so the box
@@ -6520,7 +6530,7 @@ define('format_mnemo/vr', [], function() {
         }
         this.setShadow(m, true);
         this.scene.add(m);
-        this.addPickProxy(m);
+        this.addPickProxy(m, this.modelScale(type));
         this.placedObjects.push({id: id, type: type, x: x, z: z});
         this.registerSceneEditable('placed:' + id, this.propLabel(type),
             m, x, y, z, type === 'lamp' || type === 'av', this.modelScale(type));

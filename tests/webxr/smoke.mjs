@@ -2270,6 +2270,24 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: addPickProxy keeps a fixed hit box minimum when the model is scaled up',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // A tiny 0.1-unit model that will be scaled x10 by its base scale.
+            const group = new THREE.Group();
+            group.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1),
+                new THREE.MeshStandardMaterial()));
+            const self = {THREE, addPickProxy: CS.prototype.addPickProxy};
+            self.addPickProxy(group, 10);
+            const proxy = group.children.filter((c) => c.userData && c.userData.mnemoProxy)[0];
+            // The minimum 1.4 is divided by 10 to a 0.14 local box, so once the
+            // group scales x10 its world height is the intended 1.4, not 14.
+            const h = proxy.geometry.parameters.height;
+            return {pass: !!proxy && Math.abs(h - 0.14) < 1e-6, detail: `h=${h}`};
+        }
+    },
+    {
         name: 'lighting: computeLampSlots spaces lamps on avenue, streets and corners',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
