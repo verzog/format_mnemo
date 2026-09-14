@@ -2770,8 +2770,40 @@ define('format_mnemo/vr', [], function() {
      * @param {String} name The prop base name (lamp, barrier, kiosk, av).
      * @return {Promise} Resolves with a Three.Group template.
      */
+    /**
+     * The per-model config (environments, facing, scale) set in the asset
+     * viewer for a model name, or null when none is stored.
+     *
+     * @param {String} name The model name.
+     * @return {Object|null} {envs, yaw, scale} or null.
+     */
+    Cyberspace.prototype.modelCfg = function(name) {
+        var mc = this.config.modelconfig;
+        return (mc && name && mc[name]) ? mc[name] : null;
+    };
+
+    /**
+     * The model's scale multiplier from its asset-viewer settings (1 by default).
+     *
+     * @param {String} name The model name.
+     * @return {Number} The scale multiplier.
+     */
+    Cyberspace.prototype.modelScale = function(name) {
+        var mc = this.modelCfg(name);
+        return (mc && typeof mc.scale === 'number' && mc.scale > 0) ? mc.scale : 1;
+    };
+
     Cyberspace.prototype.loadProp = function(name) {
         var self = this;
+        // Environment gate: a model tagged to specific environments only loads
+        // in those; an untagged model loads everywhere. A gated-out model
+        // rejects, so every caller falls back exactly as for a missing model.
+        var mc = this.modelCfg(name);
+        if (mc && mc.envs && mc.envs.length &&
+                mc.envs.indexOf(this.config.environment) === -1) {
+            return Promise.reject(new Error(
+                'format_mnemo: ' + name + ' not enabled for ' + this.config.environment));
+        }
         var base = this.config.modelsbaseurl;
         var fallback = this.config.modelsfallbackurl;
         var p = this.loadModel(this.joinBase(base, name + '.glb'));
@@ -3148,7 +3180,8 @@ define('format_mnemo/vr', [], function() {
                 break;
             }
             var car = tpl.clone();
-            car.scale.setScalar(0.9 + Math.random() * 0.5);
+            // The random size jitter times the model's asset-viewer scale.
+            car.scale.setScalar((0.9 + Math.random() * 0.5) * this.modelScale(ct.model));
             var dir = i % 2 === 0 ? 1 : -1;
             var rec = this.makeTrafficCar(car, ct, dir, box, yawOffset, modelDrop * car.scale.x);
             // No shadow casting on traffic: outside the void the shadow map is
@@ -3176,6 +3209,12 @@ define('format_mnemo/vr', [], function() {
      * @return {Number} Yaw offset in radians, added to the travel heading.
      */
     Cyberspace.prototype.trafficModelYaw = function(tpl, ct) {
+        // The asset-viewer facing wins (it supersedes the text car-types yaw for
+        // the models it covers), then an authored car-types yaw.
+        var mc = ct && this.modelCfg(ct.model);
+        if (mc && typeof mc.yaw === 'number' && isFinite(mc.yaw)) {
+            return mc.yaw * Math.PI / 180;
+        }
         if (ct && typeof ct.yaw === 'number' && isFinite(ct.yaw)) {
             return ct.yaw * Math.PI / 180;
         }
