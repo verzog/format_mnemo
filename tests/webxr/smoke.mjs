@@ -2004,12 +2004,13 @@ const scenarios = [
         }
     },
     {
-        name: 'space: a planet is ringed by its filename flag, else not',
+        name: 'space: built-in slots are ringed by default; a filename flag adds one',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const mk = (rings) => {
                 const added = [];
+                // Two textures -> slots 0 (ring by default) and 1 (no default ring).
                 const self = {THREE, scene: {add: (o) => added.push(o)},
                     planetTextures: [new THREE.Texture(), new THREE.Texture()],
                     planetField: null, planets: [], planetRings: rings, ringTexture: null,
@@ -2025,9 +2026,10 @@ const scenarios = [
                 });
                 return rings2;
             };
-            // Second planet flagged -> exactly one ring; none flagged -> no rings.
-            const pass = mk([false, true]) === 1 && mk([false, false]) === 0;
-            return {pass, detail: `flagged=${mk([false, true])} none=${mk([false, false])}`};
+            // No flags -> the default-ringed slot 0 still rings (one); flagging the
+            // non-default slot 1 adds a second ring.
+            const pass = mk([false, false]) === 1 && mk([false, true]) === 2;
+            return {pass, detail: `none=${mk([false, false])} flagged=${mk([false, true])}`};
         }
     },
     {
