@@ -3828,7 +3828,8 @@ define('format_mnemo/vr', [], function() {
             width: streetHalf * 1.7,
             height: 2.4,
             imageurl: section.image || null,
-            post: false
+            post: false,
+            hires: true
         });
         plate.group.position.set(0.25 * side, top - 1.9, 0);
         group.add(plate.group);
@@ -4312,9 +4313,11 @@ define('format_mnemo/vr', [], function() {
             });
         }
 
-        // Text plane.
+        // Text plane. Topic nameplates (opts.hires) are large on screen and few
+        // in number, so they get a supersampled, extra-crisp texture; the many
+        // activity signs stay at the base resolution to bound memory.
         var textMat = new THREE.MeshBasicMaterial({
-            map: this.makeTextTexture(opts.text, opts.colour),
+            map: this.makeTextTexture(opts.text, opts.colour, opts.hires ? 2 : 1),
             transparent: true,
             depthWrite: false
         });
@@ -4702,14 +4705,18 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {String} text The label text.
      * @param {Number} colour Hex int colour.
+     * @param {Number} [ss] Supersample factor (1 default, 2 for large signs).
      * @return {Object} Three.CanvasTexture.
      */
-    Cyberspace.prototype.makeTextTexture = function(text, colour) {
+    Cyberspace.prototype.makeTextTexture = function(text, colour, ss) {
         var THREE = this.THREE;
-        // Supersample the sign text: the sign plane is a fixed size in the world
-        // but can be drawn very large on screen, so more texels here keep the
-        // letters crisp instead of magnifying a small canvas into a blur.
-        var ss = 2;
+        // Optional supersample: the sign plane is a fixed size in the world but
+        // can be drawn very large on screen, so more texels keep the letters
+        // crisp instead of magnifying a small canvas into a blur. Doubling the
+        // canvas quadruples its memory, though, so this is opt-in (ss = 2) for
+        // the few large topic nameplates only; the many activity signs stay 1x
+        // and rely on the crisp core pass below, keeping headset memory in check.
+        ss = ss || 1;
         var canvas = document.createElement('canvas');
         canvas.width = 512 * ss;
         canvas.height = 128 * ss;
@@ -4793,7 +4800,9 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.verticalTextTexture = function(text, colour) {
         var THREE = this.THREE;
-        var ss = 2;
+        // Base resolution (these pylon blades exist per section, so keep their
+        // memory bounded); the crisp no-blur core below does the sharpening.
+        var ss = 1;
         var canvas = document.createElement('canvas');
         canvas.width = 128 * ss;
         canvas.height = 512 * ss;
