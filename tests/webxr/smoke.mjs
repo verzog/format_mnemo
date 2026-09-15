@@ -1376,6 +1376,7 @@ const scenarios = [
                     {key: 'lamp', label: 'Street lamp'},
                     {key: 'spaceship', label: 'spaceship'}
                 ]},
+                controlsLeft: document.createElement('div'),
                 buildPlacer: CS.prototype.buildPlacer
             };
             self.buildPlacer();
@@ -1396,6 +1397,7 @@ const scenarios = [
                 root,
                 placeType: 'lamp',
                 config: {strings: {}, placerprops: [{key: 'lamp', label: evil}]},
+                controlsLeft: document.createElement('div'),
                 buildPlacer: CS.prototype.buildPlacer
             };
             self.buildPlacer();
@@ -1417,6 +1419,7 @@ const scenarios = [
                     {key: 'drone', label: 'drone'},
                     {key: 'pylon', label: 'pylon'}
                 ]},
+                controlsLeft: document.createElement('div'),
                 buildPlacer: CS.prototype.buildPlacer
             };
             self.buildPlacer();
@@ -2128,6 +2131,7 @@ const scenarios = [
                 applyComfort: CS.prototype.applyComfort,
                 saveComfort: function() {},
                 markComfortActive: CS.prototype.markComfortActive,
+                controlsRight: document.createElement('div'),
                 buildComfort: CS.prototype.buildComfort
             };
             self.buildComfort();

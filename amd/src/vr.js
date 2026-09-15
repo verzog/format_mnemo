@@ -419,6 +419,7 @@ define('format_mnemo/vr', [], function() {
         this.buildControllers();
         this.gestures = new GestureManager(this);
         this.buildVrButton();
+        this.buildControlBar();
         this.buildFullscreenButton();
         this.buildComfort();
         this.buildKeybinds();
@@ -5329,6 +5330,56 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Build the floating control bar across the top of the stage: a left group
+     * (teacher edit/place tools) and a right group (fullscreen, comfort,
+     * controls, camera nav and the game). The bar is a flex row that wraps, so
+     * the buttons stay reachable and never overlap on a narrow (phone) screen -
+     * each build method appends its button into the matching group. Pointer
+     * events pass through the bar's empty space, so dragging the scene near the
+     * top still works.
+     */
+    Cyberspace.prototype.buildControlBar = function() {
+        var self = this;
+        var bar = document.createElement('div');
+        bar.className = 'format-mnemo__stagecontrols';
+        var left = document.createElement('div');
+        left.className = 'format-mnemo__stagecontrols-left';
+        var right = document.createElement('div');
+        right.className = 'format-mnemo__stagecontrols-right';
+        bar.appendChild(left);
+        bar.appendChild(right);
+        this.root.appendChild(bar);
+        this.controlsBar = bar;
+        this.controlsLeft = left;
+        this.controlsRight = right;
+        // Keep the pop-out panels sitting just under the bar's real height,
+        // however many rows it wraps to (a ResizeObserver catches wrapping,
+        // font-size and visibility changes; resize is the fallback).
+        this.updateControlsInset();
+        if (window.ResizeObserver) {
+            this.controlsObserver = new window.ResizeObserver(function() {
+                self.updateControlsInset();
+            });
+            this.controlsObserver.observe(bar);
+        }
+    };
+
+    /**
+     * Publish the control bar's current height as a CSS custom property so the
+     * comfort/controls/placer/editor panels open just below it at any width,
+     * rather than assuming a fixed number of wrapped rows.
+     */
+    Cyberspace.prototype.updateControlsInset = function() {
+        if (!this.controlsBar) {
+            return;
+        }
+        var h = this.controlsBar.offsetHeight;
+        if (h > 0) {
+            this.root.style.setProperty('--mnemo-controls-inset', (h + 4) + 'px');
+        }
+    };
+
+    /**
      * Build a fullscreen toggle button for the scene stage.
      */
     Cyberspace.prototype.buildFullscreenButton = function() {
@@ -5339,7 +5390,7 @@ define('format_mnemo/vr', [], function() {
         button.textContent = '⛶';
         button.title = this.config.strings.fullscreen;
         button.setAttribute('aria-label', this.config.strings.fullscreen);
-        this.root.appendChild(button);
+        this.controlsRight.appendChild(button);
 
         button.addEventListener('click', function() {
             if (document.fullscreenElement) {
@@ -5378,7 +5429,7 @@ define('format_mnemo/vr', [], function() {
         btn.textContent = '▶'; // A play triangle.
         btn.title = s.gamestart || 'Play';
         btn.setAttribute('aria-label', btn.title);
-        this.root.appendChild(btn);
+        this.controlsRight.appendChild(btn);
         this.gameButton = btn;
         btn.addEventListener('click', function() {
             if (self.game.isPlaying()) {
@@ -5533,7 +5584,7 @@ define('format_mnemo/vr', [], function() {
         btn.textContent = '⚙';
         btn.title = s.comfort || 'Comfort & controls';
         btn.setAttribute('aria-label', btn.title);
-        this.root.appendChild(btn);
+        this.controlsRight.appendChild(btn);
 
         var panel = document.createElement('div');
         panel.className = 'format-mnemo__comfort';
@@ -5858,7 +5909,7 @@ define('format_mnemo/vr', [], function() {
         btn.textContent = '⌨';
         btn.title = t('keybinds', 'Controls');
         btn.setAttribute('aria-label', btn.title);
-        this.root.appendChild(btn);
+        this.controlsRight.appendChild(btn);
 
         var panel = document.createElement('div');
         panel.className = 'format-mnemo__keybind';
@@ -6305,7 +6356,7 @@ define('format_mnemo/vr', [], function() {
         btn.type = 'button';
         btn.className = 'format-mnemo__edit-btn';
         btn.textContent = s.edit || 'Edit layout';
-        this.root.appendChild(btn);
+        this.controlsLeft.appendChild(btn);
         this.editButton = btn;
 
         var field = function(key, label, min, max, step) {
@@ -6482,7 +6533,7 @@ define('format_mnemo/vr', [], function() {
         btn.type = 'button';
         btn.className = 'format-mnemo__place-btn';
         btn.textContent = s.place || 'Place objects';
-        this.root.appendChild(btn);
+        this.controlsLeft.appendChild(btn);
         this.placeButton = btn;
 
         var panel = document.createElement('div');
@@ -9504,6 +9555,8 @@ define('format_mnemo/vr', [], function() {
             fx.blurA.setSize(w / 2, h / 2);
             fx.blurB.setSize(w / 2, h / 2);
         }
+        // The control bar may wrap differently at the new width.
+        this.updateControlsInset();
     };
 
     /**
@@ -10953,7 +11006,7 @@ define('format_mnemo/vr', [], function() {
         button.title = s.cameranav || 'Camera navigation';
         button.setAttribute('aria-label', button.title);
         button.setAttribute('aria-pressed', 'false');
-        this.root.appendChild(button);
+        this.controlsRight.appendChild(button);
 
         // Mirrored preview: the video and the four control-zone guides share a
         // media box (so the drawn zones line up with the analysed frame, not the
