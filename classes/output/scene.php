@@ -736,6 +736,8 @@ class scene implements renderable, templatable {
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/wasm'))->out(false),
             'mediapipehandmodelurl' =>
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/hand_landmarker.task'))->out(false),
+            'mediapipefacemodelurl' =>
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/face_landmarker.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
             'game' => !empty($options['mnemogame']),
