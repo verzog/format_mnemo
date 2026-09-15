@@ -246,6 +246,7 @@ define('format_mnemo/vr', [], function() {
         this.keybindSaveTimer = null; // Debounce handle for the server save.
         this.dragging = false;
         this.pointerMoved = 0;
+        this.suppressClick = false; // Swallow the click that skipped the intro.
         this.lastPointer = {x: 0, y: 0};
         this.tmp = new THREE.Vector3();
         this.tmp2 = new THREE.Vector3(); // Scratch for measuring per-frame motion.
@@ -260,6 +261,7 @@ define('format_mnemo/vr', [], function() {
         // device. Learners always walk on the ground.
         this.flyEnabled = !!config.canedit && this.readLocalFly();
         this.flyButton = null;
+        this.introActive = false; // Cinematic sky-drop intro playing (flat screen).
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.planets = []; // The Void's planet spheres, each self-rotating.
@@ -446,6 +448,10 @@ define('format_mnemo/vr', [], function() {
         this.buildPostFX();
 
         window.addEventListener('resize', this.onResize.bind(this));
+
+        // Fly in from high above on first load (flat screen), before the loop
+        // starts so the very first frame renders from the sky.
+        this.startIntro();
 
         // Drive everything from the XR-aware animation loop.
         renderer.setAnimationLoop(this.tick.bind(this));
@@ -7364,6 +7370,13 @@ define('format_mnemo/vr', [], function() {
         el.style.touchAction = 'none';
 
         el.addEventListener('pointerdown', function(e) {
+            // A press skips the sky-drop intro and lands immediately. Mark the
+            // gesture consumed so its release only skips - it must not also be
+            // read as a click that opens a node or fires.
+            if (self.introActive) {
+                self.finishIntro();
+                self.suppressClick = true;
+            }
             self.dragging = true;
             self.pointerMoved = 0;
             self.lastPointer.x = e.clientX;
@@ -7406,6 +7419,12 @@ define('format_mnemo/vr', [], function() {
             if (e.pointerId !== undefined && el.hasPointerCapture(e.pointerId)) {
                 el.releasePointerCapture(e.pointerId);
             }
+            // The press that skipped the intro is spent here: swallow its click
+            // so it never opens a node or fires.
+            if (self.suppressClick) {
+                self.suppressClick = false;
+                return;
+            }
             if (!wasClick) {
                 return;
             }
@@ -7427,6 +7446,7 @@ define('format_mnemo/vr', [], function() {
         el.addEventListener('pointerup', endDrag);
         el.addEventListener('pointercancel', function() {
             self.dragging = false;
+            self.suppressClick = false;
         });
 
         window.addEventListener('keydown', function(e) {
@@ -7441,6 +7461,10 @@ define('format_mnemo/vr', [], function() {
                 self.keybindListen = null;
                 self.renderKeybinds();
                 return;
+            }
+            // Any key skips the sky-drop intro and lands immediately.
+            if (self.introActive) {
+                self.finishIntro();
             }
             self.keys[e.code] = true;
         }, true);
@@ -9159,6 +9183,11 @@ define('format_mnemo/vr', [], function() {
             this.game.update(dt);
         }
 
+        // A headset takes over the camera, so the sky-drop never plays there.
+        if (presenting && this.introActive) {
+            this.finishIntro();
+        }
+
         if (presenting) {
             // Measure how far the rig travels this frame so the comfort
             // vignette can respond to real motion from every locomotion path.
@@ -9173,6 +9202,11 @@ define('format_mnemo/vr', [], function() {
                 var travelled = this.player.position.distanceTo(this.tmp2);
                 this.gestures.updateVignette(travelled / Math.max(dt, 0.0001), dt);
             }
+        } else if (this.introActive) {
+            // Cinematic sky-drop: fly the rig in from above before handing over
+            // control. Movement input and the world clamps are suspended so the
+            // descent starts well above the ceiling.
+            this.updateIntro(dt);
         } else {
             // Flat screen: drive look and movement from the mouse/keyboard and,
             // when it is on, camera-gesture navigation (which feeds the same
@@ -9189,8 +9223,12 @@ define('format_mnemo/vr', [], function() {
             }
         }
 
-        this.clampToWorld();
-        this.constrainToRoad();
+        // The intro flies above the ceiling and off the roads, so hold the
+        // clamps until it lands.
+        if (!this.introActive) {
+            this.clampToWorld();
+            this.constrainToRoad();
+        }
         this.followShadow();
 
         // Headset rendering must go straight to the XR framebuffer (the post
@@ -9506,6 +9544,74 @@ define('format_mnemo/vr', [], function() {
         } else if (this.navMove || this.navStrafe) {
             this.navMove = 0;
             this.navStrafe = 0;
+        }
+    };
+
+    /**
+     * Set up the cinematic entry: start the rig high above the avenue mouth,
+     * pitched down at the city, so the first frame looks like a descent into
+     * cyberspace. Flat screen only (a forced move in a headset is nauseating),
+     * and skipped entirely when the viewer prefers reduced motion.
+     */
+    Cyberspace.prototype.startIntro = function() {
+        if (this.renderer.xr.isPresenting) {
+            return;
+        }
+        var reduce = false;
+        try {
+            reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        } catch (e) {
+            reduce = false;
+        }
+        if (reduce) {
+            return;
+        }
+        var THREE = this.THREE;
+        this.introEnd = this.player.position.clone();
+        // High up and a little further back, so the descent also sweeps forward
+        // down the avenue as it drops in.
+        this.introStart = new THREE.Vector3(this.introEnd.x, this.introEnd.y + 280, this.introEnd.z + 30);
+        this.introEndPitch = this.pitch; // The resting look (level).
+        this.introStartPitch = -0.55; // Looking down at the city.
+        this.introDuration = 2.8;
+        this.introTime = 0;
+        this.introActive = true;
+        this.player.position.copy(this.introStart);
+        this.pitch = this.introStartPitch;
+    };
+
+    /**
+     * Advance the sky-drop intro: ease the rig from the sky down to the avenue
+     * mouth and level the look out, accelerating off the top and settling at the
+     * end (ease-in-out). User movement is suspended until it finishes.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateIntro = function(dt) {
+        this.introTime += dt;
+        var t = Math.min(1, this.introTime / this.introDuration);
+        // Ease-in-out cubic: hang, accelerate down, then settle.
+        var e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        this.player.position.lerpVectors(this.introStart, this.introEnd, e);
+        this.pitch = this.introStartPitch + (this.introEndPitch - this.introStartPitch) * e;
+        this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+        if (t >= 1) {
+            this.finishIntro();
+        }
+    };
+
+    /**
+     * End the intro immediately (it completed, or the viewer skipped it or
+     * entered a headset), snapping the rig to the resting start position.
+     */
+    Cyberspace.prototype.finishIntro = function() {
+        if (!this.introActive) {
+            return;
+        }
+        this.introActive = false;
+        if (this.introEnd) {
+            this.player.position.copy(this.introEnd);
+            this.pitch = this.introEndPitch;
         }
     };
 
@@ -10557,6 +10663,8 @@ define('format_mnemo/vr', [], function() {
         this.prevHand = null; // Previous frame's hand features (pull detection).
         this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
         this.lastFireTs = 0; // Last finger-gun shot time (ms), for a fire cooldown.
+        this.gunArmed = false; // A cocked finger gun (thumb up) is held, ready to fire.
+        this.handLostTime = 0; // Seconds since a hand was last tracked (latch expiry).
         this.headPitchNeutral = null; // Calibrated straight-ahead head pitch.
         this.havePitch = false; // A face is driving the look pitch this frame.
         this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
@@ -10810,17 +10918,32 @@ define('format_mnemo/vr', [], function() {
                 handTurn = it.turn;
                 moveTarget = it.moveTarget;
                 haveHand = true;
-                // Finger-gun trigger: fire once when the thumb drops (the
-                // "hammer" falling) while a finger gun is held through the
-                // transition. Requiring the previous frame to already be a
-                // cocked finger gun (thumb up) means forming the gesture with
-                // the thumb already down - or dropping it straight from an open
-                // hand - does not fire; the thumb must be raised again to shoot.
-                if (cur.fingerGun && prev && prev.fingerGun && prev.thumbUp && !cur.thumbUp) {
-                    this.fireGesture(ts);
+                // Finger-gun trigger, tracked as an armed latch so it survives a
+                // noisy frame: a finger gun with the thumb raised arms the shot,
+                // dropping the thumb (the hammer) while the gun is still held
+                // fires it once, and it must be re-cocked (thumb raised again)
+                // to fire the next. Letting the gun go disarms it. This needs a
+                // real cock-then-drop, not merely forming the gesture.
+                this.handLostTime = 0;
+                if (cur.fingerGun) {
+                    if (cur.thumbUp) {
+                        this.gunArmed = true;
+                    } else if (this.gunArmed) {
+                        this.gunArmed = false;
+                        this.fireGesture(ts);
+                    }
+                } else {
+                    this.gunArmed = false;
                 }
             } else {
                 this.prevHand = null;
+                // Tolerate a dropped frame, but disarm the finger gun after a
+                // sustained tracking loss so a hand that leaves and returns
+                // thumb-down cannot fire a shot that was never really cocked.
+                this.handLostTime += frameDt;
+                if (this.handLostTime > 0.3) {
+                    this.gunArmed = false;
+                }
             }
         }
         if (!haveHead && !haveHand) {
@@ -11108,6 +11231,8 @@ define('format_mnemo/vr', [], function() {
         // driving the look pitch until a face is seen again.
         this.headPitchNeutral = null;
         this.havePitch = false;
+        this.gunArmed = false;
+        this.handLostTime = 0;
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
@@ -11138,8 +11263,9 @@ define('format_mnemo/vr', [], function() {
         this.haulGain = 1.2; // Pull speed (frame fractions/sec) mapped to full forward.
         // How far (in hand spans) the thumb tip must stand off the index-finger
         // line to count as "raised" (the cocked hammer). Dropping the thumb
-        // toward the index closes this gap and fires.
-        this.thumbRaiseRatio = 0.45;
+        // toward the index closes this gap and fires. Kept fairly low so an
+        // ordinary raised thumb reliably arms the shot.
+        this.thumbRaiseRatio = 0.32;
     }
 
     /** @var {Array} The [tip, pip] landmark indices of the four non-thumb fingers. */
@@ -11222,8 +11348,10 @@ define('format_mnemo/vr', [], function() {
             fingers: fingers,
             open: fingers >= 4,
             fist: fingers === 0,
-            // A finger gun: index out, the other three fingers curled.
-            fingerGun: ext[0] && !ext[1] && !ext[2] && !ext[3],
+            // A finger gun: index out and the ring and pinky curled. The middle
+            // is ignored, so both a single-finger gun and a two-finger
+            // ("double-barrel") gun register - real hands rarely curl cleanly.
+            fingerGun: ext[0] && !ext[2] && !ext[3],
             // Thumb raised (the "hammer"); dropping it toward the index pulls
             // the trigger.
             thumbUp: this.thumbRaised(lm),

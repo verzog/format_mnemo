@@ -356,6 +356,73 @@ const scenarios = [
         }
     },
     {
+        name: 'intro: the sky-drop lifts the rig and lands it at the start',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // Force reduced-motion off so the intro runs in any environment.
+            const origMM = window.matchMedia;
+            window.matchMedia = () => ({matches: false});
+            try {
+                const player = new THREE.Group();
+                player.position.set(0, 0, 12);
+                const self = {
+                    THREE, player,
+                    camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100),
+                    pitch: 0, yaw: 0,
+                    renderer: {xr: {isPresenting: false}},
+                    startIntro: CS.prototype.startIntro,
+                    updateIntro: CS.prototype.updateIntro,
+                    finishIntro: CS.prototype.finishIntro
+                };
+                self.startIntro();
+                const lifted = self.introActive === true && player.position.y > 100 &&
+                    self.pitch < 0;
+                for (let i = 0; i < 300 && self.introActive; i++) {
+                    self.updateIntro(0.05);
+                }
+                const landed = self.introActive === false &&
+                    Math.abs(player.position.y) < 1e-6 &&
+                    Math.abs(player.position.z - 12) < 1e-6 &&
+                    Math.abs(self.pitch) < 1e-6;
+                return {pass: lifted && landed, detail: `lifted=${lifted} landed=${landed} y=${player.position.y.toFixed(2)}`};
+            } finally {
+                window.matchMedia = origMM;
+            }
+        }
+    },
+    {
+        name: 'intro: a press skips the drop straight to the start position',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const origMM = window.matchMedia;
+            window.matchMedia = () => ({matches: false});
+            try {
+                const player = new THREE.Group();
+                player.position.set(0, 0, 12);
+                const self = {
+                    THREE, player,
+                    camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100),
+                    pitch: 0, yaw: 0,
+                    renderer: {xr: {isPresenting: false}},
+                    startIntro: CS.prototype.startIntro,
+                    updateIntro: CS.prototype.updateIntro,
+                    finishIntro: CS.prototype.finishIntro
+                };
+                self.startIntro();
+                self.updateIntro(0.1); // A few frames into the descent.
+                const midair = player.position.y > 100;
+                self.finishIntro(); // Skip.
+                const pass = midair && self.introActive === false &&
+                    Math.abs(player.position.y) < 1e-6 && Math.abs(player.position.z - 12) < 1e-6;
+                return {pass, detail: `midair=${midair} y=${player.position.y.toFixed(2)}`};
+            } finally {
+                window.matchMedia = origMM;
+            }
+        }
+    },
+    {
         name: 'keybinds: defaults are complete and valid',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
@@ -2134,6 +2201,50 @@ const scenarios = [
             nav.fireGesture(1100); // Within 200ms -> suppressed.
             nav.fireGesture(1300); // Clear of the cooldown -> fires.
             return {pass: shots === 2, detail: `shots=${shots}`};
+        }
+    },
+    {
+        name: 'cameranav: the finger-gun latch rides a dropped frame but expires on lost tracking',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const mkNav = () => {
+                const nav = new CN(null);
+                nav._shots = 0;
+                nav.cs = {game: {isPlaying: () => true, shootFromCamera: () => {
+                    nav._shots++;
+                }}};
+                return nav;
+            };
+            const poseFor = (mode) => ({
+                detect: () => (mode.v === 'lost' ? null : [1]),
+                classify: () => (mode.v === 'fire'
+                    ? {fingerGun: true, thumbUp: false}
+                    : {fingerGun: true, thumbUp: true}),
+                intent: () => ({stop: false, turn: 0, moveTarget: 0})
+            });
+            // A: cock, one brief dropped frame (< grace), then thumb-down -> fires.
+            const a = mkNav();
+            const am = {v: 'cock'};
+            a.pose = poseFor(am);
+            a.samplePose({}, 0.033);
+            am.v = 'lost';
+            a.samplePose({}, 0.05);
+            am.v = 'fire';
+            a.samplePose({}, 0.033);
+            const survives = a._shots === 1;
+            // B: cock, sustained loss (> grace), then thumb-down -> must not fire.
+            const b = mkNav();
+            const bm = {v: 'cock'};
+            b.pose = poseFor(bm);
+            b.samplePose({}, 0.033);
+            bm.v = 'lost';
+            for (let i = 0; i < 10; i++) {
+                b.samplePose({}, 0.05);
+            }
+            bm.v = 'fire';
+            b.samplePose({}, 0.033);
+            const expires = b._shots === 0;
+            return {pass: survives && expires, detail: `survives=${survives} expires=${expires}`};
         }
     },
     {
