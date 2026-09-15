@@ -430,9 +430,10 @@ When it can, the control upgrades from simple frame-motion detection to
 **on-device hand- and head-pose recognition** using MediaPipe Tasks Vision, all
 vendored same-origin under `thirdparty/mediapipe/` (the ES module bundle, the
 WASM runtime and the hand and face landmark models), so **no external host is
-contacted**. With pose recognition you **turn your head to steer**, **open your
-palm to stop**, and **make a fist and pull it toward you to glide forward** — and
-in the arcade game you **make a finger gun and drop your thumb to shoot**.
+contacted**. With pose recognition you **turn your head to steer and tilt it to
+aim up or down**, **open your palm to stop**, and **make a fist and pull it
+toward you to glide forward** — and in the arcade game you **make a finger gun
+and drop your thumb to shoot**.
 This adds
 CSP surface beyond `script-src 'self'`: the WASM runtime needs
 **`script-src 'wasm-unsafe-eval'`** (or `'unsafe-eval'`) to instantiate, loads
