@@ -5339,17 +5339,44 @@ define('format_mnemo/vr', [], function() {
      * top still works.
      */
     Cyberspace.prototype.buildControlBar = function() {
+        var self = this;
         var bar = document.createElement('div');
-        bar.className = 'format-mnemo__controls';
+        bar.className = 'format-mnemo__stagecontrols';
         var left = document.createElement('div');
-        left.className = 'format-mnemo__controls-left';
+        left.className = 'format-mnemo__stagecontrols-left';
         var right = document.createElement('div');
-        right.className = 'format-mnemo__controls-right';
+        right.className = 'format-mnemo__stagecontrols-right';
         bar.appendChild(left);
         bar.appendChild(right);
         this.root.appendChild(bar);
+        this.controlsBar = bar;
         this.controlsLeft = left;
         this.controlsRight = right;
+        // Keep the pop-out panels sitting just under the bar's real height,
+        // however many rows it wraps to (a ResizeObserver catches wrapping,
+        // font-size and visibility changes; resize is the fallback).
+        this.updateControlsInset();
+        if (window.ResizeObserver) {
+            this.controlsObserver = new window.ResizeObserver(function() {
+                self.updateControlsInset();
+            });
+            this.controlsObserver.observe(bar);
+        }
+    };
+
+    /**
+     * Publish the control bar's current height as a CSS custom property so the
+     * comfort/controls/placer/editor panels open just below it at any width,
+     * rather than assuming a fixed number of wrapped rows.
+     */
+    Cyberspace.prototype.updateControlsInset = function() {
+        if (!this.controlsBar) {
+            return;
+        }
+        var h = this.controlsBar.offsetHeight;
+        if (h > 0) {
+            this.root.style.setProperty('--mnemo-controls-inset', (h + 4) + 'px');
+        }
     };
 
     /**
@@ -9528,6 +9555,8 @@ define('format_mnemo/vr', [], function() {
             fx.blurA.setSize(w / 2, h / 2);
             fx.blurB.setSize(w / 2, h / 2);
         }
+        // The control bar may wrap differently at the new width.
+        this.updateControlsInset();
     };
 
     /**
