@@ -10708,61 +10708,94 @@ define('format_mnemo/vr', [], function() {
     CameraNav.prototype.initPose = function() {
         var self = this;
         var cfg = this.cs && this.cs.config;
-        if (this.pose || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
+        // Already have (or are loading) a detector: nothing to do. Checking both
+        // pose and head means a partial load (only one model succeeded) is not
+        // retried, so the other is not re-created and leaked on a later start().
+        if (this.pose || this.head || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
             return;
         }
         this.poseLoading = true;
         var mp;
+        // Wrap a create so one model failing never rejects the pair: each
+        // settles to {ok, lm} or {ok:false, err}, so a working landmarker is
+        // still installed (or closed) instead of being discarded and leaked.
+        var settle = function(promise) {
+            return promise.then(function(lm) {
+                return {ok: true, lm: lm};
+            }, function(err) {
+                return {ok: false, err: err};
+            });
+        };
         loadMediapipe(cfg).then(function(loaded) {
             mp = loaded;
             return mp.FilesetResolver.forVisionTasks(cfg.mediapipewasmurl);
         }).then(function(fileset) {
             // Build the hand landmarker and (when its model is present) the face
-            // landmarker together, so the control gains both at once.
-            var hand = mp.HandLandmarker.createFromOptions(fileset, {
+            // landmarker from the one fileset, independently.
+            var hand = settle(mp.HandLandmarker.createFromOptions(fileset, {
                 baseOptions: {modelAssetPath: cfg.mediapipehandmodelurl, delegate: 'GPU'},
                 runningMode: 'VIDEO',
                 numHands: 1
-            });
-            var face = cfg.mediapipefacemodelurl ? mp.FaceLandmarker.createFromOptions(fileset, {
+            }));
+            var face = cfg.mediapipefacemodelurl ? settle(mp.FaceLandmarker.createFromOptions(fileset, {
                 baseOptions: {modelAssetPath: cfg.mediapipefacemodelurl, delegate: 'GPU'},
                 runningMode: 'VIDEO',
                 numFaces: 1
-            }) : null;
+            })) : Promise.resolve({ok: false, err: null});
             return Promise.all([hand, face]);
-        }).then(function(made) {
-            var handLandmarker = made[0];
-            var faceLandmarker = made[1];
-            // The load finished; clear the guard either way so a later start()
-            // can retry if this result is discarded.
+        }).then(function(res) {
+            // The load finished; clear the guard so a total failure can retry.
             self.poseLoading = false;
-            // A stop() (or entering XR) between request and resolution: discard.
-            if (self.active) {
-                self.pose = new HandPose(handLandmarker);
-                if (faceLandmarker) {
-                    self.head = new HeadPose(faceLandmarker);
-                }
-                if (self.onpose) {
-                    self.onpose();
-                }
-            } else {
-                if (handLandmarker.close) {
-                    handLandmarker.close();
-                }
-                if (faceLandmarker && faceLandmarker.close) {
-                    faceLandmarker.close();
-                }
+            var hand = res[0].ok ? res[0].lm : null;
+            var face = res[1].ok ? res[1].lm : null;
+            if (hand || face) {
+                self.applyPoseModels(hand, face);
+            }
+            // Surface a partial or total failure so a blocked model (CSP, a 404,
+            // out of device resources) is diagnosable; the control keeps working
+            // with whatever loaded, or the motion fallback if nothing did.
+            if (window.console && (res[0].err || res[1].err)) {
+                window.console.warn('format_mnemo: a pose model failed to load, ' +
+                    'using what is available', res[0].err || res[1].err);
             }
             return null;
         }).catch(function(e) {
             self.poseLoading = false; // Stay in motion mode.
-            // Surface why so a blocked upgrade (CSP, missing SIMD, a 404) can be
-            // diagnosed; the control keeps working in motion mode regardless.
+            // An earlier-stage failure (bundle, fileset or WASM runtime).
             if (window.console) {
                 window.console.warn('format_mnemo: pose detection unavailable, ' +
                     'using motion fallback', e);
             }
         });
+    };
+
+    /**
+     * Install whichever pose detectors loaded, or - if the control was switched
+     * off (or a headset entered) between the request and its resolution - close
+     * them instead so no WASM/GPU landmarker is leaked.
+     *
+     * @param {Object|null} hand A loaded HandLandmarker, or null.
+     * @param {Object|null} face A loaded FaceLandmarker, or null.
+     */
+    CameraNav.prototype.applyPoseModels = function(hand, face) {
+        if (this.active) {
+            if (hand) {
+                this.pose = new HandPose(hand);
+            }
+            if (face) {
+                this.head = new HeadPose(face);
+            }
+            if (this.onpose) {
+                this.onpose();
+            }
+            return;
+        }
+        if (hand && hand.close) {
+            hand.close();
+        }
+        if (face && face.close) {
+            face.close();
+        }
     };
 
     /**

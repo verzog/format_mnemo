@@ -2096,6 +2096,38 @@ const scenarios = [
         }
     },
     {
+        name: 'cameranav: a partial pose load keeps whichever model succeeded',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const handOnly = new CN(null);
+            handOnly.active = true;
+            handOnly.applyPoseModels({}, null); // Only the hand model loaded.
+            const keptHand = handOnly.pose !== null && handOnly.head === null;
+            const faceOnly = new CN(null);
+            faceOnly.active = true;
+            faceOnly.applyPoseModels(null, {}); // Only the face model loaded.
+            const keptFace = faceOnly.pose === null && faceOnly.head !== null;
+            return {pass: keptHand && keptFace, detail: `hand=${keptHand} face=${keptFace}`};
+        }
+    },
+    {
+        name: 'cameranav: models loaded after switch-off are closed, not leaked',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            nav.active = false; // Switched off (or XR entered) during the load.
+            let closedHand = false;
+            let closedFace = false;
+            nav.applyPoseModels({close: () => {
+                closedHand = true;
+            }}, {close: () => {
+                closedFace = true;
+            }});
+            const pass = nav.pose === null && nav.head === null && closedHand && closedFace;
+            return {pass, detail: `pose=${nav.pose} head=${nav.head} h=${closedHand} f=${closedFace}`};
+        }
+    },
+    {
         name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
