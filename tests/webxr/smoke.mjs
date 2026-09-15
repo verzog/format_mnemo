@@ -283,6 +283,7 @@ const scenarios = [
             const self = {
                 THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
                 pitch: -0.6, yaw: 0, keys: {KeyW: true}, config: {canedit: false},
+                keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
                 comfortSpeedScale: () => 1,
                 velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
                 updateDesktop: CS.prototype.updateDesktop,
@@ -307,6 +308,7 @@ const scenarios = [
             const self = {
                 THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
                 pitch: 0, yaw: 0, keys: {Space: true}, config: {canedit: false},
+                keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
                 comfortSpeedScale: () => 1,
                 velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
                 updateDesktop: CS.prototype.updateDesktop,
@@ -332,6 +334,7 @@ const scenarios = [
             const self = {
                 THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
                 pitch: 0, yaw: 0, keys: {KeyR: true}, config: {canedit: true},
+                keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
                 comfortSpeedScale: () => 1,
                 velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
                 updateDesktop: CS.prototype.updateDesktop,
@@ -341,6 +344,95 @@ const scenarios = [
             self.updateDesktop(0.1);
             // R rises with no gravity pulling back — free flight is preserved.
             return {pass: player.position.y > 0.1, detail: `y=${player.position.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'keybinds: defaults are complete and valid',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const k = CS.prototype.normalizeKeybinds({});
+            const pass = k.forward === 'KeyW' && k.back === 'KeyS' && k.left === 'KeyA' &&
+                k.right === 'KeyD' && k.up === 'Space' && k.down === 'KeyF' && k.run === 'ShiftLeft' &&
+                k.fire === 'Mouse0' && k.looksens === 1 && k.invert === false;
+            return {pass, detail: JSON.stringify(k)};
+        }
+    },
+    {
+        name: 'keybinds: invalid values fall back to their defaults',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            // A non-string key, an unknown fire button, an out-of-range
+            // sensitivity and a truthy invert must all be sanitised.
+            const k = CS.prototype.normalizeKeybinds({forward: 123, fire: 'Mouse9', looksens: 99, invert: 1});
+            const pass = k.forward === 'KeyW' && k.fire === 'Mouse0' && k.looksens === 1 && k.invert === true;
+            return {pass, detail: JSON.stringify(k)};
+        }
+    },
+    {
+        name: 'keybinds: actionActive follows a rebound key and drops the old one',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                keybinds: CS.prototype.normalizeKeybinds({forward: 'KeyJ'}),
+                actionActive: CS.prototype.actionActive
+            };
+            self.keys = {KeyJ: true};
+            const usesNew = self.actionActive('forward') === true;
+            self.keys = {KeyW: true}; // The old default is no longer bound.
+            const dropsOld = self.actionActive('forward') === false;
+            return {pass: usesNew && dropsOld, detail: `new=${usesNew} old=${dropsOld}`};
+        }
+    },
+    {
+        name: 'keybinds: the arrow/R/right-shift aliases stay live',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                keybinds: CS.prototype.normalizeKeybinds({}),
+                actionActive: CS.prototype.actionActive
+            };
+            self.keys = {ArrowUp: true};
+            const arrow = self.actionActive('forward') === true;
+            self.keys = {KeyR: true};
+            const rise = self.actionActive('up') === true;
+            self.keys = {ShiftRight: true};
+            const run = self.actionActive('run') === true;
+            return {pass: arrow && rise && run, detail: `arrow=${arrow} rise=${rise} run=${run}`};
+        }
+    },
+    {
+        name: 'keybinds: lookInverted and lookSensitivity read the mapping',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                keybinds: CS.prototype.normalizeKeybinds({invert: true, looksens: 1.6}),
+                lookInverted: CS.prototype.lookInverted,
+                lookSensitivity: CS.prototype.lookSensitivity
+            };
+            const pass = self.lookInverted() === true && self.lookSensitivity() === 1.6;
+            return {pass, detail: `invert=${self.lookInverted()} sens=${self.lookSensitivity()}`};
+        }
+    },
+    {
+        name: 'keybinds: a rebound move key drives desktop walking',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const player = new THREE.Group();
+            const self = {
+                THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
+                pitch: 0, yaw: 0, keys: {KeyJ: true}, config: {canedit: false},
+                keybinds: CS.prototype.normalizeKeybinds({forward: 'KeyJ'}),
+                actionActive: CS.prototype.actionActive,
+                comfortSpeedScale: () => 1,
+                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                updateDesktop: CS.prototype.updateDesktop,
+                updateDesktopFly: CS.prototype.updateDesktopFly,
+                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            };
+            self.updateDesktop(0.1);
+            // J is bound to forward -> steps -Z, just as W would.
+            return {pass: player.position.z < -0.1, detail: `z=${player.position.z.toFixed(3)}`};
         }
     },
     {
@@ -1803,6 +1895,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const self = {
                 THREE, yaw: 0, keys: {}, navMove: 1, navStrafe: 0,
+                keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
                 comfortSpeedScale: () => 1,
                 velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
                 player: new THREE.Group(),

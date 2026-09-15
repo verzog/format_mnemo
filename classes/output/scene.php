@@ -438,6 +438,52 @@ class scene implements renderable, templatable {
     }
 
     /**
+     * The current user's desktop control mapping (movement keys, fire button,
+     * look sensitivity and invert), read from their 'format_mnemo_keybinds'
+     * preference and validated field by field. Returns null when the user has
+     * no stored preference, so the client can honour a device-local
+     * (localStorage) choice before falling back to defaults. The client
+     * re-validates everything, so this is a light server-side sanity pass; a
+     * key code is any short printable string (a KeyboardEvent.code).
+     *
+     * @return array{forward: string, back: string, left: string, right: string,
+     *     up: string, down: string, run: string, fire: string, looksens: float,
+     *     invert: bool}|null
+     */
+    protected function keybinds(): ?array {
+        $raw = get_user_preferences('format_mnemo_keybinds', '');
+        $stored = (is_string($raw) && $raw !== '') ? json_decode($raw, true) : null;
+        if (!is_array($stored)) {
+            return null;
+        }
+        $defaults = [
+            'forward' => 'KeyW', 'back' => 'KeyS', 'left' => 'KeyA', 'right' => 'KeyD',
+            'up' => 'Space', 'down' => 'KeyF', 'run' => 'ShiftLeft',
+        ];
+        // A key code must be a short printable string; anything else (array,
+        // over-long value) falls back to the default for that action.
+        $key = function (string $action) use ($stored, $defaults): string {
+            $code = $stored[$action] ?? null;
+            return (is_string($code) && $code !== '' && strlen($code) <= 32) ? $code : $defaults[$action];
+        };
+        $fires = ['Mouse0' => true, 'Mouse1' => true, 'Mouse2' => true];
+        $fire = (isset($stored['fire']) && is_string($stored['fire'])) ? $stored['fire'] : '';
+        $sens = (isset($stored['looksens']) && is_numeric($stored['looksens'])) ? (float)$stored['looksens'] : 1.0;
+        return [
+            'forward' => $key('forward'),
+            'back' => $key('back'),
+            'left' => $key('left'),
+            'right' => $key('right'),
+            'up' => $key('up'),
+            'down' => $key('down'),
+            'run' => $key('run'),
+            'fire' => isset($fires[$fire]) ? $fire : 'Mouse0',
+            'looksens' => ($sens >= 0.3 && $sens <= 3) ? $sens : 1.0,
+            'invert' => !empty($stored['invert']),
+        ];
+    }
+
+    /**
      * The model file name/URL for a building row, or null when it holds only a
      * transform (empty model).
      *
@@ -660,6 +706,10 @@ class scene implements renderable, templatable {
             // Per-learner comfort settings (turn mode/angle, motion vignette,
             // movement speed), from this user's preference or the defaults.
             'comfort' => $this->comfort(),
+            // Per-learner desktop control mapping (movement keys, fire button,
+            // look sensitivity and invert), from this user's preference or null
+            // to let the client fall back to a device-local choice/defaults.
+            'keybinds' => $this->keybinds(),
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
             // Base URL of the bundled Three.js addon modules (GLTFLoader and the
@@ -784,6 +834,27 @@ class scene implements renderable, templatable {
                 'comfortmovement' => get_string('comfortmovement', 'format_mnemo'),
                 'comfortglide' => get_string('comfortglide', 'format_mnemo'),
                 'comfortteleport' => get_string('comfortteleport', 'format_mnemo'),
+                'keybinds' => get_string('keybinds', 'format_mnemo'),
+                'keybindhint' => get_string('keybindhint', 'format_mnemo'),
+                'keybindforward' => get_string('keybindforward', 'format_mnemo'),
+                'keybindback' => get_string('keybindback', 'format_mnemo'),
+                'keybindleft' => get_string('keybindleft', 'format_mnemo'),
+                'keybindright' => get_string('keybindright', 'format_mnemo'),
+                'keybindup' => get_string('keybindup', 'format_mnemo'),
+                'keybinddown' => get_string('keybinddown', 'format_mnemo'),
+                'keybindrun' => get_string('keybindrun', 'format_mnemo'),
+                'keybindfire' => get_string('keybindfire', 'format_mnemo'),
+                'keybindfireleft' => get_string('keybindfireleft', 'format_mnemo'),
+                'keybindfireright' => get_string('keybindfireright', 'format_mnemo'),
+                'keybindlook' => get_string('keybindlook', 'format_mnemo'),
+                'keybindlooklow' => get_string('keybindlooklow', 'format_mnemo'),
+                'keybindlooknormal' => get_string('keybindlooknormal', 'format_mnemo'),
+                'keybindlookhigh' => get_string('keybindlookhigh', 'format_mnemo'),
+                'keybindinvert' => get_string('keybindinvert', 'format_mnemo'),
+                'keybindoff' => get_string('keybindoff', 'format_mnemo'),
+                'keybindon' => get_string('keybindon', 'format_mnemo'),
+                'keybindpress' => get_string('keybindpress', 'format_mnemo'),
+                'keybindreset' => get_string('keybindreset', 'format_mnemo'),
                 'gamestart' => get_string('gamestart', 'format_mnemo'),
                 'gameexit' => get_string('gameexit', 'format_mnemo'),
                 'gamescore' => get_string('gamescore', 'format_mnemo'),
