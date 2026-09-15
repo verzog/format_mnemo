@@ -356,6 +356,73 @@ const scenarios = [
         }
     },
     {
+        name: 'intro: the sky-drop lifts the rig and lands it at the start',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // Force reduced-motion off so the intro runs in any environment.
+            const origMM = window.matchMedia;
+            window.matchMedia = () => ({matches: false});
+            try {
+                const player = new THREE.Group();
+                player.position.set(0, 0, 12);
+                const self = {
+                    THREE, player,
+                    camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100),
+                    pitch: 0, yaw: 0,
+                    renderer: {xr: {isPresenting: false}},
+                    startIntro: CS.prototype.startIntro,
+                    updateIntro: CS.prototype.updateIntro,
+                    finishIntro: CS.prototype.finishIntro
+                };
+                self.startIntro();
+                const lifted = self.introActive === true && player.position.y > 100 &&
+                    self.pitch < 0;
+                for (let i = 0; i < 300 && self.introActive; i++) {
+                    self.updateIntro(0.05);
+                }
+                const landed = self.introActive === false &&
+                    Math.abs(player.position.y) < 1e-6 &&
+                    Math.abs(player.position.z - 12) < 1e-6 &&
+                    Math.abs(self.pitch) < 1e-6;
+                return {pass: lifted && landed, detail: `lifted=${lifted} landed=${landed} y=${player.position.y.toFixed(2)}`};
+            } finally {
+                window.matchMedia = origMM;
+            }
+        }
+    },
+    {
+        name: 'intro: a press skips the drop straight to the start position',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const origMM = window.matchMedia;
+            window.matchMedia = () => ({matches: false});
+            try {
+                const player = new THREE.Group();
+                player.position.set(0, 0, 12);
+                const self = {
+                    THREE, player,
+                    camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100),
+                    pitch: 0, yaw: 0,
+                    renderer: {xr: {isPresenting: false}},
+                    startIntro: CS.prototype.startIntro,
+                    updateIntro: CS.prototype.updateIntro,
+                    finishIntro: CS.prototype.finishIntro
+                };
+                self.startIntro();
+                self.updateIntro(0.1); // A few frames into the descent.
+                const midair = player.position.y > 100;
+                self.finishIntro(); // Skip.
+                const pass = midair && self.introActive === false &&
+                    Math.abs(player.position.y) < 1e-6 && Math.abs(player.position.z - 12) < 1e-6;
+                return {pass, detail: `midair=${midair} y=${player.position.y.toFixed(2)}`};
+            } finally {
+                window.matchMedia = origMM;
+            }
+        }
+    },
+    {
         name: 'keybinds: defaults are complete and valid',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
