@@ -578,6 +578,56 @@
     background: rgba(0, 229, 255, 0.18);
 }
 
+/* Close (X) button, shared by the pop-out panels. */
+.format-mnemo__panel-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 14px;
+    line-height: 1;
+    color: #cdefff;
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid rgba(0, 229, 255, 0.4);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__panel-close:hover {
+    background: rgba(0, 229, 255, 0.28);
+}
+
+/* Leave room at the top of the panels for the close button. */
+.format-mnemo__comfort,
+.format-mnemo__keybind {
+    padding-top: 1.9rem;
+}
+
+/* Fly toggle (teacher/admin tool, left group). */
+.format-mnemo__fly-btn {
+    padding: 0.4rem 0.8rem;
+    font-family: "Courier New", monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #00e5ff;
+    background: rgba(2, 6, 15, 0.6);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.format-mnemo__fly-btn:hover {
+    background: rgba(0, 229, 255, 0.18);
+}
+
+.format-mnemo__fly-btn--on {
+    color: #02060f;
+    background: #00e5ff;
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.6);
+}
+
 .format-mnemo__stage:fullscreen {
     width: 100%;
     height: 100%;
