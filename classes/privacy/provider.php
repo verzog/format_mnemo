@@ -31,9 +31,11 @@ use core_privacy\local\request\writer;
  * Privacy provider for format_mnemo.
  *
  * The format keeps no data in its own tables. It stores teacher-uploaded topic
- * images as course content via the files subsystem, and one per-user comfort
- * preference (VR turn mode/angle, motion vignette and movement speed); both are
- * declared here, and the comfort preference is exported on request.
+ * images as course content via the files subsystem, and two per-user
+ * preferences: comfort settings (VR turn mode/angle, motion vignette and
+ * movement speed) and the desktop control mapping (movement keys, fire button,
+ * look sensitivity and invert). All are declared here, and the preferences are
+ * exported on request.
  */
 class provider implements
     \core_privacy\local\metadata\provider,
@@ -54,6 +56,10 @@ class provider implements
             'format_mnemo_comfort',
             'privacy:metadata:preference:comfort'
         );
+        $collection->add_user_preference(
+            'format_mnemo_keybinds',
+            'privacy:metadata:preference:keybinds'
+        );
         return $collection;
     }
 
@@ -63,13 +69,22 @@ class provider implements
      * @param int $userid The user whose preferences are being exported.
      */
     public static function export_user_preferences(int $userid): void {
-        $value = get_user_preferences('format_mnemo_comfort', null, $userid);
-        if ($value !== null) {
+        $comfort = get_user_preferences('format_mnemo_comfort', null, $userid);
+        if ($comfort !== null) {
             writer::export_user_preference(
                 'format_mnemo',
                 'format_mnemo_comfort',
-                $value,
+                $comfort,
                 get_string('privacy:metadata:preference:comfort', 'format_mnemo')
+            );
+        }
+        $keybinds = get_user_preferences('format_mnemo_keybinds', null, $userid);
+        if ($keybinds !== null) {
+            writer::export_user_preference(
+                'format_mnemo',
+                'format_mnemo_keybinds',
+                $keybinds,
+                get_string('privacy:metadata:preference:keybinds', 'format_mnemo')
             );
         }
     }

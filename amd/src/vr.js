@@ -235,6 +235,15 @@ define('format_mnemo/vr', [], function() {
         // movement speed). Seeded from the server user preference, falling back
         // to this device's last choice, then defaults. See normalizeComfort.
         this.comfort = this.normalizeComfort(config.comfort || this.readLocalComfort());
+        // Per-learner input mapping (movement keys, fire button, look
+        // sensitivity and invert). Seeded from the server user preference,
+        // falling back to this device's last choice, then defaults; the invert
+        // default follows the per-course setting. See normalizeKeybinds.
+        this.keybinds = this.normalizeKeybinds(
+            config.keybinds || this.readLocalKeybinds() || {invert: !!config.invertlook});
+        this.keybindPanel = null; // The on-screen remap panel (built on demand).
+        this.keybindListen = null; // Action currently listening for a new key, or null.
+        this.keybindSaveTimer = null; // Debounce handle for the server save.
         this.dragging = false;
         this.pointerMoved = 0;
         this.lastPointer = {x: 0, y: 0};
@@ -412,6 +421,7 @@ define('format_mnemo/vr', [], function() {
         this.buildVrButton();
         this.buildFullscreenButton();
         this.buildComfort();
+        this.buildKeybinds();
         this.buildVrComfortPanel();
         if (this.config.cameranav !== false) {
             this.buildCameraNav();
@@ -5375,6 +5385,9 @@ define('format_mnemo/vr', [], function() {
                 self.game.stop();
             } else {
                 self.game.start();
+                // The button click is the user gesture that lets us grab the
+                // pointer for arcade mouse-look straight away.
+                self.requestPointerLock();
             }
         });
     };
@@ -5622,6 +5635,407 @@ define('format_mnemo/vr', [], function() {
             var on = String(this.comfort[field]) === o.getAttribute('data-comfort-value');
             o.classList.toggle('format-mnemo__comfort-opt--on', on);
             // Expose the selection to assistive tech, not only via colour.
+            o.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+    };
+
+    /** @const {Object} Rebindable movement/look actions and their default keys. */
+    var KEYBIND_DEFAULTS = {
+        forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
+        up: 'Space', down: 'KeyF', run: 'ShiftLeft',
+        fire: 'Mouse0', // The left mouse button.
+        looksens: 1, // Look sensitivity multiplier.
+        invert: false // Invert the look direction.
+    };
+
+    /**
+     * @const {Object} Always-on secondary keys, kept whatever the primary
+     * binding is, so the arrow keys still walk and R still rises for a teacher.
+     */
+    var KEYBIND_ALIASES = {
+        forward: 'ArrowUp', back: 'ArrowDown', left: 'ArrowLeft',
+        right: 'ArrowRight', up: 'KeyR', run: 'ShiftRight'
+    };
+
+    /** @const {Object} The mouse buttons the fire action may bind to. */
+    var KEYBIND_FIRE = {Mouse0: true, Mouse1: true, Mouse2: true};
+
+    /**
+     * Normalise an input-mapping object to valid values, filling any missing or
+     * invalid field with its default. Accepts the server preference, this
+     * device's stored choice, or nothing.
+     *
+     * @param {Object} k A partial/untrusted keybinds object, or null.
+     * @return {Object} A full {forward..run, fire, looksens, invert} mapping.
+     */
+    Cyberspace.prototype.normalizeKeybinds = function(k) {
+        k = k || {};
+        var key = function(action) {
+            var code = k[action];
+            return (typeof code === 'string' && code) ? code : KEYBIND_DEFAULTS[action];
+        };
+        var sens = parseFloat(k.looksens);
+        return {
+            forward: key('forward'),
+            back: key('back'),
+            left: key('left'),
+            right: key('right'),
+            up: key('up'),
+            down: key('down'),
+            run: key('run'),
+            fire: KEYBIND_FIRE[k.fire] ? k.fire : KEYBIND_DEFAULTS.fire,
+            looksens: (isFinite(sens) && sens >= 0.3 && sens <= 3) ? sens : KEYBIND_DEFAULTS.looksens,
+            invert: !!k.invert
+        };
+    };
+
+    /**
+     * Whether a movement/look action is currently held: its bound key, or the
+     * always-on secondary key (arrows, R, right shift) for that action.
+     *
+     * @param {String} action A key-field action name (forward, back, ...).
+     * @return {Boolean} True while the action's key is down.
+     */
+    Cyberspace.prototype.actionActive = function(action) {
+        var code = this.keybinds[action];
+        if (code && this.keys[code]) {
+            return true;
+        }
+        var alias = KEYBIND_ALIASES[action];
+        return !!(alias && this.keys[alias]);
+    };
+
+    /**
+     * Whether look is inverted for this learner (their keybind choice, falling
+     * back to the per-course default before the mapping is built).
+     *
+     * @return {Boolean} True to invert the drag/mouse-look direction.
+     */
+    Cyberspace.prototype.lookInverted = function() {
+        return this.keybinds ? this.keybinds.invert : !!this.invertlook;
+    };
+
+    /**
+     * The look-sensitivity multiplier for this learner.
+     *
+     * @return {Number} A multiplier applied to drag and mouse-look speed.
+     */
+    Cyberspace.prototype.lookSensitivity = function() {
+        return this.keybinds ? this.keybinds.looksens : 1;
+    };
+
+    /**
+     * The last input mapping stored on this device (localStorage), or null.
+     * A per-device convenience mirroring readLocalComfort; the server
+     * preference is authoritative when present.
+     *
+     * @return {Object|null} The stored keybinds object, or null.
+     */
+    Cyberspace.prototype.readLocalKeybinds = function() {
+        try {
+            var raw = window.localStorage.getItem('format_mnemo_keybinds');
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * Persist the current input mapping: to this device (localStorage) for an
+     * instant, offline-safe fallback, and to the Moodle user preference so the
+     * choice follows the learner across devices. Best-effort - mirrors
+     * saveComfort, including the debounced, last-write-wins server call.
+     */
+    Cyberspace.prototype.saveKeybinds = function() {
+        var self = this;
+        try {
+            window.localStorage.setItem('format_mnemo_keybinds', JSON.stringify(this.keybinds));
+        } catch (e) {
+            // Storage unavailable (private mode / blocked); the server save still runs.
+        }
+        if (!window.require) {
+            return;
+        }
+        if (this.keybindSaveTimer) {
+            window.clearTimeout(this.keybindSaveTimer);
+        }
+        this.keybindSaveTimer = window.setTimeout(function() {
+            self.keybindSaveTimer = null;
+            var json = JSON.stringify(self.keybinds);
+            window.require(['core/ajax'], function(ajax) {
+                ajax.call([{
+                    methodname: 'core_user_set_user_preferences',
+                    args: {preferences: [{name: 'format_mnemo_keybinds', value: json}]}
+                }])[0].catch(function() {
+                    // Not logged in, or the preference is not writable; ignore.
+                });
+            });
+        }, 400);
+    };
+
+    /**
+     * Whether the desktop pointer is locked to the canvas (arcade mouse-look).
+     *
+     * @return {Boolean} True while pointer lock is held on the render surface.
+     */
+    Cyberspace.prototype.pointerLocked = function() {
+        return this.renderer && document.pointerLockElement === this.renderer.domElement;
+    };
+
+    /**
+     * Request pointer lock on the render surface so the arcade can drive
+     * free mouse-look. Only from a user gesture, only on flat screens, and
+     * only while not already locked. Failures fall back to drag-to-look.
+     */
+    Cyberspace.prototype.requestPointerLock = function() {
+        var el = this.renderer.domElement;
+        if (!el.requestPointerLock || this.pointerLocked() || this.renderer.xr.isPresenting) {
+            return;
+        }
+        try {
+            el.requestPointerLock();
+        } catch (e) {
+            // Pointer lock unavailable or blocked; mouse-look falls back to drag.
+        }
+    };
+
+    /**
+     * Release pointer lock (leaving the arcade, or entering a headset).
+     */
+    Cyberspace.prototype.exitPointerLock = function() {
+        if (this.pointerLocked() && document.exitPointerLock) {
+            document.exitPointerLock();
+        }
+    };
+
+    /** @const {Object} Readable labels for the less obvious key codes. */
+    var KEY_LABELS = {
+        Space: 'Space', ShiftLeft: 'Shift', ShiftRight: 'R-Shift',
+        ControlLeft: 'Ctrl', ControlRight: 'R-Ctrl', AltLeft: 'Alt', AltRight: 'R-Alt',
+        ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+        Enter: 'Enter', Tab: 'Tab', Backquote: '`', Escape: 'Esc'
+    };
+
+    /**
+     * A short, human-readable label for a keyboard code (KeyW -> W, Digit1 -> 1,
+     * ArrowUp -> ↑), falling back to the raw code for anything unmapped.
+     *
+     * @param {String} code A KeyboardEvent.code value.
+     * @return {String} The label to show on the remap button.
+     */
+    function keyLabel(code) {
+        if (!code) {
+            return '—';
+        }
+        if (code.indexOf('Key') === 0) {
+            return code.slice(3);
+        }
+        if (code.indexOf('Digit') === 0) {
+            return code.slice(5);
+        }
+        return KEY_LABELS[code] || code;
+    }
+
+    /**
+     * Build the controls-remap panel: a keyboard button that opens a small panel
+     * where a learner can reassign the movement keys, choose the fire mouse
+     * button, set look sensitivity and invert look. Changes apply live (the
+     * movement/look paths read the mapping each frame) and are saved per learner.
+     * On-screen only - set it before entering a headset.
+     */
+    Cyberspace.prototype.buildKeybinds = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        // A local label lookup keeps the string fallbacks out of this function's
+        // branch count (the || lives here, not once per row).
+        var t = function(key, def) {
+            return s[key] || def;
+        };
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__keybind-btn';
+        btn.textContent = '⌨';
+        btn.title = t('keybinds', 'Controls');
+        btn.setAttribute('aria-label', btn.title);
+        this.root.appendChild(btn);
+
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__keybind';
+        panel.hidden = true;
+        this.root.appendChild(panel);
+        this.keybindPanel = panel;
+
+        var hint = document.createElement('p');
+        hint.className = 'format-mnemo__keybind-hint';
+        hint.textContent = t('keybindhint',
+            'Click a key, then press the new key. In the arcade, move the mouse to aim and click to fire.');
+        panel.appendChild(hint);
+
+        // The rebindable movement keys, each a row with a button showing its
+        // current key; clicking it listens for the next key press.
+        var keyRows = [
+            {action: 'forward', label: t('keybindforward', 'Forward')},
+            {action: 'back', label: t('keybindback', 'Back')},
+            {action: 'left', label: t('keybindleft', 'Left')},
+            {action: 'right', label: t('keybindright', 'Right')},
+            {action: 'up', label: t('keybindup', 'Up / jump')},
+            {action: 'down', label: t('keybinddown', 'Down')},
+            {action: 'run', label: t('keybindrun', 'Run')}
+        ];
+        keyRows.forEach(function(row) {
+            self.buildKeybindKeyRow(panel, row.action, row.label);
+        });
+
+        // Fire button, look sensitivity and invert - segmented like comfort.
+        this.buildKeybindSegRow(panel, 'fire', t('keybindfire', 'Fire'), [
+            {value: 'Mouse0', label: t('keybindfireleft', 'Left click')},
+            {value: 'Mouse2', label: t('keybindfireright', 'Right click')}
+        ]);
+        this.buildKeybindSegRow(panel, 'looksens', t('keybindlook', 'Look sensitivity'), [
+            {value: 0.6, label: t('keybindlooklow', 'Low')},
+            {value: 1, label: t('keybindlooknormal', 'Normal')},
+            {value: 1.6, label: t('keybindlookhigh', 'High')}
+        ]);
+        this.buildKeybindSegRow(panel, 'invert', t('keybindinvert', 'Invert look'), [
+            {value: false, label: t('keybindoff', 'Off')},
+            {value: true, label: t('keybindon', 'On')}
+        ]);
+
+        var reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'format-mnemo__keybind-reset';
+        reset.textContent = t('keybindreset', 'Reset');
+        reset.addEventListener('click', function() {
+            self.resetKeybinds();
+        });
+        panel.appendChild(reset);
+
+        btn.addEventListener('click', function() {
+            panel.hidden = !panel.hidden;
+            if (panel.hidden) {
+                self.keybindListen = null;
+            }
+            self.renderKeybinds();
+        });
+
+        this.renderKeybinds();
+    };
+
+    /**
+     * Append a movement-key row to the remap panel: a label and a button that,
+     * when clicked, listens for the next key press to rebind that action.
+     *
+     * @param {Object} panel The remap panel element.
+     * @param {String} action The key-field action name.
+     * @param {String} label The row label.
+     */
+    Cyberspace.prototype.buildKeybindKeyRow = function(panel, action, label) {
+        var self = this;
+        var wrap = document.createElement('div');
+        wrap.className = 'format-mnemo__keybind-row';
+        var span = document.createElement('span');
+        span.className = 'format-mnemo__keybind-label';
+        span.textContent = label;
+        wrap.appendChild(span);
+        var kb = document.createElement('button');
+        kb.type = 'button';
+        kb.className = 'format-mnemo__keybind-key';
+        kb.setAttribute('data-keybind-key', action);
+        kb.addEventListener('click', function() {
+            // Toggle listening for this row; re-render swaps the label to a prompt.
+            self.keybindListen = (self.keybindListen === action) ? null : action;
+            self.renderKeybinds();
+        });
+        wrap.appendChild(kb);
+        panel.appendChild(wrap);
+    };
+
+    /**
+     * Append a segmented-option row (fire button, look sensitivity, invert) to
+     * the remap panel, mirroring the comfort panel's segmented controls.
+     *
+     * @param {Object} panel The remap panel element.
+     * @param {String} field The keybinds field the options set.
+     * @param {String} label The row label.
+     * @param {Array} options Each {value, label}.
+     */
+    Cyberspace.prototype.buildKeybindSegRow = function(panel, field, label, options) {
+        var self = this;
+        var wrap = document.createElement('div');
+        wrap.className = 'format-mnemo__keybind-row';
+        var span = document.createElement('span');
+        span.className = 'format-mnemo__keybind-label';
+        span.textContent = label;
+        wrap.appendChild(span);
+        var seg = document.createElement('div');
+        seg.className = 'format-mnemo__keybind-seg';
+        options.forEach(function(opt) {
+            var ob = document.createElement('button');
+            ob.type = 'button';
+            ob.className = 'format-mnemo__keybind-opt';
+            ob.textContent = opt.label;
+            ob.setAttribute('data-keybind-field', field);
+            ob.setAttribute('data-keybind-value', String(opt.value));
+            ob.addEventListener('click', function() {
+                self.setKeybind(field, opt.value);
+            });
+            seg.appendChild(ob);
+        });
+        wrap.appendChild(seg);
+        panel.appendChild(wrap);
+    };
+
+    /**
+     * Change one input-mapping field and apply it everywhere: validate the whole
+     * mapping, refresh the panel and persist. Shared by the key rows and the
+     * segmented option buttons.
+     *
+     * @param {String} field The keybinds field name.
+     * @param {String|Number|Boolean} value The new value for that field.
+     */
+    Cyberspace.prototype.setKeybind = function(field, value) {
+        this.keybinds[field] = value;
+        this.keybinds = this.normalizeKeybinds(this.keybinds);
+        this.renderKeybinds();
+        this.saveKeybinds();
+    };
+
+    /**
+     * Restore the default input mapping and persist it.
+     */
+    Cyberspace.prototype.resetKeybinds = function() {
+        this.keybinds = this.normalizeKeybinds({});
+        this.keybindListen = null;
+        this.renderKeybinds();
+        this.saveKeybinds();
+    };
+
+    /**
+     * Refresh the remap panel to match the current mapping: each key button
+     * shows its bound key (or a listening prompt), and each segmented option
+     * highlights the active value.
+     */
+    Cyberspace.prototype.renderKeybinds = function() {
+        if (!this.keybindPanel) {
+            return;
+        }
+        var s = this.config.strings || {};
+        var keys = this.keybindPanel.querySelectorAll('[data-keybind-key]');
+        for (var i = 0; i < keys.length; i++) {
+            var kb = keys[i];
+            var action = kb.getAttribute('data-keybind-key');
+            var listening = this.keybindListen === action;
+            kb.textContent = listening ?
+                (s.keybindpress || 'Press a key…') : keyLabel(this.keybinds[action]);
+            kb.classList.toggle('format-mnemo__keybind-key--listen', listening);
+        }
+        var opts = this.keybindPanel.querySelectorAll('[data-keybind-field]');
+        for (var j = 0; j < opts.length; j++) {
+            var o = opts[j];
+            var field = o.getAttribute('data-keybind-field');
+            var on = String(this.keybinds[field]) === o.getAttribute('data-keybind-value');
+            o.classList.toggle('format-mnemo__keybind-opt--on', on);
             o.setAttribute('aria-pressed', on ? 'true' : 'false');
         }
     };
@@ -6795,29 +7209,57 @@ define('format_mnemo/vr', [], function() {
         });
         el.addEventListener('pointermove', function(e) {
             self.updatePointerNdc(e);
-            if (self.dragging && !self.renderer.xr.isPresenting) {
+            if (self.renderer.xr.isPresenting) {
+                return;
+            }
+            var lim = Math.PI / 2 - 0.05;
+            var sign = self.lookInverted() ? 1 : -1;
+            if (self.pointerLocked()) {
+                // Arcade free-look: the locked pointer feeds raw motion deltas,
+                // so the aim tracks the mouse directly with no dragging.
+                var ls = 0.0022 * self.lookSensitivity();
+                self.yaw += (e.movementX || 0) * ls * sign;
+                self.pitch += (e.movementY || 0) * ls * sign;
+                self.pitch = Math.max(-lim, Math.min(lim, self.pitch));
+                return;
+            }
+            if (self.dragging) {
                 var dx = e.clientX - self.lastPointer.x;
                 var dy = e.clientY - self.lastPointer.y;
                 self.lastPointer.x = e.clientX;
                 self.lastPointer.y = e.clientY;
                 self.pointerMoved += Math.abs(dx) + Math.abs(dy);
-                // Drag to look. The direction is configurable per course (and via
-                // a site default) so it can be changed without editing code.
-                var sign = self.invertlook ? 1 : -1;
-                self.yaw += dx * 0.0032 * sign;
-                self.pitch += dy * 0.0032 * sign;
-                var lim = Math.PI / 2 - 0.05;
+                // Drag to look. Direction and sensitivity follow the per-learner
+                // control settings (seeded from the per-course/site default).
+                var ds = 0.0032 * self.lookSensitivity();
+                self.yaw += dx * ds * sign;
+                self.pitch += dy * ds * sign;
                 self.pitch = Math.max(-lim, Math.min(lim, self.pitch));
             }
         });
         var endDrag = function(e) {
-            if (self.dragging && self.pointerMoved < 6 && !self.renderer.xr.isPresenting) {
-                self.clickOpen();
-            }
+            var wasClick = self.dragging && self.pointerMoved < 6 && !self.renderer.xr.isPresenting;
             self.dragging = false;
             if (e.pointerId !== undefined && el.hasPointerCapture(e.pointerId)) {
                 el.releasePointerCapture(e.pointerId);
             }
+            if (!wasClick) {
+                return;
+            }
+            if (self.game && self.game.isPlaying()) {
+                // In the arcade a click fires along the crosshair. The first
+                // click (before the pointer is locked) grabs the lock instead of
+                // firing, so switching to mouse-look does not also loose a shot.
+                if (self.pointerLocked()) {
+                    if ('Mouse' + e.button === self.keybinds.fire) {
+                        self.game.shootFromCamera();
+                    }
+                } else {
+                    self.requestPointerLock();
+                }
+                return;
+            }
+            self.clickOpen();
         };
         el.addEventListener('pointerup', endDrag);
         el.addEventListener('pointercancel', function() {
@@ -6825,8 +7267,20 @@ define('format_mnemo/vr', [], function() {
         });
 
         window.addEventListener('keydown', function(e) {
+            // While a remap row is listening, capture the next key as its new
+            // binding rather than treating it as a held movement key.
+            if (self.keybindListen) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.code !== 'Escape') {
+                    self.setKeybind(self.keybindListen, e.code);
+                }
+                self.keybindListen = null;
+                self.renderKeybinds();
+                return;
+            }
             self.keys[e.code] = true;
-        });
+        }, true);
         window.addEventListener('keyup', function(e) {
             self.keys[e.code] = false;
         });
@@ -8910,27 +9364,27 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.updateDesktopFly = function(dt) {
         var THREE = this.THREE;
-        var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) *
+        var speed = (this.actionActive('run') ? 14 : 7) *
             this.comfortSpeedScale() * dt;
         var forward = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
         var right = new THREE.Vector3(1, 0, 0).applyEuler(this.camera.rotation);
 
-        if (this.keys.KeyW || this.keys.ArrowUp) {
+        if (this.actionActive('forward')) {
             this.player.position.addScaledVector(forward, speed);
         }
-        if (this.keys.KeyS || this.keys.ArrowDown) {
+        if (this.actionActive('back')) {
             this.player.position.addScaledVector(forward, -speed);
         }
-        if (this.keys.KeyA || this.keys.ArrowLeft) {
+        if (this.actionActive('left')) {
             this.player.position.addScaledVector(right, -speed);
         }
-        if (this.keys.KeyD || this.keys.ArrowRight) {
+        if (this.actionActive('right')) {
             this.player.position.addScaledVector(right, speed);
         }
-        if (this.keys.KeyR || this.keys.Space) {
+        if (this.actionActive('up')) {
             this.player.position.y += speed;
         }
-        if (this.keys.KeyF) {
+        if (this.actionActive('down')) {
             this.player.position.y -= speed;
         }
         // Analog forward/back and strafe from camera-gesture navigation.
@@ -8951,23 +9405,23 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.updateDesktopWalk = function(dt) {
         var THREE = this.THREE;
-        var speed = (this.keys.ShiftLeft || this.keys.ShiftRight ? 14 : 7) *
+        var speed = (this.actionActive('run') ? 14 : 7) *
             this.comfortSpeedScale() * dt;
         // Horizontal forward/right from the yaw only, so looking up or down
         // never lifts or sinks the walker.
         var forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
         var right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-        if (this.keys.KeyW || this.keys.ArrowUp) {
+        if (this.actionActive('forward')) {
             this.player.position.addScaledVector(forward, speed);
         }
-        if (this.keys.KeyS || this.keys.ArrowDown) {
+        if (this.actionActive('back')) {
             this.player.position.addScaledVector(forward, -speed);
         }
-        if (this.keys.KeyA || this.keys.ArrowLeft) {
+        if (this.actionActive('left')) {
             this.player.position.addScaledVector(right, -speed);
         }
-        if (this.keys.KeyD || this.keys.ArrowRight) {
+        if (this.actionActive('right')) {
             this.player.position.addScaledVector(right, speed);
         }
         // Analog forward/back and strafe from camera-gesture navigation.
@@ -8980,7 +9434,7 @@ define('format_mnemo/vr', [], function() {
 
         // Jump and gravity. A jump only launches from the ground; the apex stays
         // just under flyThreshold so the walker keeps to the streets.
-        if (this.onGround && this.keys.Space) {
+        if (this.onGround && this.actionActive('up')) {
             this.velocityY = this.jumpSpeed;
             this.onGround = false;
         }
@@ -10669,6 +11123,10 @@ define('format_mnemo/vr', [], function() {
             this.vrHud.visible = false;
         }
         this.markButton(false);
+        // Hand the mouse cursor back when leaving the arcade.
+        if (this.cs.exitPointerLock) {
+            this.cs.exitPointerLock();
+        }
     };
 
     /**
