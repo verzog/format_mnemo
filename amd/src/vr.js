@@ -10443,6 +10443,11 @@ define('format_mnemo/vr', [], function() {
         this.prevHand = null; // Previous frame's hand features (pull detection).
         this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
         this.lastFireTs = 0; // Last finger-gun shot time (ms), for a fire cooldown.
+        this.headPitchNeutral = null; // Calibrated straight-ahead head pitch.
+        this.havePitch = false; // A face is driving the look pitch this frame.
+        this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
+        this.maxPitch = Math.PI / 2 - 0.05; // Clamp, matching the drag-look limit.
+        this.pitchEase = 8; // Look-pitch easing rate toward the target (per second).
         // Tunables (the one place to adjust the feel): a deadzone that ignores
         // frame noise, a gain that maps motion energy to a full-scale axis, and
         // the steering rate. Smoothing is asymmetric and time-based - a short
@@ -10657,11 +10662,21 @@ define('format_mnemo/vr', [], function() {
         // Head steering (preferred when a face is seen).
         var headTurn = 0;
         var haveHead = false;
+        this.havePitch = false;
         if (this.head) {
             var hlm = this.head.detect(v, ts);
             if (hlm) {
-                headTurn = this.head.intent(this.head.classify(hlm)).turn;
+                var hc = this.head.classify(hlm);
+                // Calibrate the straight-ahead pitch on the first face seen, so
+                // the absolute look mapping is relative to this learner's neutral.
+                if (this.headPitchNeutral === null) {
+                    this.headPitchNeutral = hc.pitch;
+                }
+                var hi = this.head.intent(hc, this.headPitchNeutral);
+                headTurn = hi.turn;
                 haveHead = true;
+                this.pitchTarget = hi.pitch * this.maxPitch;
+                this.havePitch = true;
             }
         }
         // Hand: stop (open palm), forward (fist haul) and - only as the fallback
@@ -10682,9 +10697,12 @@ define('format_mnemo/vr', [], function() {
                 moveTarget = it.moveTarget;
                 haveHand = true;
                 // Finger-gun trigger: fire once when the thumb drops (the
-                // "hammer" falling) while the hand holds a finger gun. The
-                // thumb must be raised again to fire the next shot.
-                if (cur.fingerGun && prev && prev.thumbUp && !cur.thumbUp) {
+                // "hammer" falling) while a finger gun is held through the
+                // transition. Requiring the previous frame to already be a
+                // cocked finger gun (thumb up) means forming the gesture with
+                // the thumb already down - or dropping it straight from an open
+                // hand - does not fire; the thumb must be raised again to shoot.
+                if (cur.fingerGun && prev && prev.fingerGun && prev.thumbUp && !cur.thumbUp) {
                     this.fireGesture(ts);
                 }
             } else {
@@ -10836,6 +10854,15 @@ define('format_mnemo/vr', [], function() {
         this.cs.yaw -= this.intent.turn * this.turnRate * dt;
         this.cs.navMove = this.intent.move;
         this.cs.navStrafe = 0;
+        // Head tilt aims vertically: ease the look pitch toward the absolute
+        // target so the finger-gun shot (and the view) can reach high targets.
+        // Only while a face is driving it, so mouse-look pitch is left alone
+        // otherwise.
+        if (this.havePitch) {
+            var a = 1 - Math.exp(-this.pitchEase * Math.max(0, dt));
+            this.cs.pitch += (this.pitchTarget - this.cs.pitch) * a;
+            this.cs.pitch = Math.max(-this.maxPitch, Math.min(this.maxPitch, this.cs.pitch));
+        }
     };
 
     /**
@@ -10963,6 +10990,10 @@ define('format_mnemo/vr', [], function() {
         // its per-stroke state so a restart begins clean.
         this.prevHand = null;
         this.poseMove = 0;
+        // Re-calibrate the head-pitch neutral on the next start, and stop
+        // driving the look pitch until a face is seen again.
+        this.headPitchNeutral = null;
+        this.havePitch = false;
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
@@ -10991,6 +11022,10 @@ define('format_mnemo/vr', [], function() {
         this.turnGain = 0.35; // Hand offset from centre mapped to full steering.
         this.turnDeadzone = 0.06; // Ignore a hand near the centre line.
         this.haulGain = 1.2; // Pull speed (frame fractions/sec) mapped to full forward.
+        // How far (in hand spans) the thumb tip must stand off the index-finger
+        // line to count as "raised" (the cocked hammer). Dropping the thumb
+        // toward the index closes this gap and fires.
+        this.thumbRaiseRatio = 0.45;
     }
 
     /** @var {Array} The [tip, pip] landmark indices of the four non-thumb fingers. */
@@ -11023,6 +11058,34 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Whether the thumb is raised (the cocked hammer of a finger gun): the thumb
+     * tip stands clear of the index-finger line. Measured as the tip's
+     * perpendicular distance from the line through the index MCP and tip,
+     * normalised by the hand span - so it tracks the thumb pivoting down toward
+     * the index (which closes the gap) rather than merely how extended the thumb
+     * is, and holds however the hand is rotated. A straight thumb pivoting down
+     * therefore still crosses the threshold, unlike an extension test.
+     *
+     * @param {Array} lm The 21 landmarks.
+     * @return {Boolean} True while the thumb is raised.
+     */
+    HandPose.prototype.thumbRaised = function(lm) {
+        var a = lm[5]; // Index MCP.
+        var b = lm[8]; // Index tip.
+        var p = lm[4]; // Thumb tip.
+        var abx = b.x - a.x;
+        var aby = b.y - a.y;
+        var lenab = Math.sqrt(abx * abx + aby * aby);
+        var span = this.dist(lm[0], lm[9]);
+        if (lenab === 0 || span === 0) {
+            return false;
+        }
+        // Perpendicular distance from the thumb tip to the index-finger line.
+        var perp = Math.abs(abx * (p.y - a.y) - aby * (p.x - a.x)) / lenab;
+        return perp / span > this.thumbRaiseRatio;
+    };
+
+    /**
      * Reduce a hand's landmarks to the features the intent needs: how many of the
      * four fingers are extended (so an open palm and a fist can be told apart),
      * the wrist position (steering and pull detection) and the hand's span - its
@@ -11047,8 +11110,9 @@ define('format_mnemo/vr', [], function() {
             fist: fingers === 0,
             // A finger gun: index out, the other three fingers curled.
             fingerGun: ext[0] && !ext[1] && !ext[2] && !ext[3],
-            // Thumb raised (the "hammer"); dropping it pulls the trigger.
-            thumbUp: this.fingerExtended(lm, 4, 2),
+            // Thumb raised (the "hammer"); dropping it toward the index pulls
+            // the trigger.
+            thumbUp: this.thumbRaised(lm),
             x: lm[0].x,
             y: lm[0].y,
             span: this.dist(lm[0], lm[9]) // Wrist to middle-finger MCP.
@@ -11127,6 +11191,13 @@ define('format_mnemo/vr', [], function() {
         this.landmarker = landmarker || null;
         this.yawGain = 0.5; // Head-yaw signal at which steering is full.
         this.yawDeadzone = 0.1; // Ignore a head near centre.
+        // Pitch: a head-tilt signal (nose height relative to the eyes) is mapped
+        // absolutely to a look angle, so tilting the head up looks up by a set
+        // amount rather than spinning like yaw. The gain is the tilt away from
+        // the calibrated neutral that reaches a full look; the deadzone ignores
+        // a small wobble around neutral.
+        this.pitchGain = 0.12;
+        this.pitchDeadzone = 0.015;
     }
 
     /** @const {Number} Nose-tip landmark index in the MediaPipe face mesh. */
@@ -11135,15 +11206,25 @@ define('format_mnemo/vr', [], function() {
     HeadPose.RIGHT_EDGE = 234;
     /** @const {Number} Left face-edge (cheek) landmark index. */
     HeadPose.LEFT_EDGE = 454;
+    /** @const {Number} Right eye outer-corner landmark index. */
+    HeadPose.RIGHT_EYE = 33;
+    /** @const {Number} Left eye outer-corner landmark index. */
+    HeadPose.LEFT_EYE = 263;
+    /** @const {Number} Forehead (brow centre) landmark index. */
+    HeadPose.BROW = 10;
+    /** @const {Number} Chin (bottom) landmark index. */
+    HeadPose.CHIN = 152;
 
     /**
-     * Reduce the face landmarks to a normalised yaw signal: the nose tip's
-     * horizontal offset from the midpoint of the two face edges, scaled by half
-     * the face width, so it is roughly -1..1 and independent of how far the face
-     * is from the camera.
+     * Reduce the face landmarks to normalised yaw and pitch signals. Yaw is the
+     * nose tip's horizontal offset from the midpoint of the two face edges,
+     * scaled by half the face width (roughly -1..1, negative = head turned
+     * right). Pitch is the nose tip's height relative to the eye line, scaled by
+     * the face height, so it grows as the head tilts down and shrinks as it
+     * tilts up; both are independent of how far the face is from the camera.
      *
      * @param {Array} lm The face landmarks.
-     * @return {Object} {yaw} in roughly -1..1 (negative = head turned right).
+     * @return {Object} {yaw, pitch}.
      */
     HeadPose.prototype.classify = function(lm) {
         var nose = lm[HeadPose.NOSE];
@@ -11151,25 +11232,42 @@ define('format_mnemo/vr', [], function() {
         var le = lm[HeadPose.LEFT_EDGE];
         var midX = (re.x + le.x) / 2;
         var halfW = Math.abs(le.x - re.x) / 2;
-        return {yaw: halfW > 0 ? (nose.x - midX) / halfW : 0};
+        var eyeMidY = (lm[HeadPose.RIGHT_EYE].y + lm[HeadPose.LEFT_EYE].y) / 2;
+        var faceH = Math.abs(lm[HeadPose.CHIN].y - lm[HeadPose.BROW].y);
+        return {
+            yaw: halfW > 0 ? (nose.x - midX) / halfW : 0,
+            pitch: faceH > 0 ? (nose.y - eyeMidY) / faceH : 0
+        };
     };
 
     /**
-     * Map the head yaw signal to a steering intent, past a deadzone and scaled by
-     * the gain. A head turned to the user's right (a negative yaw signal) steers
-     * right (a positive turn, matching HandPose and the apply() convention).
+     * Map the head signals to a navigation intent. Yaw steers past a deadzone:
+     * a head turned to the user's right (a negative yaw signal) steers right (a
+     * positive turn, matching HandPose and the apply() convention). Pitch maps
+     * absolutely to a look angle relative to a calibrated neutral: tilting the
+     * head up (a smaller pitch signal than neutral) looks up. Pitch is skipped
+     * when no neutral has been calibrated yet.
      *
-     * @param {Object} cur The current head features {yaw}.
-     * @return {Object} {turn} in -1..1.
+     * @param {Object} cur The current head features {yaw, pitch}.
+     * @param {Number} [neutralPitch] The calibrated straight-ahead pitch signal.
+     * @return {Object} {turn, pitch} each in -1..1.
      */
-    HeadPose.prototype.intent = function(cur) {
+    HeadPose.prototype.intent = function(cur, neutralPitch) {
         var mag = Math.abs(cur.yaw) - this.yawDeadzone;
-        if (mag <= 0) {
-            return {turn: 0};
+        var turn = 0;
+        if (mag > 0) {
+            // Negative yaw (head to the user's right) -> positive turn (steer right).
+            turn = Math.max(-1, Math.min(1, (cur.yaw < 0 ? 1 : -1) * mag / this.yawGain));
         }
-        // Negative yaw (head to the user's right) -> positive turn (steer right).
-        var turn = (cur.yaw < 0 ? 1 : -1) * mag / this.yawGain;
-        return {turn: Math.max(-1, Math.min(1, turn))};
+        var pitch = 0;
+        if (typeof neutralPitch === 'number') {
+            var dev = neutralPitch - cur.pitch; // Head up (smaller signal) -> positive.
+            var pmag = Math.abs(dev) - this.pitchDeadzone;
+            if (pmag > 0) {
+                pitch = Math.max(-1, Math.min(1, (dev < 0 ? -1 : 1) * pmag / this.pitchGain));
+            }
+        }
+        return {turn: turn, pitch: pitch};
     };
 
     /**

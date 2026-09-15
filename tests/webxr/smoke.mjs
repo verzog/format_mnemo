@@ -2035,17 +2035,23 @@ const scenarios = [
         fn: () => {
             const HP = window.__mnemoModule._HandPose;
             const hp = new HP(null);
-            // Index out, other three curled (at the wrist), thumb up or down.
+            // Index out along a vertical line (x=0.5), other three curled at the
+            // wrist. Thumb up = tip off to the side of the index line; thumb
+            // down = tip pivoted back onto the line (a straight thumb, so still
+            // extended - which the old test could not tell apart).
             const gun = (thumbUp) => {
                 const lm = [];
                 for (let i = 0; i < 21; i++) {
-                    lm.push({x: 0.5, y: 0.5, z: 0});
+                    lm.push({x: 0.5, y: 0.6, z: 0}); // Default at the wrist.
                 }
-                lm[9] = {x: 0.5, y: 0.3, z: 0}; // Middle MCP (span).
-                lm[6] = {x: 0.5, y: 0.35, z: 0}; // Index pip.
-                lm[8] = {x: 0.5, y: 0.15, z: 0}; // Index tip (extended).
-                lm[2] = {x: 0.5, y: 0.45, z: 0}; // Thumb MCP.
-                lm[4] = thumbUp ? {x: 0.5, y: 0.1, z: 0} : {x: 0.5, y: 0.48, z: 0}; // Thumb tip.
+                lm[0] = {x: 0.5, y: 0.6, z: 0}; // Wrist.
+                lm[9] = {x: 0.5, y: 0.45, z: 0}; // Middle MCP (span 0.15).
+                lm[5] = {x: 0.5, y: 0.5, z: 0}; // Index MCP.
+                lm[6] = {x: 0.5, y: 0.4, z: 0}; // Index pip.
+                lm[8] = {x: 0.5, y: 0.2, z: 0}; // Index tip (extended).
+                lm[2] = {x: 0.55, y: 0.55, z: 0}; // Thumb MCP.
+                // Thumb tip: far off the index line when up, near it when down.
+                lm[4] = thumbUp ? {x: 0.7, y: 0.45, z: 0} : {x: 0.52, y: 0.35, z: 0};
                 return lm;
             };
             const up = hp.classify(gun(true));
@@ -2086,7 +2092,24 @@ const scenarios = [
             for (idle._f = 0; idle._f < frames.length; idle._f++) {
                 idle.samplePose({}, 0.033);
             }
-            return {pass: firedOnce && idleShots === 0, detail: `shots=${shots} idle=${idleShots}`};
+            // Arming: dropping the thumb straight from an open hand (not a cocked
+            // finger gun) must not fire - the previous frame must be a finger gun.
+            const armed = new CN(null);
+            let armedShots = 0;
+            armed.cs = {game: {isPlaying: () => true, shootFromCamera: () => {
+                armedShots++;
+            }}};
+            const noCock = [
+                {fingerGun: false, thumbUp: true}, // Open hand, thumb up.
+                {fingerGun: true, thumbUp: false} // Straight to gun, thumb down.
+            ];
+            armed.pose = {detect: () => [1], classify: () => noCock[armed._f],
+                intent: () => ({stop: false, turn: 0, moveTarget: 0})};
+            for (armed._f = 0; armed._f < noCock.length; armed._f++) {
+                armed.samplePose({}, 0.033);
+            }
+            return {pass: firedOnce && idleShots === 0 && armedShots === 0,
+                detail: `shots=${shots} idle=${idleShots} armed=${armedShots}`};
         }
     },
     {
@@ -2110,14 +2133,20 @@ const scenarios = [
             const HeP = window.__mnemoModule._HeadPose;
             const hp = new HeP(null);
             // Edges at 0.3/0.7 (mid 0.5, half-width 0.2); nose x sets the yaw.
-            const mkFace = (noseX) => {
+            // Eyes at y=0.45, brow/chin span 0.25..0.85 (face height 0.6); nose y
+            // (default 0.5) sets the pitch.
+            const mkFace = (noseX, noseY) => {
                 const lm = [];
                 for (let i = 0; i < 468; i++) {
                     lm.push({x: 0.5, y: 0.5, z: 0});
                 }
                 lm[234] = {x: 0.3, y: 0.5, z: 0};
                 lm[454] = {x: 0.7, y: 0.5, z: 0};
-                lm[1] = {x: noseX, y: 0.45, z: 0};
+                lm[33] = {x: 0.4, y: 0.45, z: 0}; // Right eye outer.
+                lm[263] = {x: 0.6, y: 0.45, z: 0}; // Left eye outer.
+                lm[10] = {x: 0.5, y: 0.25, z: 0}; // Brow.
+                lm[152] = {x: 0.5, y: 0.85, z: 0}; // Chin.
+                lm[1] = {x: noseX, y: noseY === undefined ? 0.5 : noseY, z: 0};
                 return lm;
             };
             window.__mnemoTest.mkFace = mkFace; // Shared by the tests below.
@@ -2144,13 +2173,53 @@ const scenarios = [
         }
     },
     {
+        name: 'headpose: head tilt aims the look pitch past a deadzone',
+        fn: () => {
+            const HeP = window.__mnemoModule._HeadPose;
+            const hp = new HeP(null);
+            const mkFace = window.__mnemoTest.mkFace;
+            const neutral = hp.classify(mkFace(0.5, 0.5)).pitch; // Straight ahead.
+            const up = hp.intent(hp.classify(mkFace(0.5, 0.35)), neutral); // Head up.
+            const down = hp.intent(hp.classify(mkFace(0.5, 0.65)), neutral);
+            const still = hp.intent(hp.classify(mkFace(0.5, 0.5)), neutral);
+            const noCal = hp.intent(hp.classify(mkFace(0.5, 0.35))); // No neutral yet.
+            const pass = up.pitch > 0 && down.pitch < 0 && still.pitch === 0 && noCal.pitch === 0;
+            return {pass, detail: `up=${up.pitch.toFixed(2)} down=${down.pitch.toFixed(2)} still=${still.pitch} none=${noCal.pitch}`};
+        }
+    },
+    {
+        name: 'cameranav: head tilt eases the look pitch, mouse pitch untouched',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            nav.cs = {yaw: 0, pitch: 0, navMove: 0, navStrafe: 0};
+            nav.intent = {turn: 0, move: 0};
+            nav.havePitch = true;
+            nav.pitchTarget = 0.5;
+            for (let i = 0; i < 60; i++) {
+                nav.apply(0.1);
+            }
+            const eased = Math.abs(nav.cs.pitch - 0.5) < 1e-3;
+            // No face driving pitch: apply must leave the look pitch alone.
+            const nav2 = new CN(null);
+            nav2.cs = {yaw: 0, pitch: 0.3, navMove: 0, navStrafe: 0};
+            nav2.intent = {turn: 0, move: 0};
+            nav2.havePitch = false;
+            nav2.pitchTarget = 0.9;
+            nav2.apply(0.1);
+            const untouched = nav2.cs.pitch === 0.3;
+            return {pass: eased && untouched, detail: `eased=${nav.cs.pitch.toFixed(3)} untouched=${nav2.cs.pitch}`};
+        }
+    },
+    {
         name: 'cameranav: the head steers while the hand stops and hauls',
         fn: () => {
             const CN = window.__mnemoModule._CameraNav;
             const nav = new CN(null);
             // Stub landmarkers: the head reports a right turn, the hand a (lower
             // priority) left turn with no stop and no haul.
-            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6}), intent: () => ({turn: 1})};
+            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6, pitch: 0}),
+                intent: () => ({turn: 1, pitch: 0})};
             nav.pose = {detect: () => [1], classify: () => ({open: false, fist: false}),
                 intent: () => ({stop: false, turn: -0.5, moveTarget: 0})};
             nav.samplePose({}, 0.033);
@@ -2160,7 +2229,8 @@ const scenarios = [
             nav.samplePose({}, 0.033);
             const handFallback = Math.abs(nav.intent.turn + 0.5) < 1e-9;
             // An open palm (stop) zeroes the intent whatever the head says.
-            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6}), intent: () => ({turn: 1})};
+            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6, pitch: 0}),
+                intent: () => ({turn: 1, pitch: 0})};
             nav.pose = {detect: () => [1], classify: () => ({open: true, fist: false}),
                 intent: () => ({stop: true, turn: 0, moveTarget: 0})};
             nav.samplePose({}, 0.033);
