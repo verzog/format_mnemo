@@ -10195,8 +10195,14 @@ define('format_mnemo/vr', [], function() {
                 landmarker.close();
             }
             return null;
-        }).catch(function() {
+        }).catch(function(e) {
             self.poseLoading = false; // Stay in motion mode.
+            // Surface why so a blocked upgrade (CSP, missing SIMD, a 404) can be
+            // diagnosed; the control keeps working in motion mode regardless.
+            if (window.console) {
+                window.console.warn('format_mnemo: hand-pose detection unavailable, ' +
+                    'using motion fallback', e);
+            }
         });
     };
 
