@@ -2031,6 +2031,80 @@ const scenarios = [
         }
     },
     {
+        name: 'handpose: classify reads a finger gun and the thumb hammer',
+        fn: () => {
+            const HP = window.__mnemoModule._HandPose;
+            const hp = new HP(null);
+            // Index out, other three curled (at the wrist), thumb up or down.
+            const gun = (thumbUp) => {
+                const lm = [];
+                for (let i = 0; i < 21; i++) {
+                    lm.push({x: 0.5, y: 0.5, z: 0});
+                }
+                lm[9] = {x: 0.5, y: 0.3, z: 0}; // Middle MCP (span).
+                lm[6] = {x: 0.5, y: 0.35, z: 0}; // Index pip.
+                lm[8] = {x: 0.5, y: 0.15, z: 0}; // Index tip (extended).
+                lm[2] = {x: 0.5, y: 0.45, z: 0}; // Thumb MCP.
+                lm[4] = thumbUp ? {x: 0.5, y: 0.1, z: 0} : {x: 0.5, y: 0.48, z: 0}; // Thumb tip.
+                return lm;
+            };
+            const up = hp.classify(gun(true));
+            const down = hp.classify(gun(false));
+            const pass = up.fingerGun && up.thumbUp && up.fingers === 1 &&
+                down.fingerGun && !down.thumbUp;
+            return {pass, detail: `up=${up.fingerGun}/${up.thumbUp} down=${down.fingerGun}/${down.thumbUp}`};
+        }
+    },
+    {
+        name: 'cameranav: a finger-gun thumb drop fires once, a hold does not',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            let shots = 0;
+            nav.cs = {game: {isPlaying: () => true, shootFromCamera: () => {
+                shots++;
+            }}};
+            const frames = [
+                {fingerGun: true, thumbUp: true}, // Cock.
+                {fingerGun: true, thumbUp: false}, // Pull -> fire.
+                {fingerGun: true, thumbUp: false} // Hold -> no new shot.
+            ];
+            nav.pose = {detect: () => [1], classify: () => frames[nav._f],
+                intent: () => ({stop: false, turn: 0, moveTarget: 0})};
+            for (nav._f = 0; nav._f < frames.length; nav._f++) {
+                nav.samplePose({}, 0.033);
+            }
+            const firedOnce = shots === 1;
+            // Not while the game is idle.
+            const idle = new CN(null);
+            let idleShots = 0;
+            idle.cs = {game: {isPlaying: () => false, shootFromCamera: () => {
+                idleShots++;
+            }}};
+            idle.pose = {detect: () => [1], classify: () => frames[idle._f],
+                intent: () => ({stop: false, turn: 0, moveTarget: 0})};
+            for (idle._f = 0; idle._f < frames.length; idle._f++) {
+                idle.samplePose({}, 0.033);
+            }
+            return {pass: firedOnce && idleShots === 0, detail: `shots=${shots} idle=${idleShots}`};
+        }
+    },
+    {
+        name: 'cameranav: the finger-gun fire is rate-limited',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            let shots = 0;
+            nav.cs = {game: {isPlaying: () => true, shootFromCamera: () => {
+                shots++;
+            }}};
+            nav.fireGesture(1000); // Fires.
+            nav.fireGesture(1100); // Within 200ms -> suppressed.
+            nav.fireGesture(1300); // Clear of the cooldown -> fires.
+            return {pass: shots === 2, detail: `shots=${shots}`};
+        }
+    },
+    {
         name: 'headpose: nose offset from the face-edge midpoint reads as yaw',
         fn: () => {
             const HeP = window.__mnemoModule._HeadPose;
