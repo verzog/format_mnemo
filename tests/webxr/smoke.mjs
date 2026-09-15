@@ -2204,6 +2204,50 @@ const scenarios = [
         }
     },
     {
+        name: 'cameranav: the finger-gun latch rides a dropped frame but expires on lost tracking',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const mkNav = () => {
+                const nav = new CN(null);
+                nav._shots = 0;
+                nav.cs = {game: {isPlaying: () => true, shootFromCamera: () => {
+                    nav._shots++;
+                }}};
+                return nav;
+            };
+            const poseFor = (mode) => ({
+                detect: () => (mode.v === 'lost' ? null : [1]),
+                classify: () => (mode.v === 'fire'
+                    ? {fingerGun: true, thumbUp: false}
+                    : {fingerGun: true, thumbUp: true}),
+                intent: () => ({stop: false, turn: 0, moveTarget: 0})
+            });
+            // A: cock, one brief dropped frame (< grace), then thumb-down -> fires.
+            const a = mkNav();
+            const am = {v: 'cock'};
+            a.pose = poseFor(am);
+            a.samplePose({}, 0.033);
+            am.v = 'lost';
+            a.samplePose({}, 0.05);
+            am.v = 'fire';
+            a.samplePose({}, 0.033);
+            const survives = a._shots === 1;
+            // B: cock, sustained loss (> grace), then thumb-down -> must not fire.
+            const b = mkNav();
+            const bm = {v: 'cock'};
+            b.pose = poseFor(bm);
+            b.samplePose({}, 0.033);
+            bm.v = 'lost';
+            for (let i = 0; i < 10; i++) {
+                b.samplePose({}, 0.05);
+            }
+            bm.v = 'fire';
+            b.samplePose({}, 0.033);
+            const expires = b._shots === 0;
+            return {pass: survives && expires, detail: `survives=${survives} expires=${expires}`};
+        }
+    },
+    {
         name: 'headpose: nose offset from the face-edge midpoint reads as yaw',
         fn: () => {
             const HeP = window.__mnemoModule._HeadPose;

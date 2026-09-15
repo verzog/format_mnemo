@@ -246,6 +246,7 @@ define('format_mnemo/vr', [], function() {
         this.keybindSaveTimer = null; // Debounce handle for the server save.
         this.dragging = false;
         this.pointerMoved = 0;
+        this.suppressClick = false; // Swallow the click that skipped the intro.
         this.lastPointer = {x: 0, y: 0};
         this.tmp = new THREE.Vector3();
         this.tmp2 = new THREE.Vector3(); // Scratch for measuring per-frame motion.
@@ -7369,9 +7370,12 @@ define('format_mnemo/vr', [], function() {
         el.style.touchAction = 'none';
 
         el.addEventListener('pointerdown', function(e) {
-            // A press skips the sky-drop intro and lands immediately.
+            // A press skips the sky-drop intro and lands immediately. Mark the
+            // gesture consumed so its release only skips - it must not also be
+            // read as a click that opens a node or fires.
             if (self.introActive) {
                 self.finishIntro();
+                self.suppressClick = true;
             }
             self.dragging = true;
             self.pointerMoved = 0;
@@ -7415,6 +7419,12 @@ define('format_mnemo/vr', [], function() {
             if (e.pointerId !== undefined && el.hasPointerCapture(e.pointerId)) {
                 el.releasePointerCapture(e.pointerId);
             }
+            // The press that skipped the intro is spent here: swallow its click
+            // so it never opens a node or fires.
+            if (self.suppressClick) {
+                self.suppressClick = false;
+                return;
+            }
             if (!wasClick) {
                 return;
             }
@@ -7436,6 +7446,7 @@ define('format_mnemo/vr', [], function() {
         el.addEventListener('pointerup', endDrag);
         el.addEventListener('pointercancel', function() {
             self.dragging = false;
+            self.suppressClick = false;
         });
 
         window.addEventListener('keydown', function(e) {
@@ -10653,6 +10664,7 @@ define('format_mnemo/vr', [], function() {
         this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
         this.lastFireTs = 0; // Last finger-gun shot time (ms), for a fire cooldown.
         this.gunArmed = false; // A cocked finger gun (thumb up) is held, ready to fire.
+        this.handLostTime = 0; // Seconds since a hand was last tracked (latch expiry).
         this.headPitchNeutral = null; // Calibrated straight-ahead head pitch.
         this.havePitch = false; // A face is driving the look pitch this frame.
         this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
@@ -10912,6 +10924,7 @@ define('format_mnemo/vr', [], function() {
                 // fires it once, and it must be re-cocked (thumb raised again)
                 // to fire the next. Letting the gun go disarms it. This needs a
                 // real cock-then-drop, not merely forming the gesture.
+                this.handLostTime = 0;
                 if (cur.fingerGun) {
                     if (cur.thumbUp) {
                         this.gunArmed = true;
@@ -10924,6 +10937,13 @@ define('format_mnemo/vr', [], function() {
                 }
             } else {
                 this.prevHand = null;
+                // Tolerate a dropped frame, but disarm the finger gun after a
+                // sustained tracking loss so a hand that leaves and returns
+                // thumb-down cannot fire a shot that was never really cocked.
+                this.handLostTime += frameDt;
+                if (this.handLostTime > 0.3) {
+                    this.gunArmed = false;
+                }
             }
         }
         if (!haveHead && !haveHand) {
@@ -11212,6 +11232,7 @@ define('format_mnemo/vr', [], function() {
         this.headPitchNeutral = null;
         this.havePitch = false;
         this.gunArmed = false;
+        this.handLostTime = 0;
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
