@@ -10442,6 +10442,7 @@ define('format_mnemo/vr', [], function() {
         this.poseLoading = false; // A load attempt is in flight.
         this.prevHand = null; // Previous frame's hand features (pull detection).
         this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
+        this.lastFireTs = 0; // Last finger-gun shot time (ms), for a fire cooldown.
         // Tunables (the one place to adjust the feel): a deadzone that ignores
         // frame noise, a gain that maps motion energy to a full-scale axis, and
         // the steering rate. Smoothing is asymmetric and time-based - a short
@@ -10673,12 +10674,19 @@ define('format_mnemo/vr', [], function() {
             var lm = this.pose.detect(v, ts);
             if (lm) {
                 var cur = this.pose.classify(lm);
-                var it = this.pose.intent(this.prevHand, cur, frameDt);
+                var prev = this.prevHand;
+                var it = this.pose.intent(prev, cur, frameDt);
                 this.prevHand = cur;
                 stop = it.stop;
                 handTurn = it.turn;
                 moveTarget = it.moveTarget;
                 haveHand = true;
+                // Finger-gun trigger: fire once when the thumb drops (the
+                // "hammer" falling) while the hand holds a finger gun. The
+                // thumb must be raised again to fire the next shot.
+                if (cur.fingerGun && prev && prev.thumbUp && !cur.thumbUp) {
+                    this.fireGesture(ts);
+                }
             } else {
                 this.prevHand = null;
             }
@@ -10695,6 +10703,24 @@ define('format_mnemo/vr', [], function() {
         }
         this.poseMove = this.blend(this.poseMove, moveTarget, frameDt);
         this.intent = {turn: haveHead ? headTurn : handTurn, move: this.poseMove};
+    };
+
+    /**
+     * Fire the arcade weapon along the camera crosshair from a finger-gun
+     * trigger pull. A no-op unless the game is playing, and rate-limited so a
+     * single pull cannot loose a burst from landmark jitter.
+     *
+     * @param {Number} ts The current timestamp in milliseconds.
+     */
+    CameraNav.prototype.fireGesture = function(ts) {
+        if (!this.cs || !this.cs.game || !this.cs.game.isPlaying()) {
+            return;
+        }
+        if (this.lastFireTs && ts - this.lastFireTs < 200) {
+            return;
+        }
+        this.lastFireTs = ts;
+        this.cs.game.shootFromCamera();
     };
 
     /**
@@ -11003,12 +11029,15 @@ define('format_mnemo/vr', [], function() {
      * apparent size, which grows as the hand comes toward the camera.
      *
      * @param {Array} lm The 21 landmarks.
-     * @return {Object} {fingers, open, fist, x, y, span}.
+     * @return {Object} {fingers, open, fist, fingerGun, thumbUp, x, y, span}.
      */
     HandPose.prototype.classify = function(lm) {
+        var ext = [];
         var fingers = 0;
         for (var i = 0; i < HandPose.FINGERS.length; i++) {
-            if (this.fingerExtended(lm, HandPose.FINGERS[i][0], HandPose.FINGERS[i][1])) {
+            var e = this.fingerExtended(lm, HandPose.FINGERS[i][0], HandPose.FINGERS[i][1]);
+            ext.push(e);
+            if (e) {
                 fingers++;
             }
         }
@@ -11016,6 +11045,10 @@ define('format_mnemo/vr', [], function() {
             fingers: fingers,
             open: fingers >= 4,
             fist: fingers === 0,
+            // A finger gun: index out, the other three fingers curled.
+            fingerGun: ext[0] && !ext[1] && !ext[2] && !ext[3],
+            // Thumb raised (the "hammer"); dropping it pulls the trigger.
+            thumbUp: this.fingerExtended(lm, 4, 2),
             x: lm[0].x,
             y: lm[0].y,
             span: this.dist(lm[0], lm[9]) // Wrist to middle-finger MCP.
