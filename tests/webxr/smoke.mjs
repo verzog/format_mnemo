@@ -2031,6 +2031,103 @@ const scenarios = [
         }
     },
     {
+        name: 'headpose: nose offset from the face-edge midpoint reads as yaw',
+        fn: () => {
+            const HeP = window.__mnemoModule._HeadPose;
+            const hp = new HeP(null);
+            // Edges at 0.3/0.7 (mid 0.5, half-width 0.2); nose x sets the yaw.
+            const mkFace = (noseX) => {
+                const lm = [];
+                for (let i = 0; i < 468; i++) {
+                    lm.push({x: 0.5, y: 0.5, z: 0});
+                }
+                lm[234] = {x: 0.3, y: 0.5, z: 0};
+                lm[454] = {x: 0.7, y: 0.5, z: 0};
+                lm[1] = {x: noseX, y: 0.45, z: 0};
+                return lm;
+            };
+            window.__mnemoTest.mkFace = mkFace; // Shared by the tests below.
+            const centre = hp.classify(mkFace(0.5)).yaw;
+            const right = hp.classify(mkFace(0.35)).yaw; // Head to the user's right.
+            const left = hp.classify(mkFace(0.65)).yaw;
+            const pass = Math.abs(centre) < 1e-9 && right < 0 && left > 0 &&
+                hp.detect(null, 0) === null;
+            return {pass, detail: `c=${centre} r=${right.toFixed(2)} l=${left.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'headpose: a turned head steers, a centred head does not',
+        fn: () => {
+            const HeP = window.__mnemoModule._HeadPose;
+            const hp = new HeP(null);
+            const mkFace = window.__mnemoTest.mkFace;
+            const right = hp.intent(hp.classify(mkFace(0.35))); // Head right -> steer right.
+            const left = hp.intent(hp.classify(mkFace(0.65)));
+            const centre = hp.intent(hp.classify(mkFace(0.5)));
+            const tiny = hp.intent(hp.classify(mkFace(0.49))); // Within the deadzone.
+            const pass = right.turn > 0 && left.turn < 0 && centre.turn === 0 && tiny.turn === 0;
+            return {pass, detail: `r=${right.turn.toFixed(2)} l=${left.turn.toFixed(2)} c=${centre.turn} t=${tiny.turn}`};
+        }
+    },
+    {
+        name: 'cameranav: the head steers while the hand stops and hauls',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            // Stub landmarkers: the head reports a right turn, the hand a (lower
+            // priority) left turn with no stop and no haul.
+            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6}), intent: () => ({turn: 1})};
+            nav.pose = {detect: () => [1], classify: () => ({open: false, fist: false}),
+                intent: () => ({stop: false, turn: -0.5, moveTarget: 0})};
+            nav.samplePose({}, 0.033);
+            const headWins = Math.abs(nav.intent.turn - 1) < 1e-9;
+            // With no face, the hand's own steering is used instead.
+            nav.head = null;
+            nav.samplePose({}, 0.033);
+            const handFallback = Math.abs(nav.intent.turn + 0.5) < 1e-9;
+            // An open palm (stop) zeroes the intent whatever the head says.
+            nav.head = {detect: () => [1], classify: () => ({yaw: -0.6}), intent: () => ({turn: 1})};
+            nav.pose = {detect: () => [1], classify: () => ({open: true, fist: false}),
+                intent: () => ({stop: true, turn: 0, moveTarget: 0})};
+            nav.samplePose({}, 0.033);
+            const stops = nav.intent.turn === 0 && nav.intent.move === 0;
+            return {pass: headWins && handFallback && stops,
+                detail: `head=${headWins} hand=${handFallback} stop=${stops}`};
+        }
+    },
+    {
+        name: 'cameranav: a partial pose load keeps whichever model succeeded',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const handOnly = new CN(null);
+            handOnly.active = true;
+            handOnly.applyPoseModels({}, null); // Only the hand model loaded.
+            const keptHand = handOnly.pose !== null && handOnly.head === null;
+            const faceOnly = new CN(null);
+            faceOnly.active = true;
+            faceOnly.applyPoseModels(null, {}); // Only the face model loaded.
+            const keptFace = faceOnly.pose === null && faceOnly.head !== null;
+            return {pass: keptHand && keptFace, detail: `hand=${keptHand} face=${keptFace}`};
+        }
+    },
+    {
+        name: 'cameranav: models loaded after switch-off are closed, not leaked',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const nav = new CN(null);
+            nav.active = false; // Switched off (or XR entered) during the load.
+            let closedHand = false;
+            let closedFace = false;
+            nav.applyPoseModels({close: () => {
+                closedHand = true;
+            }}, {close: () => {
+                closedFace = true;
+            }});
+            const pass = nav.pose === null && nav.head === null && closedHand && closedFace;
+            return {pass, detail: `pose=${nav.pose} head=${nav.head} h=${closedHand} f=${closedFace}`};
+        }
+    },
+    {
         name: 'comfort: normalizeComfort keeps valid values and defaults the rest',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

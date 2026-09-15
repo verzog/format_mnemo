@@ -10438,6 +10438,7 @@ define('format_mnemo/vr', [], function() {
         // hand gestures instead of frame motion; until then (or if it fails to
         // load) the motion path above is the fallback.
         this.pose = null; // A HandPose once the landmarker has loaded.
+        this.head = null; // A HeadPose once the face landmarker has loaded.
         this.poseLoading = false; // A load attempt is in flight.
         this.prevHand = null; // Previous frame's hand features (pull detection).
         this.poseMove = 0; // Smoothed forward (haul) energy in pose mode.
@@ -10613,9 +10614,9 @@ define('format_mnemo/vr', [], function() {
         }
         var frameDt = this.lastTime >= 0 ? v.currentTime - this.lastTime : 0;
         this.lastTime = v.currentTime;
-        // Pose mode (MediaPipe hand landmarks) once it has loaded; otherwise the
-        // frame-motion fallback.
-        if (this.pose) {
+        // Pose mode (MediaPipe hand and/or face landmarks) once it has loaded;
+        // otherwise the frame-motion fallback.
+        if (this.pose || this.head) {
             this.samplePose(v, frameDt);
             return;
         }
@@ -10636,81 +10637,165 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Read hand gestures for one frame via the loaded HandPose and turn them into
-     * the steering/move intent: an open palm stops, the hand's position steers,
-     * and a fisted "haul" glides forward (its target smoothed with the same
-     * attack/release easing so repeated hauls sustain momentum). No hand in view
-     * clears the intent so the rig coasts to a stop.
+     * Read hand and head gestures for one frame and turn them into the
+     * steering/move intent:
+     *   - the head steers: turning it left or right rotates the view (when the
+     *     face landmarker has loaded and a face is visible);
+     *   - an open palm stops;
+     *   - a fisted "haul" (grab and pull the hand toward you) glides forward,
+     *     its target smoothed so repeated hauls sustain momentum.
+     * When no face is available the hand's own left/right position steers
+     * instead (the Phase 1 fallback). No hand and no face in view clears the
+     * intent so the rig coasts to a stop.
      *
      * @param {Object} v The video element.
      * @param {Number} frameDt Seconds since the last processed frame.
      */
     CameraNav.prototype.samplePose = function(v, frameDt) {
-        var lm = this.pose.detect(v, window.performance ? window.performance.now() : Date.now());
-        if (!lm) {
+        var ts = window.performance ? window.performance.now() : Date.now();
+        // Head steering (preferred when a face is seen).
+        var headTurn = 0;
+        var haveHead = false;
+        if (this.head) {
+            var hlm = this.head.detect(v, ts);
+            if (hlm) {
+                headTurn = this.head.intent(this.head.classify(hlm)).turn;
+                haveHead = true;
+            }
+        }
+        // Hand: stop (open palm), forward (fist haul) and - only as the fallback
+        // when no face steers - left/right position steering.
+        var handTurn = 0;
+        var stop = false;
+        var moveTarget = 0;
+        var haveHand = false;
+        if (this.pose) {
+            var lm = this.pose.detect(v, ts);
+            if (lm) {
+                var cur = this.pose.classify(lm);
+                var it = this.pose.intent(this.prevHand, cur, frameDt);
+                this.prevHand = cur;
+                stop = it.stop;
+                handTurn = it.turn;
+                moveTarget = it.moveTarget;
+                haveHand = true;
+            } else {
+                this.prevHand = null;
+            }
+        }
+        if (!haveHead && !haveHand) {
             this.clearIntent();
-            this.prevHand = null;
             this.poseMove = 0;
             return;
         }
-        var cur = this.pose.classify(lm);
-        var it = this.pose.intent(this.prevHand, cur, frameDt);
-        this.prevHand = cur;
-        if (it.stop) {
+        if (stop) {
             this.clearIntent();
             this.poseMove = 0;
             return;
         }
-        this.poseMove = this.blend(this.poseMove, it.moveTarget, frameDt);
-        this.intent = {turn: it.turn, move: this.poseMove};
+        this.poseMove = this.blend(this.poseMove, moveTarget, frameDt);
+        this.intent = {turn: haveHead ? headTurn : handTurn, move: this.poseMove};
     };
 
     /**
-     * Try to upgrade the control to MediaPipe hand-pose detection: load the
-     * vision bundle, resolve its WASM runtime and create a HandLandmarker from
-     * the vendored model. On any failure the control silently stays in motion
-     * mode (the fallback), so this never throws. Runs at most once.
+     * Try to upgrade the control to MediaPipe pose detection: load the vision
+     * bundle, resolve its WASM runtime and create a HandLandmarker (stop and
+     * haul-forward gestures) and, when its model is vendored, a FaceLandmarker
+     * (head steering) from the same fileset. On any failure the control silently
+     * stays in motion mode (the fallback), so this never throws. Runs at most
+     * once.
      */
     CameraNav.prototype.initPose = function() {
         var self = this;
         var cfg = this.cs && this.cs.config;
-        if (this.pose || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
+        // Already have (or are loading) a detector: nothing to do. Checking both
+        // pose and head means a partial load (only one model succeeded) is not
+        // retried, so the other is not re-created and leaked on a later start().
+        if (this.pose || this.head || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
             return;
         }
         this.poseLoading = true;
         var mp;
+        // Wrap a create so one model failing never rejects the pair: each
+        // settles to {ok, lm} or {ok:false, err}, so a working landmarker is
+        // still installed (or closed) instead of being discarded and leaked.
+        var settle = function(promise) {
+            return promise.then(function(lm) {
+                return {ok: true, lm: lm};
+            }, function(err) {
+                return {ok: false, err: err};
+            });
+        };
         loadMediapipe(cfg).then(function(loaded) {
             mp = loaded;
             return mp.FilesetResolver.forVisionTasks(cfg.mediapipewasmurl);
         }).then(function(fileset) {
-            return mp.HandLandmarker.createFromOptions(fileset, {
+            // Build the hand landmarker and (when its model is present) the face
+            // landmarker from the one fileset, independently.
+            var hand = settle(mp.HandLandmarker.createFromOptions(fileset, {
                 baseOptions: {modelAssetPath: cfg.mediapipehandmodelurl, delegate: 'GPU'},
                 runningMode: 'VIDEO',
                 numHands: 1
-            });
-        }).then(function(landmarker) {
-            // The load finished; clear the guard either way so a later start()
-            // can retry if this result is discarded.
+            }));
+            var face = cfg.mediapipefacemodelurl ? settle(mp.FaceLandmarker.createFromOptions(fileset, {
+                baseOptions: {modelAssetPath: cfg.mediapipefacemodelurl, delegate: 'GPU'},
+                runningMode: 'VIDEO',
+                numFaces: 1
+            })) : Promise.resolve({ok: false, err: null});
+            return Promise.all([hand, face]);
+        }).then(function(res) {
+            // The load finished; clear the guard so a total failure can retry.
             self.poseLoading = false;
-            // A stop() (or entering XR) between request and resolution: discard.
-            if (self.active) {
-                self.pose = new HandPose(landmarker);
-                if (self.onpose) {
-                    self.onpose();
-                }
-            } else if (landmarker.close) {
-                landmarker.close();
+            var hand = res[0].ok ? res[0].lm : null;
+            var face = res[1].ok ? res[1].lm : null;
+            if (hand || face) {
+                self.applyPoseModels(hand, face);
+            }
+            // Surface a partial or total failure so a blocked model (CSP, a 404,
+            // out of device resources) is diagnosable; the control keeps working
+            // with whatever loaded, or the motion fallback if nothing did.
+            if (window.console && (res[0].err || res[1].err)) {
+                window.console.warn('format_mnemo: a pose model failed to load, ' +
+                    'using what is available', res[0].err || res[1].err);
             }
             return null;
         }).catch(function(e) {
             self.poseLoading = false; // Stay in motion mode.
-            // Surface why so a blocked upgrade (CSP, missing SIMD, a 404) can be
-            // diagnosed; the control keeps working in motion mode regardless.
+            // An earlier-stage failure (bundle, fileset or WASM runtime).
             if (window.console) {
-                window.console.warn('format_mnemo: hand-pose detection unavailable, ' +
+                window.console.warn('format_mnemo: pose detection unavailable, ' +
                     'using motion fallback', e);
             }
         });
+    };
+
+    /**
+     * Install whichever pose detectors loaded, or - if the control was switched
+     * off (or a headset entered) between the request and its resolution - close
+     * them instead so no WASM/GPU landmarker is leaked.
+     *
+     * @param {Object|null} hand A loaded HandLandmarker, or null.
+     * @param {Object|null} face A loaded FaceLandmarker, or null.
+     */
+    CameraNav.prototype.applyPoseModels = function(hand, face) {
+        if (this.active) {
+            if (hand) {
+                this.pose = new HandPose(hand);
+            }
+            if (face) {
+                this.head = new HeadPose(face);
+            }
+            if (this.onpose) {
+                this.onpose();
+            }
+            return;
+        }
+        if (hand && hand.close) {
+            hand.close();
+        }
+        if (face && face.close) {
+            face.close();
+        }
     };
 
     /**
@@ -10988,6 +11073,86 @@ define('format_mnemo/vr', [], function() {
         }
         var res = this.landmarker.detectForVideo(video, timestampMs);
         return (res && res.landmarks && res.landmarks.length) ? res.landmarks[0] : null;
+    };
+
+    /**
+     * Head-pose reader for the camera control, built on a MediaPipe
+     * FaceLandmarker. It turns the head's left/right yaw into a steering signal:
+     * turn your head to look that way and the view rotates, past a small
+     * deadzone. The classification is pure (landmarks in, yaw out) so it is unit
+     * tested; only detect() touches the MediaPipe runtime and the video.
+     *
+     * Yaw is read from where the nose tip sits between the two face edges rather
+     * than a transformation matrix, so it needs only the 2D landmarks and its
+     * sign is easy to reason about. The camera image is not mirrored, so turning
+     * the head to the user's right slides the nose toward the image's left
+     * (a negative offset), which steers right - matching the mirrored preview.
+     *
+     * @param {Object} landmarker A MediaPipe FaceLandmarker (null-safe for tests).
+     */
+    function HeadPose(landmarker) {
+        this.landmarker = landmarker || null;
+        this.yawGain = 0.5; // Head-yaw signal at which steering is full.
+        this.yawDeadzone = 0.1; // Ignore a head near centre.
+    }
+
+    /** @const {Number} Nose-tip landmark index in the MediaPipe face mesh. */
+    HeadPose.NOSE = 1;
+    /** @const {Number} Right face-edge (cheek) landmark index. */
+    HeadPose.RIGHT_EDGE = 234;
+    /** @const {Number} Left face-edge (cheek) landmark index. */
+    HeadPose.LEFT_EDGE = 454;
+
+    /**
+     * Reduce the face landmarks to a normalised yaw signal: the nose tip's
+     * horizontal offset from the midpoint of the two face edges, scaled by half
+     * the face width, so it is roughly -1..1 and independent of how far the face
+     * is from the camera.
+     *
+     * @param {Array} lm The face landmarks.
+     * @return {Object} {yaw} in roughly -1..1 (negative = head turned right).
+     */
+    HeadPose.prototype.classify = function(lm) {
+        var nose = lm[HeadPose.NOSE];
+        var re = lm[HeadPose.RIGHT_EDGE];
+        var le = lm[HeadPose.LEFT_EDGE];
+        var midX = (re.x + le.x) / 2;
+        var halfW = Math.abs(le.x - re.x) / 2;
+        return {yaw: halfW > 0 ? (nose.x - midX) / halfW : 0};
+    };
+
+    /**
+     * Map the head yaw signal to a steering intent, past a deadzone and scaled by
+     * the gain. A head turned to the user's right (a negative yaw signal) steers
+     * right (a positive turn, matching HandPose and the apply() convention).
+     *
+     * @param {Object} cur The current head features {yaw}.
+     * @return {Object} {turn} in -1..1.
+     */
+    HeadPose.prototype.intent = function(cur) {
+        var mag = Math.abs(cur.yaw) - this.yawDeadzone;
+        if (mag <= 0) {
+            return {turn: 0};
+        }
+        // Negative yaw (head to the user's right) -> positive turn (steer right).
+        var turn = (cur.yaw < 0 ? 1 : -1) * mag / this.yawGain;
+        return {turn: Math.max(-1, Math.min(1, turn))};
+    };
+
+    /**
+     * Run face detection on the current video frame and return the first face's
+     * landmarks, or null when no face is present or the runtime is unavailable.
+     *
+     * @param {Object} video The video element.
+     * @param {Number} timestampMs A monotonically increasing timestamp (ms).
+     * @return {Array|null} The face landmarks, or null.
+     */
+    HeadPose.prototype.detect = function(video, timestampMs) {
+        if (!this.landmarker) {
+            return null;
+        }
+        var res = this.landmarker.detectForVideo(video, timestampMs);
+        return (res && res.faceLandmarks && res.faceLandmarks.length) ? res.faceLandmarks[0] : null;
     };
 
     /**
@@ -12073,6 +12238,7 @@ define('format_mnemo/vr', [], function() {
         _GameManager: GameManager,
         _CameraNav: CameraNav,
         _HandPose: HandPose,
+        _HeadPose: HeadPose,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,
