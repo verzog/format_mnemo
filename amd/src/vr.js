@@ -255,6 +255,11 @@ define('format_mnemo/vr', [], function() {
         this.brake = false; // Open-palm brake: suppress locomotion this frame.
         this.gestures = null; // XR gesture manager (built after the renderer).
         this.game = null; // Optional arcade game manager (built when enabled).
+        // Free flight is off by default for everyone; only an editing teacher
+        // can turn it on (the Fly toggle), and that choice is remembered on this
+        // device. Learners always walk on the ground.
+        this.flyEnabled = !!config.canedit && this.readLocalFly();
+        this.flyButton = null;
 
         this.spinners = []; // Rooftop holo elements that rotate.
         this.planets = []; // The Void's planet spheres, each self-rotating.
@@ -433,6 +438,7 @@ define('format_mnemo/vr', [], function() {
         }
         if (this.config.canedit) {
             this.buildEditor();
+            this.buildFlyToggle();
         }
         this.bindDesktopControls();
         this.bindMediaPause();
@@ -5352,6 +5358,19 @@ define('format_mnemo/vr', [], function() {
         this.controlsBar = bar;
         this.controlsLeft = left;
         this.controlsRight = right;
+        // Drop focus after a mouse/touch press on any control button, so a
+        // subsequent movement key (Space to jump, in particular) moves the
+        // rig instead of re-activating the still-focused button - which would
+        // otherwise toggle fullscreen, the game, or a panel. e.detail > 0 marks
+        // a pointer activation, so keyboard focus and Enter/Space activation are
+        // left untouched for accessibility.
+        var blurButton = function(e) {
+            var b = e.target && e.target.closest ? e.target.closest('button') : null;
+            if (b && e.detail && b.blur) {
+                b.blur();
+            }
+        };
+        bar.addEventListener('click', blurButton);
         // Keep the pop-out panels sitting just under the bar's real height,
         // however many rows it wraps to (a ResizeObserver catches wrapping,
         // font-size and visibility changes; resize is the fallback).
@@ -5377,6 +5396,94 @@ define('format_mnemo/vr', [], function() {
         if (h > 0) {
             this.root.style.setProperty('--mnemo-controls-inset', (h + 4) + 'px');
         }
+    };
+
+    /**
+     * The free-flight choice stored on this device, or false. A per-device
+     * convenience so a teacher who turned flight on does not have to re-tick it
+     * each visit.
+     *
+     * @return {Boolean} True when flight was left on.
+     */
+    Cyberspace.prototype.readLocalFly = function() {
+        try {
+            return window.localStorage.getItem('format_mnemo_fly') === '1';
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /**
+     * Persist the current free-flight choice to this device (best-effort).
+     */
+    Cyberspace.prototype.saveFly = function() {
+        try {
+            window.localStorage.setItem('format_mnemo_fly', this.flyEnabled ? '1' : '0');
+        } catch (e) {
+            // Storage unavailable (private mode / blocked); ignore.
+        }
+    };
+
+    /**
+     * Build the Fly toggle: a button (shown only to users who can edit the
+     * course) that turns free flight on or off. Off by default, so every user -
+     * teachers and admins included - walks on the ground until flight is ticked.
+     */
+    Cyberspace.prototype.buildFlyToggle = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__fly-btn';
+        btn.textContent = s.fly || 'Fly';
+        btn.title = s.fly_help || 'Fly freely instead of walking on the ground';
+        btn.setAttribute('aria-label', btn.title);
+        this.controlsLeft.appendChild(btn);
+        this.flyButton = btn;
+        this.markFlyActive();
+        btn.addEventListener('click', function() {
+            self.flyEnabled = !self.flyEnabled;
+            self.markFlyActive();
+            self.saveFly();
+        });
+    };
+
+    /**
+     * Reflect the current flight state on the Fly toggle (highlight + pressed).
+     */
+    Cyberspace.prototype.markFlyActive = function() {
+        if (!this.flyButton) {
+            return;
+        }
+        this.flyButton.classList.toggle('format-mnemo__fly-btn--on', this.flyEnabled);
+        this.flyButton.setAttribute('aria-pressed', this.flyEnabled ? 'true' : 'false');
+    };
+
+    /**
+     * Add a close (✕) button to a pop-out panel so it can be dismissed without
+     * hunting for its toggle button (which may have wrapped out of easy reach on
+     * a narrow screen). Positioned at the panel's top-right by the stylesheet.
+     *
+     * @param {Object} panel The panel element.
+     * @param {Function} [onClose] Optional extra work to run on close.
+     * @return {Object} The close button.
+     */
+    Cyberspace.prototype.buildPanelClose = function(panel, onClose) {
+        var s = this.config.strings || {};
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'format-mnemo__panel-close';
+        btn.textContent = '✕';
+        btn.title = s.closemenu || 'Close';
+        btn.setAttribute('aria-label', btn.title);
+        btn.addEventListener('click', function() {
+            panel.hidden = true;
+            if (onClose) {
+                onClose();
+            }
+        });
+        panel.appendChild(btn);
+        return btn;
     };
 
     /**
@@ -5591,6 +5698,7 @@ define('format_mnemo/vr', [], function() {
         panel.hidden = true;
         this.root.appendChild(panel);
         this.comfortPanel = panel;
+        this.buildPanelClose(panel);
 
         // Each row: a label and a set of segmented option buttons. Picking one
         // updates that comfort field, applies it live and persists.
@@ -5916,6 +6024,10 @@ define('format_mnemo/vr', [], function() {
         panel.hidden = true;
         this.root.appendChild(panel);
         this.keybindPanel = panel;
+        this.buildPanelClose(panel, function() {
+            self.keybindListen = null;
+            self.renderKeybinds();
+        });
 
         var hint = document.createElement('p');
         hint.className = 'format-mnemo__keybind-hint';
@@ -9400,7 +9512,9 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.updateDesktop = function(dt) {
         // Apply look.
         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
-        if (this.config.canedit) {
+        // Everyone walks on the ground by default; free flight is opt-in and
+        // only offered to users who can edit the course (the Fly toggle).
+        if (this.config.canedit && this.flyEnabled) {
             this.updateDesktopFly(dt);
         } else {
             this.updateDesktopWalk(dt);

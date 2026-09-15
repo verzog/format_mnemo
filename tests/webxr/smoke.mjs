@@ -326,24 +326,33 @@ const scenarios = [
         }
     },
     {
-        name: 'desktop: an editing teacher keeps free flight',
+        name: 'desktop: an editing teacher flies only when flight is on',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
-            const player = new THREE.Group();
-            const self = {
-                THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
-                pitch: 0, yaw: 0, keys: {KeyR: true}, config: {canedit: true},
-                keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
-                comfortSpeedScale: () => 1,
-                velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
-                updateDesktop: CS.prototype.updateDesktop,
-                updateDesktopFly: CS.prototype.updateDesktopFly,
-                updateDesktopWalk: CS.prototype.updateDesktopWalk
+            const mk = (fly) => {
+                const player = new THREE.Group();
+                const self = {
+                    THREE, camera: new THREE.PerspectiveCamera(70, 1, 0.1, 100), player,
+                    pitch: 0, yaw: 0, keys: {KeyF: true}, config: {canedit: true},
+                    flyEnabled: fly,
+                    keybinds: CS.prototype.normalizeKeybinds({}), actionActive: CS.prototype.actionActive,
+                    comfortSpeedScale: () => 1,
+                    velocityY: 0, onGround: true, jumpSpeed: 7, gravity: 22,
+                    updateDesktop: CS.prototype.updateDesktop,
+                    updateDesktopFly: CS.prototype.updateDesktopFly,
+                    updateDesktopWalk: CS.prototype.updateDesktopWalk
+                };
+                self.updateDesktop(0.1);
+                return player.position.y;
             };
-            self.updateDesktop(0.1);
-            // R rises with no gravity pulling back — free flight is preserved.
-            return {pass: player.position.y > 0.1, detail: `y=${player.position.y.toFixed(3)}`};
+            // Flight on: the descend key drops the rig below ground level (free
+            // vertical flight). Flight off (the default): a teacher walks, so the
+            // descend key does nothing and gravity holds them at y = 0.
+            const flying = mk(true);
+            const grounded = mk(false);
+            const pass = flying < -0.1 && Math.abs(grounded) < 1e-9;
+            return {pass, detail: `flying=${flying.toFixed(3)} grounded=${grounded.toFixed(3)}`};
         }
     },
     {
@@ -2373,6 +2382,7 @@ const scenarios = [
                 saveComfort: function() {},
                 markComfortActive: CS.prototype.markComfortActive,
                 controlsRight: document.createElement('div'),
+                buildPanelClose: CS.prototype.buildPanelClose,
                 buildComfort: CS.prototype.buildComfort
             };
             self.buildComfort();
@@ -2382,6 +2392,47 @@ const scenarios = [
                 snap.getAttribute('aria-pressed') === 'false' &&
                 smooth.classList.contains('format-mnemo__comfort-opt--on');
             return {pass, detail: `smooth=${smooth.getAttribute('aria-pressed')} snap=${snap.getAttribute('aria-pressed')}`};
+        }
+    },
+    {
+        name: 'controls: the panel close button hides the panel',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {strings: {}}};
+            const panel = document.createElement('div');
+            panel.hidden = false;
+            let extra = false;
+            const btn = CS.prototype.buildPanelClose.call(self, panel, () => {
+                extra = true;
+            });
+            const wired = panel.contains(btn) && btn.classList.contains('format-mnemo__panel-close');
+            btn.click();
+            return {pass: wired && panel.hidden === true && extra,
+                detail: `wired=${wired} hidden=${panel.hidden} extra=${extra}`};
+        }
+    },
+    {
+        name: 'controls: the Fly toggle flips free flight off and on',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                config: {strings: {}},
+                flyEnabled: false,
+                controlsLeft: document.createElement('div'),
+                saveFly: () => {},
+                markFlyActive: CS.prototype.markFlyActive,
+                buildFlyToggle: CS.prototype.buildFlyToggle
+            };
+            self.buildFlyToggle();
+            const offStart = self.flyEnabled === false &&
+                self.flyButton.getAttribute('aria-pressed') === 'false';
+            self.flyButton.click();
+            const on = self.flyEnabled === true &&
+                self.flyButton.classList.contains('format-mnemo__fly-btn--on');
+            self.flyButton.click();
+            const off = self.flyEnabled === false &&
+                !self.flyButton.classList.contains('format-mnemo__fly-btn--on');
+            return {pass: offStart && on && off, detail: `start=${offStart} on=${on} off=${off}`};
         }
     },
     {
