@@ -213,11 +213,13 @@ off).
   it.
 - **Topic images** — each section can carry an optional image (uploaded in the
   section's settings) that appears on its street sign.
-- **Per-course, per-environment look** — teachers pick the active environment
-  (Cyberspace / Grid / Void) in course settings, and each environment has its
-  own self-contained area (neon palette, street lighting, invert look and arcade
-  game). Configuring or switching one world never disturbs another's settings.
-- **Arcade / game mode** *(optional, off by default)* — a per-course toggle adds
+- **Per-environment look** — teachers pick the active environment
+  (Cyberspace / Grid / Void) in course settings; each world's own look (neon
+  palette, street lighting, invert look and arcade game) is configured site-wide
+  by an administrator, one self-contained section per environment. Configuring
+  one world never disturbs another, and every course on a given world shares its
+  look.
+- **Arcade / game mode** *(optional, off by default)* — a per-environment toggle adds
   a small **Start Game** button to the scene. It drops shootable targets into the
   city and gives the learner a crosshair HUD (score and shields): **click** (or
   **squeeze the VR trigger**) to fire a hitscan shot, hit a target to score, and
@@ -258,9 +260,10 @@ Alternatively install the ZIP via
 
 1. In a course, open **Settings → Course format** and choose
    **Mnemo (VR cyberspace)**.
-2. Pick the active **Environment**, then open that world's section to set its
-   **Neon palette**, **Street lighting**, invert look and (optionally) **Arcade /
-   game mode** (off by default). Each environment keeps its own settings. Add a
+2. Pick the active **Environment** (Cyberspace / Grid / Void). Each world's look
+   — **Neon palette**, **Street lighting**, invert look and (optionally) **Arcade
+   / game mode**, off by default — is set site-wide by an administrator (see
+   *Admin settings* below), so the course only chooses which world to show. Add a
    **topic image** in each section's settings.
 3. With editing **on**, add sections and activities as usual (standard 2D UI).
 4. Turn editing **off** to fly through the course. Click **Enter VR** to jack in
@@ -280,13 +283,18 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
 - **Three.js module URL** — where the browser loads Three.js from. **Leave blank**
   (the default) to use the copy bundled with the plugin. Set it only to load
   Three.js from a shared or newer hosted copy.
-- **Default environment** / **Default neon palette** — the defaults applied to
-  newly created courses (teachers can override per course).
-- **Default street lighting** — the density of the automatic street lamps that
-  line the avenue and side streets at even spacing (with a lamp at each
-  side-street corner): Off, Sparse, Normal or Dense. Each course can override it
-  (or keep **Site default**), so changing this reaches every course that has not
-  set its own. Turning it off leaves teachers free to place their own lamps.
+- **Default environment** — the world selected for newly created courses
+  (teachers can switch it per course).
+- **Cyberspace / Grid / Void look** — each environment has its own section, and
+  every course on that world shares its look:
+  - **Neon palette** — the dominant glow colour of the data structures.
+  - **Street lighting** — the density of the automatic street lamps that line
+    the avenue and side streets at even spacing (with a lamp at each side-street
+    corner): Off, Sparse, Normal or Dense. Off leaves teachers free to place
+    their own lamps.
+  - **Invert mouse look** — reverse the drag-to-look direction for that world.
+  - **Arcade game mode** — the optional shoot-the-targets mini-game (off by
+    default).
 - **Prop asset pack URL** — a URL of a directory of glTF (`.glb`) prop models to
   use instead of the bundled props. **Leave blank** to use the uploaded pack (if
   any) or the plugin's own models. If set, it takes precedence over an upload.

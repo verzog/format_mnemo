@@ -42,122 +42,35 @@ final class scene_test extends \advanced_testcase {
 
         $this->assertArrayHasKey('mnemoenvironment', $options);
         $this->assertSame('cyberspace', $options['mnemoenvironment']);
-        // Each environment carries its own self-contained settings.
-        $this->assertArrayHasKey('mnemo_cyberspace_palette', $options);
-        $this->assertArrayHasKey('mnemo_grid_palette', $options);
-        $this->assertArrayHasKey('mnemo_void_palette', $options);
-        $this->assertArrayHasKey('mnemo_void_game', $options);
-        $this->assertSame('cyan', $options['mnemo_cyberspace_palette']);
-        $this->assertSame('inherit', $options['mnemo_grid_lighting']);
-        // The old single keys are gone.
+        // The course stores only which world is active; each world's look is a
+        // site-wide setting, not a per-course option.
+        $this->assertArrayNotHasKey('mnemo_cyberspace_palette', $options);
         $this->assertArrayNotHasKey('mnemopalette', $options);
         $this->assertTrue($format->uses_sections());
         $this->assertTrue($format->supports_components());
     }
 
     /**
-     * The course settings form returns a header element per environment together
-     * with that environment's options, so the three worlds render as separate
-     * grouped areas. The course edit form only relocates the elements this method
-     * returns, so a header left out of the return value would show no grouping.
-     */
-    public function test_settings_form_returns_a_header_per_environment(): void {
-        $this->resetAfterTest();
-        $this->setAdminUser();
-        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
-        $format = course_get_format($course);
-
-        // A tiny stand-in for MoodleQuickForm. Every form call the format makes
-        // routes through __call (so the camelCase QuickForm API needs no real
-        // methods); only addElement returns a value - a name-bearing handle - so
-        // we can assert what the format returns without building a real form.
-        $mform = new class {
-            /**
-             * Any property read (the format checks $mform->_defaultValues) is an
-             * empty array, so no default is ever considered already set.
-             *
-             * @param string $name the property read
-             * @return array always empty
-             */
-            public function __get($name) {
-                return [];
-            }
-
-            /**
-             * Intercept every QuickForm call. addElement returns a name-bearing
-             * handle; every other call is a no-op.
-             *
-             * @param string $method the method called
-             * @param array $args its arguments
-             * @return object|null a handle for addElement, otherwise null
-             */
-            public function __call($method, $args) {
-                if ($method === 'addElement') {
-                    return new class ($args[1]) {
-                        /** @var string The element name. */
-                        private $elname;
-
-                        /**
-                         * Store the element name.
-                         *
-                         * @param string $elname the element name
-                         */
-                        public function __construct($elname) {
-                            $this->elname = $elname;
-                        }
-
-                        /**
-                         * Return the element name for any getter call.
-                         *
-                         * @param string $method the method called
-                         * @param array $args its arguments
-                         * @return string the element name
-                         */
-                        public function __call($method, $args) {
-                            return $this->elname;
-                        }
-                    };
-                }
-                return null;
-            }
-        };
-
-        $elements = $format->create_edit_form_elements($mform, false);
-        $names = [];
-        foreach ($elements as $element) {
-            $names[] = $element->getName();
-        }
-
-        foreach (['cyberspace', 'grid', 'void'] as $env) {
-            $this->assertContains('mnemohdr_' . $env, $names, "missing header for $env");
-            $this->assertContains('mnemo_' . $env . '_palette', $names);
-        }
-        // Each header precedes its own settings.
-        $this->assertLessThan(
-            array_search('mnemo_grid_palette', $names, true),
-            array_search('mnemohdr_grid', $names, true)
-        );
-    }
-
-    /**
-     * The scene reads the settings of the active environment only: switching the
-     * environment swaps in that world's palette/lighting/game, leaving the other
-     * environments' settings untouched.
+     * The scene reads the look of the active environment from the site-wide
+     * settings only: switching the course's environment swaps in that world's
+     * palette/lighting/game, leaving the other environments' settings untouched.
      */
     public function test_scene_config_uses_active_environment_options(): void {
         global $PAGE;
         $this->resetAfterTest();
         $this->setAdminUser();
 
+        // Each world has its own site-wide look.
+        set_config('cyberspace_palette', 'green', 'format_mnemo');
+        set_config('grid_palette', 'amber', 'format_mnemo');
+        set_config('grid_game', 1, 'format_mnemo');
+        set_config('void_palette', 'magenta', 'format_mnemo');
+
+        // The course simply selects which world is active.
         $course = $this->getDataGenerator()->create_course([
             'format' => 'mnemo',
             'numsections' => 1,
-            // Grid is active; each world has its own look.
             'mnemoenvironment' => 'grid',
-            'mnemo_cyberspace_palette' => 'green',
-            'mnemo_grid_palette' => 'amber',
-            'mnemo_grid_game' => 1,
-            'mnemo_void_palette' => 'magenta',
         ], ['createsections' => true]);
 
         $PAGE->set_context(context_course::instance($course->id));
@@ -170,33 +83,26 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
-     * A legacy single option (from a pre-split course backup restored after the
-     * upgrade, so the migration never ran for it) is still honoured for the
-     * active environment, rather than silently reverting to the default.
+     * An environment with no stored site settings falls back to the built-in
+     * defaults (cyan palette, mouse look not inverted, arcade off).
      */
-    public function test_scene_config_legacy_option_fallback(): void {
-        global $PAGE, $DB;
+    public function test_scene_config_environment_defaults(): void {
+        global $PAGE;
         $this->resetAfterTest();
         $this->setAdminUser();
 
         $course = $this->getDataGenerator()->create_course([
-            'format' => 'mnemo', 'numsections' => 1, 'mnemoenvironment' => 'grid',
+            'format' => 'mnemo', 'numsections' => 1, 'mnemoenvironment' => 'void',
         ], ['createsections' => true]);
-        // Simulate the restored backup: no per-environment palette row, but a
-        // legacy single value present.
-        $DB->delete_records('course_format_options', [
-            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0, 'name' => 'mnemo_grid_palette',
-        ]);
-        $DB->insert_record('course_format_options', (object)[
-            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0,
-            'name' => 'mnemopalette', 'value' => 'amber',
-        ]);
 
         $PAGE->set_context(context_course::instance($course->id));
         $scene = new \format_mnemo\output\scene(course_get_format($course));
         $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
 
-        $this->assertSame('amber', $config['palette']); // Legacy value honoured.
+        $this->assertSame('void', $config['environment']);
+        $this->assertSame('cyan', $config['palette']);
+        $this->assertFalse($config['invertlook']);
+        $this->assertFalse($config['game']);
     }
 
     /**
