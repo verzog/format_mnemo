@@ -783,15 +783,21 @@ class scene implements renderable, templatable {
             'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
             'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
             'sidewalktextureurl' => $this->resolve_asset_url('sidewalktextureurl', 'sidewalktexture'),
+            // The sun and moon assets: each an optional {url, kind} where kind is
+            // 'model' (a .glb placed in the sky) or 'image' (skins the disc), or
+            // null to keep the built-in procedural disc. Shown in every
+            // environment, so not gated to the void.
+            'sunasset' => $this->celestial_asset('sunasseturl', 'sunasset'),
+            'moonasset' => $this->celestial_asset('moonasseturl', 'moonasset'),
             // Void backdrop: an optional equirectangular sky/starfield image,
             // and up to nine planet-surface maps (in upload order). The client
             // only uses these in the void environment.
             'spacetextureurl' => $this->resolve_asset_url('spacetextureurl', 'spacetexture'),
             'planettextureurls' => $this->stored_asset_urls('planettextures', 9),
-            // Per-planet ring flags (aligned with planettextureurls): an uploaded
-            // planet whose filename contains the word "ring" is additionally
-            // ringed (the built-in slots are ringed by default regardless).
-            'planetrings' => $this->planet_ring_flags('planettextures', 9),
+            // Per-planet ring flags (planets numbered 1..9 in upload order): a
+            // planet is ringed only when the admin selects it in the "Ringed
+            // planets" setting, so rings appear exactly where intended.
+            'planetrings' => $this->ring_flags(9),
             // Optional ring image (a radial strip) that skins ringed planets.
             'ringtextureurl' => $this->resolve_asset_url('ringtextureurl', 'ringtexture'),
             // Texture tiling scale (world units per tile) and the size of the
@@ -1083,28 +1089,84 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * A ring flag per uploaded file in a multi-file area (aligned with
-     * stored_asset_urls, same order and cap): true when the filename marks the
-     * planet as ringed. The marker is the word "ring" delimited by the start or
-     * end of the base name or a non-letter (so "saturn-ring.png", "ring2.jpg"
-     * and "ice_ring.webp" match, but "spring.png" does not).
+     * A ring flag for each of the Void's planet slots (1..$max, in upload
+     * order), true when the admin has selected that planet in the "Ringed
+     * planets" setting. When the setting has never been saved, defaults to the
+     * three slots that were ringed by default before (1, 5 and 9).
      *
-     * @param string $filearea The system-context file area.
-     * @param int $max Maximum number of flags to return.
-     * @return bool[] The per-file ring flags.
+     * @param int $max Number of planet slots to return flags for.
+     * @return bool[] The per-planet ring flags, indexed from 0.
      */
-    protected function planet_ring_flags(string $filearea, int $max): array {
+    protected function ring_flags(int $max): array {
+        $raw = get_config('format_mnemo', 'ringplanets');
+        if ($raw === false) {
+            $selected = [1, 5, 9];
+        } else {
+            $selected = [];
+            foreach (explode(',', (string)$raw) as $piece) {
+                $piece = trim($piece);
+                if ($piece !== '' && ctype_digit($piece)) {
+                    $selected[] = (int)$piece;
+                }
+            }
+        }
+        $set = array_flip($selected);
+        $flags = [];
+        for ($i = 0; $i < $max; $i++) {
+            $flags[] = isset($set[$i + 1]);
+        }
+        return $flags;
+    }
+
+    /**
+     * Resolve a celestial (sun or moon) asset to {url, kind}, or null when none
+     * is configured. An admin-set URL wins over an uploaded file; the kind is
+     * 'model' for a glTF binary (.glb/.gltf) and 'image' otherwise, so the
+     * client knows whether to place a 3D model or skin the glowing disc.
+     *
+     * @param string $urlsetting The URL config key (e.g. 'sunasseturl').
+     * @param string $filearea The system-context file area (e.g. 'sunasset').
+     * @return array{url: string, kind: string}|null
+     */
+    protected function celestial_asset(string $urlsetting, string $filearea): ?array {
+        $url = get_config('format_mnemo', $urlsetting);
+        if (!empty($url)) {
+            return ['url' => $url, 'kind' => $this->asset_kind($url)];
+        }
         $context = \context_system::instance();
         $fs = get_file_storage();
         $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
-        $flags = [];
+        if (empty($files)) {
+            return null;
+        }
+        $rev = 0;
+        $stored = null;
         foreach ($files as $file) {
-            $flags[] = (bool)preg_match('/(?:^|[^a-z])ring(?:[^a-z]|$)/i', $file->get_filename());
-            if (count($flags) >= $max) {
-                break;
+            if ((int)$file->get_timemodified() >= $rev) {
+                $rev = (int)$file->get_timemodified();
+                $stored = $file;
             }
         }
-        return $flags;
+        $fileurl = moodle_url::make_pluginfile_url(
+            $context->id,
+            'format_mnemo',
+            $filearea,
+            $rev,
+            '/',
+            $stored->get_filename()
+        )->out(false);
+        return ['url' => $fileurl, 'kind' => $this->asset_kind($stored->get_filename())];
+    }
+
+    /**
+     * Classify a celestial asset by extension: a glTF binary (.glb/.gltf) is a
+     * 3D 'model', anything else is treated as a flat 'image'.
+     *
+     * @param string $nameorurl A file name or URL.
+     * @return string 'model' or 'image'.
+     */
+    protected function asset_kind(string $nameorurl): string {
+        return preg_match('/\.(glb|gltf)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
     }
 
     /**

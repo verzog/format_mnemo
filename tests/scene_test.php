@@ -564,6 +564,75 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * The per-planet ring flags default to the three planets ringed by default
+     * (1, 5, 9), and follow the admin "Ringed planets" setting when configured.
+     */
+    public function test_scene_config_ring_flags(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1, 'mnemoenvironment' => 'void'],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // Unset: the default ringed planets are 1, 5 and 9 (indices 0, 4, 8).
+        $flags = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'))['planetrings'];
+        $this->assertCount(9, $flags);
+        $this->assertTrue($flags[0]);
+        $this->assertFalse($flags[1]);
+        $this->assertTrue($flags[4]);
+        $this->assertTrue($flags[8]);
+
+        // Configured: only the selected planets (2 and 3) are ringed.
+        set_config('ringplanets', '2,3', 'format_mnemo');
+        $flags = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'))['planetrings'];
+        $this->assertFalse($flags[0]);
+        $this->assertTrue($flags[1]);
+        $this->assertTrue($flags[2]);
+        $this->assertFalse($flags[3]);
+
+        // Cleared (nothing selected): no planet is ringed.
+        set_config('ringplanets', '', 'format_mnemo');
+        $flags = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'))['planetrings'];
+        $this->assertSame([], array_filter($flags));
+    }
+
+    /**
+     * The sun/moon assets resolve to {url, kind}: a .glb is a model, an image is
+     * an image, and an unset asset is null (the client keeps the procedural disc).
+     */
+    public function test_scene_config_celestial_assets(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // Nothing configured: both null.
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertNull($config['sunasset']);
+        $this->assertNull($config['moonasset']);
+
+        // A .glb sun URL is a model; an image moon URL is an image.
+        set_config('sunasseturl', 'https://cdn.example/sun.glb', 'format_mnemo');
+        set_config('moonasseturl', 'https://cdn.example/moon.png', 'format_mnemo');
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame('https://cdn.example/sun.glb', $config['sunasset']['url']);
+        $this->assertSame('model', $config['sunasset']['kind']);
+        $this->assertSame('https://cdn.example/moon.png', $config['moonasset']['url']);
+        $this->assertSame('image', $config['moonasset']['kind']);
+    }
+
+    /**
      * canedit is true for a user who can edit activities (editing teacher) and
      * false for a student, gating the in-view editor.
      */

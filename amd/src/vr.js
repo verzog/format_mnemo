@@ -333,6 +333,15 @@ define('format_mnemo/vr', [], function() {
         // procedural band.
         this.planetRings = config.planetrings || [];
         this.ringTexture = assets.ringTexture || null;
+        // Optional sun/moon assets. Each is {url, kind} where kind is 'model'
+        // (a .glb placed in the sky) or 'image' (skins the glowing disc), or
+        // null to keep the procedural disc. Shown in every environment. Image
+        // assets are pre-loaded into sun/moonTexture; models load lazily when
+        // the matching body is added (see addCelestialBody).
+        this.sunAsset = config.sunasset || null;
+        this.moonAsset = config.moonasset || null;
+        this.sunTexture = assets.sunTexture || null;
+        this.moonTexture = assets.moonTexture || null;
         // Tiling scales (world units per tile) and the size of the ground patch
         // laid around each building. Admin-configurable.
         this.roadScale = config.roadtexturescale > 0 ? config.roadtexturescale : 8;
@@ -687,8 +696,9 @@ define('format_mnemo/vr', [], function() {
         var dir = opts.dir || day.sunDir;
         var distance = opts.distance || 480;
         var scale = opts.scale || 1;
+        var isday = day.day > 0.12;
         var body;
-        if (day.day > 0.12) {
+        if (isday) {
             // Daytime: the sun, warming toward orange near sunrise/sunset.
             var sunColour = new THREE.Color(0xfff2d8).lerp(new THREE.Color(0xff9550), day.warm);
             body = {
@@ -701,6 +711,16 @@ define('format_mnemo/vr', [], function() {
                 dir: dir, colour: new THREE.Color(0xcdd8ff), size: 46 * scale,
                 opacity: opts.opacity || 0.9, core: 0.55, maria: true, distance: distance
             };
+        }
+        // A custom asset for the active body: a model replaces the disc entirely,
+        // an image skins it. Anything absent keeps the procedural disc.
+        var asset = isday ? this.sunAsset : this.moonAsset;
+        if (asset && asset.kind === 'model' && asset.url) {
+            this.buildCelestialModel(body, asset.url);
+            return;
+        }
+        if (asset && asset.kind === 'image') {
+            body.texture = isday ? this.sunTexture : this.moonTexture;
         }
         this.buildCelestialBodies([body]);
     };
@@ -758,10 +778,21 @@ define('format_mnemo/vr', [], function() {
         var made = [];
         for (var i = 0; i < bodies.length; i++) {
             var b = bodies[i];
-            var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-                map: this.celestialDiscTexture(b.colour, {core: b.core, maria: b.maria}),
+            // A custom image (b.texture) skins the disc; otherwise paint the
+            // procedural sun/moon glow. A requested image that failed to load is
+            // null, so the procedural disc is used as the fallback.
+            var map = b.texture || this.celestialDiscTexture(b.colour, {core: b.core, maria: b.maria});
+            var matopts = {
+                map: map,
                 transparent: true, depthWrite: false, fog: false, opacity: b.opacity
-            }));
+            };
+            if (b.texture) {
+                // A custom image may be opaque or rectangular. Mask it to a soft
+                // disc (via a radial alpha map) so it reads as the sun/moon and
+                // not a square billboard with visible corners.
+                matopts.alphaMap = this.discMaskTexture();
+            }
+            var sprite = new THREE.Sprite(new THREE.SpriteMaterial(matopts));
             sprite.scale.set(b.size, b.size, 1);
             var distance = b.distance || 480;
             sprite.position.copy(b.dir).multiplyScalar(distance);
@@ -772,6 +803,114 @@ define('format_mnemo/vr', [], function() {
             made.push(sprite);
         }
         return made;
+    };
+
+    /**
+     * Place a custom 3D model (a .glb) as the sun or moon: load it, scale it to
+     * roughly the disc's on-sky footprint, and hang it at the body's fixed
+     * direction and distance so updateCelestials keeps it at "infinity" like a
+     * disc. A holder group is registered immediately, carrying the procedural
+     * disc as a placeholder so the sky is never empty while the model loads (or
+     * if the request hangs); the disc is swapped out only once the model is in,
+     * and kept if the load fails.
+     *
+     * @param {Object} b The body descriptor {dir, colour, size, core, maria,
+     *     opacity, distance}.
+     * @param {String} url The model URL.
+     */
+    Cyberspace.prototype.buildCelestialModel = function(b, url) {
+        var THREE = this.THREE;
+        var self = this;
+        var distance = b.distance || 480;
+        var holder = new THREE.Group();
+        holder.position.copy(b.dir).multiplyScalar(distance);
+        this.scene.add(holder);
+        this.celestials.push({sprite: holder, dir: b.dir.clone(), distance: distance});
+        // Show the procedural disc straight away so the sun or moon is present
+        // from the first frame; a slow or never-settling model load then never
+        // leaves the sky empty. Replaced by the model on success, kept on error.
+        var placeholder = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: this.celestialDiscTexture(b.colour, {core: b.core, maria: b.maria}),
+            transparent: true, depthWrite: false, fog: false, opacity: b.opacity
+        }));
+        placeholder.scale.set(b.size, b.size, 1);
+        holder.add(placeholder);
+        this.loadModel(url).then(function(tpl) {
+            var model = tpl.clone(true);
+            // Scale the model so its largest dimension matches the disc's
+            // visual footprint, then recentre it on the holder origin.
+            var box = new THREE.Box3().setFromObject(model);
+            var size = box.getSize(new THREE.Vector3());
+            var maxdim = Math.max(size.x, size.y, size.z) || 1;
+            var factor = (b.size * 1.4) / maxdim;
+            model.scale.setScalar(factor);
+            var centre = box.getCenter(new THREE.Vector3()).multiplyScalar(factor);
+            model.position.sub(centre);
+            self.dressCelestialModel(model);
+            holder.remove(placeholder);
+            holder.add(model);
+            return holder;
+        }).catch(function() {
+            // The model failed to load: the placeholder disc already in the
+            // holder stays as the visible sun/moon.
+        });
+    };
+
+    /**
+     * A soft radial alpha-mask texture (opaque white centre fading to black at
+     * the rim), used as a sprite alpha map so a custom, possibly rectangular or
+     * opaque, sun/moon image reads as a round disc rather than a square.
+     *
+     * @return {Object} A Three.CanvasTexture (greyscale, no colour space).
+     */
+    Cyberspace.prototype.discMaskTexture = function() {
+        var THREE = this.THREE;
+        var ctx = this.newCanvasCtx(128);
+        var rg = ctx.createRadialGradient(64, 64, 4, 64, 64, 64);
+        rg.addColorStop(0, 'rgba(255,255,255,1)');
+        rg.addColorStop(0.72, 'rgba(255,255,255,1)');
+        rg.addColorStop(1, 'rgba(0,0,0,1)');
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(ctx.canvas);
+    };
+
+    /**
+     * Make a celestial model read as a self-luminous body: force its materials
+     * to glow (from their own colour/texture) so the sun or moon shows brightly
+     * against the sky regardless of where the scene lights fall, and drop fog so
+     * it stays crisp at its far distance.
+     *
+     * @param {Object} model The loaded model group.
+     */
+    Cyberspace.prototype.dressCelestialModel = function(model) {
+        model.traverse(function(o) {
+            if (!o.isMesh || !o.material) {
+                return;
+            }
+            var mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (var i = 0; i < mats.length; i++) {
+                var m = mats[i];
+                if (m.emissive) {
+                    if (!m.emissiveMap && m.map) {
+                        m.emissiveMap = m.map;
+                    }
+                    if (m.emissive.getHex && m.emissive.getHex() === 0x000000) {
+                        // Glow in the material's own colour (so a red or orange
+                        // body keeps its hue); fall back to white only when the
+                        // material has neither a base colour nor a texture map.
+                        if (m.map || (m.color && m.color.getHex)) {
+                            m.emissive.copy(m.color || {r: 1, g: 1, b: 1});
+                        } else {
+                            m.emissive.setHex(0xffffff);
+                        }
+                    }
+                    m.emissiveIntensity = Math.max(m.emissiveIntensity || 0, 0.9);
+                }
+                m.fog = false;
+                m.needsUpdate = true;
+            }
+        });
     };
 
     /**
@@ -1017,12 +1156,11 @@ define('format_mnemo/vr', [], function() {
                 y: s.y,
                 z: -s.dist * Math.cos(az)
             };
-            // A planet's built-in slot ring flag always applies, so the Void
-            // shows rings by default whether or not planet textures are
-            // uploaded. An uploaded planet can additionally be ringed by naming
-            // its file with "ring" (planetRings, from the server). Either way a
-            // ringed planet is skinned by the uploaded ring image when present.
-            var ringed = s.ring || !!this.planetRings[i];
+            // Whether this planet is ringed is decided solely by the admin's
+            // "Ringed planets" selection (planetRings, from the server), so
+            // rings appear exactly where intended. A ringed planet is skinned by
+            // the uploaded ring image when present.
+            var ringed = !!this.planetRings[i];
             this.makePlanet(s.r, at, s.band, ringed, texs[i] || null);
         }
     };
@@ -12325,6 +12463,49 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Whether the clock hour lands in daylight, so the sun (not the moon) is the
+     * body the scene will show. Mirrors computeDaylight()'s day fraction and the
+     * addCelestialBody() threshold, but standalone so the asset loader can pick
+     * the one celestial image worth fetching. Defaults to day when the hour is
+     * unknown.
+     *
+     * @param {Number} hour Hour of day, 0-24 (minutes as a fraction).
+     * @return {Boolean} True when the sun is the active body.
+     */
+    function celestialIsDay(hour) {
+        if (typeof hour !== 'number' || isNaN(hour)) {
+            return true;
+        }
+        var ang = ((hour - 6) / 12) * Math.PI;
+        var elev = (hour >= 6 && hour <= 18) ? Math.sin(ang) : -0.25;
+        var day = Math.max(0, Math.min(1, elev * 1.25));
+        return day > 0.12;
+    }
+
+    /**
+     * Queue a load for the clock-active celestial body's image, if it is an
+     * image asset with a URL. The clock picks exactly one body (sun by day, moon
+     * by night) when the scene is built and never switches it, so fetching the
+     * other would waste bandwidth and loader time on something never shown.
+     *
+     * @param {Object} config The scene configuration (hour, sunasset, moonasset).
+     * @param {Object} THREE The Three.js module namespace.
+     * @param {Object} assets The assets accumulator (sunTexture/moonTexture set).
+     * @param {Array} jobs The pending-load promise list to push onto.
+     */
+    function queueCelestialImage(config, THREE, assets, jobs) {
+        var isday = celestialIsDay(config.hour);
+        var body = isday ? config.sunasset : config.moonasset;
+        if (!body || body.kind !== 'image' || !body.url) {
+            return;
+        }
+        var key = isday ? 'sunTexture' : 'moonTexture';
+        jobs.push(loadBoundedTexture(body.url, THREE, false, function(tex) {
+            assets[key] = tex;
+        }));
+    }
+
+    /**
      * Load the optional site-wide scene assets before the scene is built, so it
      * renders with them from the first frame: a neon webfont and sign frame
      * texture, and tiled road and ground textures. All are best-effort — a
@@ -12341,7 +12522,8 @@ define('format_mnemo/vr', [], function() {
         var assets = {
             signFontFamily: null, signTexture: null,
             roadTexture: null, groundTexture: null, sidewalkTexture: null,
-            spaceTexture: null, planetTextures: [], ringTexture: null
+            spaceTexture: null, planetTextures: [], ringTexture: null,
+            sunTexture: null, moonTexture: null
         };
         var jobs = [];
 
@@ -12387,6 +12569,11 @@ define('format_mnemo/vr', [], function() {
                 assets.sidewalkTexture = tex;
             }));
         }
+
+        // Sun/moon image assets (skin the glowing disc): only the clock-active
+        // body's image is fetched (see queueCelestialImage). Model assets (.glb)
+        // are not loaded here; they load lazily when the body is built.
+        queueCelestialImage(config, THREE, assets, jobs);
 
         // The Void's optional sky and planet maps (equirectangular). Only loaded
         // for the void environment, since nothing else uses them. Planet maps

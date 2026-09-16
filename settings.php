@@ -272,6 +272,47 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
+    // Sun and moon. In every environment one celestial body follows the site
+    // clock — the sun by day, the moon by night. Each can be given its own
+    // asset: a flat image that skins the glowing disc, or a 3D .glb model placed
+    // in the sky. A model wins over an image, and either wins over the built-in
+    // procedural disc. The URL, if set, takes precedence over the upload.
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/celestialheading',
+        get_string('setting_celestialheading', 'format_mnemo'),
+        get_string('setting_celestialheading_desc', 'format_mnemo')
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/sunasseturl',
+        get_string('setting_sunasseturl', 'format_mnemo'),
+        get_string('setting_sunasseturl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/sunasset',
+        get_string('setting_sunasset', 'format_mnemo'),
+        get_string('setting_sunasset_desc', 'format_mnemo'),
+        'sunasset',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/moonasseturl',
+        get_string('setting_moonasseturl', 'format_mnemo'),
+        get_string('setting_moonasseturl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/moonasset',
+        get_string('setting_moonasset', 'format_mnemo'),
+        get_string('setting_moonasset_desc', 'format_mnemo'),
+        'moonasset',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
+    ));
+
     // Void backdrop: an equirectangular (2:1 lat-long) sky/starfield image that
     // replaces the procedural stars in the Void environment. Left blank, the
     // Void keeps its generated starfield and nebulae. URL, or upload below.
@@ -305,8 +346,8 @@ if ($ADMIN->fulltree) {
 
     // Ring image for the Void's ringed planets: a radial strip read from the
     // inner edge (left) to the outer edge (right) and wrapped once around the
-    // ring, so it reads as concentric bands. A planet is ringed when its planet
-    // texture's filename contains "ring". Left blank, rings use a flat band.
+    // ring, so it reads as concentric bands. Which planets are ringed is set by
+    // the "Ringed planets" setting below. Left blank, rings use a flat band.
     // URL, or upload below.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/ringtextureurl',
@@ -322,6 +363,23 @@ if ($ADMIN->fulltree) {
         'ringtexture',
         0,
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Which of the Void's planets wear a ring. The planets are numbered in the
+    // order their surface maps are uploaded (Planet 1 is the first, and so on);
+    // with no maps uploaded the Void shows three procedural planets. Only the
+    // planets selected here are ringed, so rings appear exactly where intended.
+    // Defaults to the three planets that were ringed by default before.
+    $ringchoices = [];
+    for ($i = 1; $i <= 9; $i++) {
+        $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
+    }
+    $settings->add(new admin_setting_configmultiselect(
+        'format_mnemo/ringplanets',
+        get_string('setting_ringplanets', 'format_mnemo'),
+        get_string('setting_ringplanets_desc', 'format_mnemo'),
+        [1, 5, 9],
+        $ringchoices
     ));
 
     // Texture tiling scale (world units per tile) for the road, ground and

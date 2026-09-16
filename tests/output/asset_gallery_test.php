@@ -90,22 +90,62 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
-     * Each uploaded planet map becomes a card, and one whose filename contains
-     * "ring" is flagged as ringed.
+     * Each uploaded planet map becomes a card, and its ring flag follows the
+     * authoritative "Ringed planets" admin setting (planets numbered in upload
+     * order), matching the scene — not the file name.
      */
     public function test_planet_maps_and_ring_flag(): void {
         $this->resetAfterTest();
 
         $this->make_file('planettextures', 'aaa-plain.png');
-        $this->make_file('planettextures', 'saturn-ring.png');
+        $this->make_file('planettextures', 'bbb-second.png');
+        $this->make_file('planettextures', 'ccc-third.png');
 
+        // Select planets 1 and 3 as ringed; planet 2 is not.
+        set_config('ringplanets', '1,3', 'format_mnemo');
         $planets = array_values(array_filter(asset_gallery::textures(), function ($t) {
             return $t['key'] === 'planettexture';
         }));
-        $this->assertCount(2, $planets);
-        // Ordered by filename: the plain one first, the ringed one second.
-        $this->assertFalse($planets[0]['ringed']);
-        $this->assertTrue($planets[1]['ringed']);
+        $this->assertCount(3, $planets);
+        // Ordered by filename, so planet 1, 2, 3 in turn.
+        $this->assertTrue($planets[0]['ringed']);
+        $this->assertFalse($planets[1]['ringed']);
+        $this->assertTrue($planets[2]['ringed']);
+
+        // Clearing the setting rings no planet.
+        set_config('ringplanets', '', 'format_mnemo');
+        $planets = array_values(array_filter(asset_gallery::textures(), function ($t) {
+            return $t['key'] === 'planettexture';
+        }));
+        $this->assertSame([], array_values(array_filter(array_column($planets, 'ringed'))));
+    }
+
+    /**
+     * A configured sun/moon asset appears in the asset viewer: an image under
+     * the textures, a .glb under the models.
+     */
+    public function test_celestial_assets_in_viewer(): void {
+        $this->resetAfterTest();
+
+        // A sun image shows as a texture card.
+        set_config('sunasseturl', 'https://cdn.example.org/sun.png', 'format_mnemo');
+        $sun = $this->tex(asset_gallery::textures(), 'sun');
+        $this->assertNotNull($sun);
+        $this->assertSame('url', $sun['source']);
+        $this->assertSame('https://cdn.example.org/sun.png', $sun['url']);
+
+        // A moon .glb shows as a model card, not a texture.
+        set_config('moonasseturl', 'https://cdn.example.org/moon.glb', 'format_mnemo');
+        $this->assertNull($this->tex(asset_gallery::textures(), 'moon'));
+        $models = asset_gallery::models();
+        $moon = null;
+        foreach ($models as $model) {
+            if ($model['key'] === 'moon') {
+                $moon = $model;
+            }
+        }
+        $this->assertNotNull($moon);
+        $this->assertSame('https://cdn.example.org/moon.glb', $moon['url']);
     }
 
     /**
