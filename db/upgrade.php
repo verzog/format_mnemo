@@ -174,5 +174,33 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026091600, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026091700) {
+        // Each environment's look (palette, street lighting, mouse-look
+        // direction, arcade game) is now configured site-wide, one section per
+        // environment, rather than per course. Seed every environment's new site
+        // settings from the former site-wide single defaults, so a site that had
+        // customised them keeps its look; only unset keys are written, so a
+        // re-run never clobbers an admin's later choice.
+        $palette = get_config('format_mnemo', 'defaultpalette') ?: 'cyan';
+        $lighting = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
+        $invert = get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0;
+        $seed = [
+            'palette' => $palette,
+            'lighting' => $lighting,
+            'invertlook' => $invert,
+            'game' => 0,
+        ];
+        foreach (['cyberspace', 'grid', 'void'] as $env) {
+            foreach ($seed as $setting => $value) {
+                $key = $env . '_' . $setting;
+                if (get_config('format_mnemo', $key) === false) {
+                    set_config($key, $value, 'format_mnemo');
+                }
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026091700, 'format', 'mnemo');
+    }
+
     return true;
 }

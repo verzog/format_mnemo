@@ -50,34 +50,66 @@ if ($ADMIN->fulltree) {
         ]
     ));
 
-    // Default neon palette for newly created courses.
-    $settings->add(new admin_setting_configselect(
-        'format_mnemo/defaultpalette',
-        get_string('setting_defaultpalette', 'format_mnemo'),
-        get_string('setting_defaultpalette_desc', 'format_mnemo'),
-        'cyan',
-        [
-            'cyan' => get_string('palette_cyan', 'format_mnemo'),
-            'amber' => get_string('palette_amber', 'format_mnemo'),
-            'magenta' => get_string('palette_magenta', 'format_mnemo'),
-            'green' => get_string('palette_green', 'format_mnemo'),
-        ]
-    ));
-
-    // Default street-lighting density for courses that inherit it (each course
-    // can override this in its settings).
-    $settings->add(new admin_setting_configselect(
-        'format_mnemo/defaultlighting',
-        get_string('setting_defaultlighting', 'format_mnemo'),
-        get_string('setting_defaultlighting_desc', 'format_mnemo'),
-        'normal',
-        [
-            'off' => get_string('lighting_off', 'format_mnemo'),
-            'sparse' => get_string('lighting_sparse', 'format_mnemo'),
-            'normal' => get_string('lighting_normal', 'format_mnemo'),
-            'dense' => get_string('lighting_dense', 'format_mnemo'),
-        ]
-    ));
+    // Per-environment look and feel. Each of the three worlds carries its own
+    // self-contained palette, street lighting, mouse-look direction and arcade
+    // toggle, configured site-wide here under a heading of its own. A course
+    // simply picks which world is active (the "Default environment" above seeds
+    // new courses; a teacher switches it in the course settings), and the scene
+    // then reads that environment's settings from this page.
+    $paletteoptions = [
+        'cyan' => get_string('palette_cyan', 'format_mnemo'),
+        'amber' => get_string('palette_amber', 'format_mnemo'),
+        'magenta' => get_string('palette_magenta', 'format_mnemo'),
+        'green' => get_string('palette_green', 'format_mnemo'),
+    ];
+    $lightingoptions = [
+        'off' => get_string('lighting_off', 'format_mnemo'),
+        'sparse' => get_string('lighting_sparse', 'format_mnemo'),
+        'normal' => get_string('lighting_normal', 'format_mnemo'),
+        'dense' => get_string('lighting_dense', 'format_mnemo'),
+    ];
+    // Seed each environment's default from the former site-wide single defaults,
+    // so a site that had customised them keeps its look after the split (the
+    // upgrade step persists these too; this covers the display before it runs).
+    $seedpalette = get_config('format_mnemo', 'defaultpalette') ?: 'cyan';
+    $seedlighting = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
+    $seedinvert = get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0;
+    // The three worlds, kept in step with \format_mnemo::ENVIRONMENTS. Inlined
+    // rather than referencing the class, which is not loaded while the admin
+    // settings tree is built.
+    foreach (['cyberspace', 'grid', 'void'] as $env) {
+        $settings->add(new admin_setting_heading(
+            'format_mnemo/envheading_' . $env,
+            get_string('environment_' . $env, 'format_mnemo'),
+            get_string('setting_envheading_desc', 'format_mnemo')
+        ));
+        $settings->add(new admin_setting_configselect(
+            'format_mnemo/' . $env . '_palette',
+            get_string('palette', 'format_mnemo'),
+            get_string('palette_help', 'format_mnemo'),
+            $seedpalette,
+            $paletteoptions
+        ));
+        $settings->add(new admin_setting_configselect(
+            'format_mnemo/' . $env . '_lighting',
+            get_string('lighting', 'format_mnemo'),
+            get_string('lighting_help', 'format_mnemo'),
+            $seedlighting,
+            $lightingoptions
+        ));
+        $settings->add(new admin_setting_configcheckbox(
+            'format_mnemo/' . $env . '_invertlook',
+            get_string('invertlook', 'format_mnemo'),
+            get_string('invertlook_help', 'format_mnemo'),
+            $seedinvert
+        ));
+        $settings->add(new admin_setting_configcheckbox(
+            'format_mnemo/' . $env . '_game',
+            get_string('game', 'format_mnemo'),
+            get_string('game_help', 'format_mnemo'),
+            0
+        ));
+    }
 
     // Base URL of an external glTF (.glb) prop asset pack. Left blank, the
     // plugin loads the original props it bundles (models/). Point this at a
@@ -325,15 +357,6 @@ if ($ADMIN->fulltree) {
         get_string('setting_groundpatchsize_desc', 'format_mnemo'),
         '14',
         PARAM_INT
-    ));
-
-    // Default drag-to-look direction for newly created courses. Teachers can
-    // override this per course, so the direction never needs a code change.
-    $settings->add(new admin_setting_configcheckbox(
-        'format_mnemo/defaultinvertlook',
-        get_string('setting_defaultinvertlook', 'format_mnemo'),
-        get_string('setting_defaultinvertlook_desc', 'format_mnemo'),
-        0
     ));
 
     // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for

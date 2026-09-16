@@ -658,35 +658,24 @@ class scene implements renderable, templatable {
      * @return array
      */
     public function get_scene_config(renderer_base $output): array {
-        global $DB;
         $course = $this->format->get_course();
         $options = $this->format->get_format_options();
         $nodes = $this->build_nodes();
 
-        // The active environment and its own self-contained settings (each world
-        // stores its palette/lighting/invert/game under "mnemo_<env>_<setting>").
+        // The active environment (chosen per course) and its own self-contained
+        // look, which is configured site-wide, one section per environment, and
+        // stored under the config keys "<env>_<setting>" (e.g. "void_palette").
         $env = $options['mnemoenvironment'] ?? 'cyberspace';
         if (!in_array($env, \format_mnemo::ENVIRONMENTS, true)) {
             $env = 'cyberspace';
         }
-        // Read the raw stored option rows so a legacy single value (mnemopalette
-        // etc.) survives: it appears when a pre-split course backup is restored
-        // after the site upgraded, and get_format_options() drops keys no longer
-        // declared. Resolve per-environment key first, then the legacy key for
-        // the active world, then the default.
-        $raw = $DB->get_records_menu('course_format_options', [
-            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0,
-        ], '', 'name, value');
-        $envopt = function (string $setting, $default) use ($raw, $env) {
-            $key = 'mnemo_' . $env . '_' . $setting;
-            if (array_key_exists($key, $raw)) {
-                return $raw[$key];
-            }
-            // The old single key, e.g. mnemopalette or mnemoinvertlook.
-            $legacy = 'mnemo' . $setting;
-            return array_key_exists($legacy, $raw) ? $raw[$legacy] : $default;
+        $envconfig = function (string $setting, $default) use ($env) {
+            $value = get_config('format_mnemo', $env . '_' . $setting);
+            // An unset (false) or blank site setting takes the default; a stored
+            // "0" (an unticked checkbox) is a real value and is kept.
+            return ($value === false || $value === '') ? $default : $value;
         };
-        $envlighting = $envopt('lighting', 'inherit');
+        $envlighting = $envconfig('lighting', 'normal');
 
         // Default to the Three.js copy bundled with the plugin; an admin can
         // override the URL (e.g. a CDN or a shared local copy) in settings.
@@ -743,8 +732,8 @@ class scene implements renderable, templatable {
             // Empty when a custom threeurl is set (see above).
             'addonsbaseurl' => $addonsbaseurl,
             'environment' => $env,
-            'palette' => $envopt('palette', 'cyan'),
-            'invertlook' => !empty($envopt('invertlook', 0)),
+            'palette' => $envconfig('palette', 'cyan'),
+            'invertlook' => !empty($envconfig('invertlook', 0)),
             // Whether the opt-in webcam gesture-navigation control is offered to
             // flat-screen viewers. Site-wide admin setting, on unless explicitly
             // turned off (so an unset value defaults to available).
@@ -766,11 +755,11 @@ class scene implements renderable, templatable {
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/face_landmarker.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
-            'game' => !empty($envopt('game', 0)),
+            'game' => !empty($envconfig('game', 0)),
             // Street-lamp layout: the resolved spacing (world units between
             // lamps, 0 = no auto lamps) and whether to light the side-street
-            // corners. Resolved from the per-course option, falling back to the
-            // site-wide default when the course inherits.
+            // corners, from the active environment's site-wide street-lighting
+            // setting.
             'lightingspacing' => $this->lighting_spacing($envlighting),
             'lightingcorners' => $this->lighting_spacing($envlighting) > 0,
             // Hour of day (0-24 float) in the site's timezone, so the client can
@@ -927,16 +916,13 @@ class scene implements renderable, templatable {
 
     /**
      * Resolve a street-lighting preset to the world-unit spacing between street
-     * lamps (0 means no automatic lamps). 'inherit' (the per-course default)
-     * falls back to the site-wide default, itself defaulting to 'normal'.
+     * lamps (0 means no automatic lamps). An unknown or blank value falls back
+     * to the 'normal' spacing.
      *
-     * @param string $value The per-course lighting option.
+     * @param string $value The active environment's street-lighting setting.
      * @return int Spacing in world units, or 0 for off.
      */
     protected function lighting_spacing(string $value): int {
-        if ($value === 'inherit' || $value === '') {
-            $value = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
-        }
         $presets = ['off' => 0, 'sparse' => 32, 'normal' => 20, 'dense' => 12];
         return $presets[$value] ?? $presets['normal'];
     }
