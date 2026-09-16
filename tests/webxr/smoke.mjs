@@ -3261,20 +3261,23 @@ const scenarios = [
                     sunAsset: asset, moonAsset: null, sunTexture: tex, moonTexture: null,
                     newCanvasCtx: CS.prototype.newCanvasCtx,
                     celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                    discMaskTexture: CS.prototype.discMaskTexture,
                     buildCelestialBodies: CS.prototype.buildCelestialBodies,
                     addCelestialBody: CS.prototype.addCelestialBody
                 };
                 self.addCelestialBody(day, {});
                 const sp = added.find((o) => o.isSprite);
-                return sp ? sp.material.map : null;
+                return sp ? sp.material : null;
             };
             const img = new THREE.Texture();
-            // With an image asset the disc wears that exact texture; with none it
-            // falls back to a freshly painted procedural disc.
-            const skinned = mk({kind: 'image', url: 'x'}, img) === img;
+            // With an image asset the disc wears that exact texture and is masked
+            // to a round disc (alphaMap), so an opaque image is not a square; with
+            // no asset it falls back to a freshly painted procedural disc.
+            const custom = mk({kind: 'image', url: 'x'}, img);
+            const skinned = custom.map === img && !!custom.alphaMap;
             const procedural = mk(null, null);
-            const pass = skinned && !!procedural && procedural !== img;
-            return {pass, detail: `skinned=${skinned} procedural=${!!procedural}`};
+            const pass = skinned && !!procedural.map && procedural.map !== img && !procedural.alphaMap;
+            return {pass, detail: `skinned=${skinned} masked=${!!custom.alphaMap}`};
         }
     },
     {

@@ -62,8 +62,25 @@ class asset_gallery {
         foreach ($defs as $def) {
             $out[] = self::single_texture($def['key'], $def['urlsetting'], $def['filearea']);
         }
-        // The planet maps are a multi-file area: one card per uploaded map.
+        // Sun and moon assets that are images (a .glb is a model, shown under
+        // models() instead). Each skins the celestial disc in every world.
+        foreach (['sun', 'moon'] as $body) {
+            $cel = self::celestial($body);
+            if ($cel !== null && $cel['kind'] === 'image') {
+                $out[] = [
+                    'key' => $body,
+                    'label' => get_string('preview_tex_' . $body, 'format_mnemo'),
+                    'usagekey' => 'preview_use_' . $body,
+                    'url' => $cel['url'],
+                    'source' => $cel['source'],
+                ];
+            }
+        }
+        // The planet maps are a multi-file area: one card per uploaded map. Which
+        // planet is ringed follows the authoritative "Ringed planets" admin
+        // setting (planets numbered in upload order), matching the scene.
         // get_area_files() keys by pathname hash, so count with our own index.
+        $ringset = self::ringed_planets();
         $n = 0;
         foreach (self::stored_files('planettextures') as $file) {
             $n++;
@@ -74,10 +91,70 @@ class asset_gallery {
                 'url' => self::file_url('planettextures', $file),
                 'source' => 'uploaded',
                 'filename' => $file->get_filename(),
-                'ringed' => (bool)preg_match('/(?:^|[^a-z])ring(?:[^a-z]|$)/i', $file->get_filename()),
+                'ringed' => isset($ringset[$n]),
             ];
         }
         return $out;
+    }
+
+    /**
+     * The set of Void planet numbers (1-based, upload order) that wear a ring,
+     * from the "ringplanets" admin setting, defaulting to the three that were
+     * ringed by default before it existed. Returned as a lookup set (planet
+     * number => true), matching {@see scene::ring_flags()}.
+     *
+     * @return array<int, bool> Map of planet number => true.
+     */
+    protected static function ringed_planets(): array {
+        $raw = get_config('format_mnemo', 'ringplanets');
+        if ($raw === false) {
+            $selected = [1, 5, 9];
+        } else {
+            $selected = [];
+            foreach (explode(',', (string)$raw) as $piece) {
+                $piece = trim($piece);
+                if ($piece !== '' && ctype_digit($piece)) {
+                    $selected[] = (int)$piece;
+                }
+            }
+        }
+        return array_flip($selected);
+    }
+
+    /**
+     * Resolve a celestial (sun or moon) asset to {url, kind, source}, or null
+     * when none is configured. A URL setting wins over an uploaded file; the
+     * kind is 'model' for a glTF binary (.glb/.gltf) and 'image' otherwise.
+     *
+     * @param string $body 'sun' or 'moon'.
+     * @return array{url: string, kind: string, source: string}|null
+     */
+    protected static function celestial(string $body): ?array {
+        $url = get_config('format_mnemo', $body . 'asseturl');
+        if (!empty($url)) {
+            return ['url' => $url, 'kind' => self::asset_kind($url), 'source' => 'url'];
+        }
+        $files = self::stored_files($body . 'asset');
+        if (!empty($files)) {
+            $file = reset($files);
+            return [
+                'url' => self::file_url($body . 'asset', $file),
+                'kind' => self::asset_kind($file->get_filename()),
+                'source' => 'uploaded',
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * Classify a celestial asset by extension: a glTF binary (.glb/.gltf) is a
+     * 3D 'model', anything else is a flat 'image'.
+     *
+     * @param string $nameorurl A file name or URL.
+     * @return string 'model' or 'image'.
+     */
+    protected static function asset_kind(string $nameorurl): string {
+        return preg_match('/\.(glb|gltf)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
     }
 
     /**
@@ -171,6 +248,21 @@ class asset_gallery {
                 'copyright' => $meta['copyright'],
                 'generator' => $meta['generator'],
             ];
+        }
+        // Sun and moon assets that are 3D models (a plain image is a texture,
+        // shown under textures() instead). They get a live 3D preview here.
+        foreach (['sun', 'moon'] as $body) {
+            $cel = self::celestial($body);
+            if ($cel !== null && $cel['kind'] === 'model') {
+                $out[] = [
+                    'key' => $body,
+                    'label' => get_string('preview_tex_' . $body, 'format_mnemo'),
+                    'url' => $cel['url'],
+                    'source' => $cel['source'],
+                    'copyright' => null,
+                    'generator' => null,
+                ];
+            }
         }
         return $out;
     }
