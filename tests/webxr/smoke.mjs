@@ -3133,13 +3133,13 @@ const scenarios = [
         }
     },
     {
-        name: 'space: built-in slots are ringed by default; a filename flag adds one',
+        name: 'space: only the planets the server flags (admin choice) are ringed',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const mk = (rings) => {
                 const added = [];
-                // Two textures -> slots 0 (ring by default) and 1 (no default ring).
+                // Two textures -> planet slots 0 and 1; rings follow the flags.
                 const self = {THREE, scene: {add: (o) => added.push(o)},
                     planetTextures: [new THREE.Texture(), new THREE.Texture()],
                     planetField: null, planets: [], planetRings: rings, ringTexture: null,
@@ -3155,10 +3155,10 @@ const scenarios = [
                 });
                 return rings2;
             };
-            // No flags -> the default-ringed slot 0 still rings (one); flagging the
-            // non-default slot 1 adds a second ring.
-            const pass = mk([false, false]) === 1 && mk([false, true]) === 2;
-            return {pass, detail: `none=${mk([false, false])} flagged=${mk([false, true])}`};
+            // No flags -> no rings; the flags are authoritative, so each flagged
+            // planet gets exactly one ring and nothing else does.
+            const pass = mk([false, false]) === 0 && mk([true, false]) === 1 && mk([true, true]) === 2;
+            return {pass, detail: `none=${mk([false, false])} one=${mk([true, false])} both=${mk([true, true])}`};
         }
     },
     {
@@ -3246,6 +3246,35 @@ const scenarios = [
             const pass = day.n === 1 && night.n === 1 && day.cel === 1 && night.cel === 1 &&
                 day.size > 60 && Math.abs(night.size - 46) < 1;
             return {pass, detail: `day{n:${day.n},size:${day.size.toFixed(0)}} night{n:${night.n},size:${night.size.toFixed(0)}}`};
+        }
+    },
+    {
+        name: 'sky: a custom sun image skins the disc; without one the procedural disc is used',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const day = CS.prototype.computeDaylight.call({THREE, palette: {haze: 0x99aabb}}, 12);
+            const mk = (asset, tex) => {
+                const added = [];
+                const self = {
+                    THREE, day, celestials: [], scene: {add: (o) => added.push(o)},
+                    sunAsset: asset, moonAsset: null, sunTexture: tex, moonTexture: null,
+                    newCanvasCtx: CS.prototype.newCanvasCtx,
+                    celestialDiscTexture: CS.prototype.celestialDiscTexture,
+                    buildCelestialBodies: CS.prototype.buildCelestialBodies,
+                    addCelestialBody: CS.prototype.addCelestialBody
+                };
+                self.addCelestialBody(day, {});
+                const sp = added.find((o) => o.isSprite);
+                return sp ? sp.material.map : null;
+            };
+            const img = new THREE.Texture();
+            // With an image asset the disc wears that exact texture; with none it
+            // falls back to a freshly painted procedural disc.
+            const skinned = mk({kind: 'image', url: 'x'}, img) === img;
+            const procedural = mk(null, null);
+            const pass = skinned && !!procedural && procedural !== img;
+            return {pass, detail: `skinned=${skinned} procedural=${!!procedural}`};
         }
     },
     {

@@ -85,16 +85,19 @@ off).
   streets float among a starfield, drifting nebulae and lit planets under a
   distant star. The whole planet field revolves slowly (one turn an hour) and
   each planet also **turns on its own axis** (about once every two minutes), so
-  a textured world visibly rotates. Some planets are **ringed** by default; an
-  uploaded planet is additionally ringed when its texture filename contains the
-  word *ring* (e.g. `saturn-ring.png`). An optional site-wide **ring image** (a
-  radial strip, inner edge → outer edge) skins those rings as concentric bands,
-  or they fall back to a plain band.
+  a textured world visibly rotates. Which planets are **ringed** is chosen by an
+  administrator (the *Ringed planets* setting), so rings appear exactly where
+  intended. An optional site-wide **ring image** (a radial strip, inner edge →
+  outer edge) skins those rings as concentric bands, or they fall back to a
+  plain band.
 - **Sun, moon and clouds** — a single **sun or moon** hangs in the sky of every
   environment, following the **Moodle site clock**: the sun by day, the moon by
-  night. It stays pinned at a fixed direction and distance from the viewer (so it
-  never clips as you move), and in the **Void** it is small and dim so it never
-  outshines the planets. The daytime city also gets a layer of soft **clouds**
+  night. Each can be given its own look site-wide — a flat **image** that skins
+  the glowing disc, or a 3D **`.glb` model** placed in the sky — or left as the
+  built-in procedural disc. It stays pinned at a fixed direction and distance
+  from the viewer (so it never clips as you move), and in the **Void** it is
+  small and dim so it never outshines the planets. The daytime city also gets a
+  layer of soft **clouds**
   drifting slowly overhead, which fade out at night so the neon skyline stays
   clear.
 - **Road-constrained movement** — on foot (and gliding) the learner is kept on
@@ -343,13 +346,21 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
   environment in your own sky. Supply an **equirectangular (2:1 lat-long)** sky
   or starfield image (URL or upload; the URL wins). **Leave both blank** to keep
   the procedural starfield and nebulae. Only used in the Void.
+- **Sun / Moon image or model URL** and **Upload sun / moon image or model** —
+  give the sky's sun and moon their own look. Each area takes either a flat
+  **image** (skins the glowing disc) or a 3D **`.glb` model** (placed in the sky
+  as that body). A model wins over an image, and either replaces the built-in
+  procedural disc; the URL wins over an upload. **Leave a body blank** to keep
+  its procedural disc. The sun and moon show in every environment.
 - **Upload planet textures** — upload up to **nine** equirectangular (2:1
   lat-long) images to use as the surfaces of the Void's planets; each is applied
   to one planet in filename order (so the Void shows as many planets as you
-  upload, up to nine). Some planets are **ringed** by default; include the word
-  **`ring`** in a file's name (e.g. `saturn-ring.png`) to add a **ring** to that
-  planet as well. **Leave empty** to keep the procedural banded planets. Only
-  used in the Void.
+  upload, up to nine — Planet 1 is the first). **Leave empty** to keep the
+  procedural banded planets. Only used in the Void.
+- **Ringed planets** — choose which of the Void's planets (numbered 1–9 in
+  upload order) wear a ring. Only the planets selected here are ringed, so rings
+  appear exactly where intended. Defaults to the three planets ringed by default
+  before. Only used in the Void.
 - **Ring texture URL** / **Upload ring texture** — skin the ringed planets with
   your own ring image: a **radial strip** read from the inner edge (left) to the
   outer edge (right) and wrapped once around the ring, so it reads as concentric
