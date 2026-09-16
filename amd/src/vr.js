@@ -12483,6 +12483,29 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Queue a load for the clock-active celestial body's image, if it is an
+     * image asset with a URL. The clock picks exactly one body (sun by day, moon
+     * by night) when the scene is built and never switches it, so fetching the
+     * other would waste bandwidth and loader time on something never shown.
+     *
+     * @param {Object} config The scene configuration (hour, sunasset, moonasset).
+     * @param {Object} THREE The Three.js module namespace.
+     * @param {Object} assets The assets accumulator (sunTexture/moonTexture set).
+     * @param {Array} jobs The pending-load promise list to push onto.
+     */
+    function queueCelestialImage(config, THREE, assets, jobs) {
+        var isday = celestialIsDay(config.hour);
+        var body = isday ? config.sunasset : config.moonasset;
+        if (!body || body.kind !== 'image' || !body.url) {
+            return;
+        }
+        var key = isday ? 'sunTexture' : 'moonTexture';
+        jobs.push(loadBoundedTexture(body.url, THREE, false, function(tex) {
+            assets[key] = tex;
+        }));
+    }
+
+    /**
      * Load the optional site-wide scene assets before the scene is built, so it
      * renders with them from the first frame: a neon webfont and sign frame
      * texture, and tiled road and ground textures. All are best-effort — a
@@ -12547,22 +12570,10 @@ define('format_mnemo/vr', [], function() {
             }));
         }
 
-        // Sun/moon image assets (skin the glowing disc). The clock picks exactly
-        // one body when the scene is built and never switches it, so only the
-        // active body's image is fetched — the other would cost bandwidth and
-        // loader time for something never shown. Model assets (.glb) are not
-        // loaded here; they load lazily when the body is built.
-        var isday = celestialIsDay(config.hour);
-        if (isday && config.sunasset && config.sunasset.kind === 'image' && config.sunasset.url) {
-            jobs.push(loadBoundedTexture(config.sunasset.url, THREE, false, function(tex) {
-                assets.sunTexture = tex;
-            }));
-        }
-        if (!isday && config.moonasset && config.moonasset.kind === 'image' && config.moonasset.url) {
-            jobs.push(loadBoundedTexture(config.moonasset.url, THREE, false, function(tex) {
-                assets.moonTexture = tex;
-            }));
-        }
+        // Sun/moon image assets (skin the glowing disc): only the clock-active
+        // body's image is fetched (see queueCelestialImage). Model assets (.glb)
+        // are not loaded here; they load lazily when the body is built.
+        queueCelestialImage(config, THREE, assets, jobs);
 
         // The Void's optional sky and planet maps (equirectangular). Only loaded
         // for the void environment, since nothing else uses them. Planet maps
