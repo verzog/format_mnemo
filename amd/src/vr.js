@@ -831,6 +831,7 @@ define('format_mnemo/vr', [], function() {
             model.position.sub(centre);
             self.dressCelestialModel(model);
             holder.add(model);
+            return holder;
         }).catch(function() {
             // The model failed to load: show the procedural disc in its place.
             var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
