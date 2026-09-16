@@ -339,9 +339,9 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
-    // Streets: shared by the Cyberspace and Grid worlds (both have avenues,
-    // sidewalks and buildings). The Void has no streets, so these are ignored
-    // there.
+    // Streets and traffic: the road, ground and sidewalk textures, their tiling
+    // and the flying-car types. Shared by every world that has streets —
+    // Cyberspace, Grid and the Void, whose streets float in space.
     $settings->add(new admin_setting_heading(
         'format_mnemo/streetsheading',
         get_string('setting_streetsheading', 'format_mnemo'),

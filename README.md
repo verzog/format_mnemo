@@ -285,8 +285,9 @@ Under **Plugins → Course formats → Mnemo (VR cyberspace)**, the settings are
 grouped into sections: **General** (settings shared by every world, plus the
 **Sun and moon** assets), one section per environment — **Cyberspace**, **Grid**
 and **Void** (the Void's section also holds its space, planet and ring assets),
-and **Streets (Cyberspace & Grid)** for the road/ground/sidewalk textures and
-flying-car traffic the two street worlds share.
+and **Streets and traffic** for the road/ground/sidewalk textures and flying-car
+traffic, shared by every world that has streets — Cyberspace, Grid, and the
+Void, whose streets float in space.
 
 - **Three.js module URL** — where the browser loads Three.js from. **Leave blank**
   (the default) to use the copy bundled with the plugin. Set it only to load
