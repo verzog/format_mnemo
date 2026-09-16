@@ -281,7 +281,12 @@ Alternatively install the ZIP via
 
 ## Admin settings
 
-Under **Plugins → Course formats → Mnemo (VR cyberspace)**:
+Under **Plugins → Course formats → Mnemo (VR cyberspace)**, the settings are
+grouped into sections: **General** (settings shared by every world, plus the
+**Sun and moon** assets), one section per environment — **Cyberspace**, **Grid**
+and **Void** (the Void's section also holds its space, planet and ring assets),
+and **Streets (Cyberspace & Grid)** for the road/ground/sidewalk textures and
+flying-car traffic the two street worlds share.
 
 - **Three.js module URL** — where the browser loads Three.js from. **Leave blank**
   (the default) to use the copy bundled with the plugin. Set it only to load

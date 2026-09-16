@@ -25,6 +25,13 @@
 defined('MOODLE_INTERNAL') || die();
 
 if ($ADMIN->fulltree) {
+    // Global settings that apply to every environment.
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/globalheading',
+        get_string('setting_globalheading', 'format_mnemo'),
+        get_string('setting_globalheading_desc', 'format_mnemo')
+    ));
+
     // URL of the Three.js ES module. Left blank, the plugin loads the copy it
     // bundles (thirdparty/three.module.min.js). Override only to point at a
     // shared or newer hosted copy; it must be an ES module build that exports
@@ -50,72 +57,11 @@ if ($ADMIN->fulltree) {
         ]
     ));
 
-    // Per-environment look and feel. Each of the three worlds carries its own
-    // self-contained palette, street lighting, mouse-look direction and arcade
-    // toggle, configured site-wide here under a heading of its own. A course
-    // simply picks which world is active (the "Default environment" above seeds
-    // new courses; a teacher switches it in the course settings), and the scene
-    // then reads that environment's settings from this page.
-    $paletteoptions = [
-        'cyan' => get_string('palette_cyan', 'format_mnemo'),
-        'amber' => get_string('palette_amber', 'format_mnemo'),
-        'magenta' => get_string('palette_magenta', 'format_mnemo'),
-        'green' => get_string('palette_green', 'format_mnemo'),
-    ];
-    $lightingoptions = [
-        'off' => get_string('lighting_off', 'format_mnemo'),
-        'sparse' => get_string('lighting_sparse', 'format_mnemo'),
-        'normal' => get_string('lighting_normal', 'format_mnemo'),
-        'dense' => get_string('lighting_dense', 'format_mnemo'),
-    ];
-    // Seed each environment's default from the former site-wide single defaults,
-    // so a site that had customised them keeps its look after the split (the
-    // upgrade step persists these too; this covers the display before it runs).
-    $seedpalette = get_config('format_mnemo', 'defaultpalette') ?: 'cyan';
-    $seedlighting = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
-    $seedinvert = get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0;
-    // The three worlds, kept in step with \format_mnemo::ENVIRONMENTS. Inlined
-    // rather than referencing the class, which is not loaded while the admin
-    // settings tree is built.
-    foreach (['cyberspace', 'grid', 'void'] as $env) {
-        $settings->add(new admin_setting_heading(
-            'format_mnemo/envheading_' . $env,
-            get_string('environment_' . $env, 'format_mnemo'),
-            get_string('setting_envheading_desc', 'format_mnemo')
-        ));
-        $settings->add(new admin_setting_configselect(
-            'format_mnemo/' . $env . '_palette',
-            get_string('palette', 'format_mnemo'),
-            get_string('palette_help', 'format_mnemo'),
-            $seedpalette,
-            $paletteoptions
-        ));
-        $settings->add(new admin_setting_configselect(
-            'format_mnemo/' . $env . '_lighting',
-            get_string('lighting', 'format_mnemo'),
-            get_string('lighting_help', 'format_mnemo'),
-            $seedlighting,
-            $lightingoptions
-        ));
-        $settings->add(new admin_setting_configcheckbox(
-            'format_mnemo/' . $env . '_invertlook',
-            get_string('invertlook', 'format_mnemo'),
-            get_string('invertlook_help', 'format_mnemo'),
-            $seedinvert
-        ));
-        $settings->add(new admin_setting_configcheckbox(
-            'format_mnemo/' . $env . '_game',
-            get_string('game', 'format_mnemo'),
-            get_string('game_help', 'format_mnemo'),
-            0
-        ));
-    }
-
     // Base URL of an external glTF (.glb) prop asset pack. Left blank, the
     // plugin loads the original props it bundles (models/). Point this at a
     // directory of .glb files (av, lamp, kiosk, barrier, ...) to swap in your
     // own CC0/licensed models; Draco/meshopt geometry and KTX2 textures are
-    // supported via the bundled addon loaders.
+    // supported via the bundled addon loaders. Props appear in every world.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/assetbaseurl',
         get_string('setting_assetbaseurl', 'format_mnemo'),
@@ -138,26 +84,11 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
     ));
 
-    // Flying-car traffic types. One car type per line, in the form
-    // "model | path | speed | height | land [| count]",
-    // where model is a placeable prop name (bundled or uploaded, e.g. "av"),
-    // path is avenue|cross|diagonal, speed and height are world units, land is
-    // none|ground|rooftop, and the optional count is how many of that car to
-    // spawn. Blank lines and lines starting with "#" are ignored; unknown
-    // models or bad values are skipped. Left blank, a single avenue vehicle
-    // flies as before. See setting_cartypes_desc for the worked example.
-    $settings->add(new admin_setting_configtextarea(
-        'format_mnemo/cartypes',
-        get_string('setting_cartypes', 'format_mnemo'),
-        get_string('setting_cartypes_desc', 'format_mnemo'),
-        '',
-        PARAM_RAW
-    ));
-
     // Neon sign webfont. Left blank, sign and label text is drawn in the
     // bundled "Courier New"/monospace stack. Point this at a hosted webfont file
     // (.woff2/.woff/.ttf/.otf) to give every neon sign a custom typeface. The
     // uploaded font below is used if this is blank; this URL, if set, wins.
+    // Signs appear in every world.
     $settings->add(new admin_setting_configtext(
         'format_mnemo/signfonturl',
         get_string('setting_signfonturl', 'format_mnemo'),
@@ -200,6 +131,221 @@ if ($ADMIN->fulltree) {
         'signtexture',
         0,
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
+    // steering and moving. On by default; the camera is only used when the
+    // learner turns it on, is processed on the device and never uploaded. Untick
+    // to remove the control site-wide (e.g. to satisfy a camera policy).
+    $settings->add(new admin_setting_configcheckbox(
+        'format_mnemo/cameranav',
+        get_string('setting_cameranav', 'format_mnemo'),
+        get_string('setting_cameranav_desc', 'format_mnemo'),
+        1
+    ));
+
+    // Sun and moon. In every environment one celestial body follows the site
+    // clock — the sun by day, the moon by night. Each can be given its own
+    // asset: a flat image that skins the glowing disc, or a 3D .glb model placed
+    // in the sky. A model wins over an image, and either wins over the built-in
+    // procedural disc. The URL, if set, takes precedence over the upload.
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/celestialheading',
+        get_string('setting_celestialheading', 'format_mnemo'),
+        get_string('setting_celestialheading_desc', 'format_mnemo')
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/sunasseturl',
+        get_string('setting_sunasseturl', 'format_mnemo'),
+        get_string('setting_sunasseturl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/sunasset',
+        get_string('setting_sunasset', 'format_mnemo'),
+        get_string('setting_sunasset_desc', 'format_mnemo'),
+        'sunasset',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
+    ));
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/moonasseturl',
+        get_string('setting_moonasseturl', 'format_mnemo'),
+        get_string('setting_moonasseturl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/moonasset',
+        get_string('setting_moonasset', 'format_mnemo'),
+        get_string('setting_moonasset_desc', 'format_mnemo'),
+        'moonasset',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
+    ));
+
+    // Per-environment look and feel. Each world carries its own self-contained
+    // palette, street lighting, mouse-look direction and arcade toggle under a
+    // heading of its own; the Void additionally carries its own space/planet/
+    // ring assets below its look. A course simply picks which world is active
+    // (the "Default environment" above seeds new courses; a teacher switches it
+    // in the course settings), and the scene reads that world's settings here.
+    $paletteoptions = [
+        'cyan' => get_string('palette_cyan', 'format_mnemo'),
+        'amber' => get_string('palette_amber', 'format_mnemo'),
+        'magenta' => get_string('palette_magenta', 'format_mnemo'),
+        'green' => get_string('palette_green', 'format_mnemo'),
+    ];
+    $lightingoptions = [
+        'off' => get_string('lighting_off', 'format_mnemo'),
+        'sparse' => get_string('lighting_sparse', 'format_mnemo'),
+        'normal' => get_string('lighting_normal', 'format_mnemo'),
+        'dense' => get_string('lighting_dense', 'format_mnemo'),
+    ];
+    // Seed each environment's default from the former site-wide single defaults,
+    // so a site that had customised them keeps its look after the split (the
+    // upgrade step persists these too; this covers the display before it runs).
+    $seedpalette = get_config('format_mnemo', 'defaultpalette') ?: 'cyan';
+    $seedlighting = get_config('format_mnemo', 'defaultlighting') ?: 'normal';
+    $seedinvert = get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0;
+    // Emit one world's look controls (palette, lighting, invert, arcade).
+    $addlook = function (string $env) use (
+        $settings,
+        $paletteoptions,
+        $lightingoptions,
+        $seedpalette,
+        $seedlighting,
+        $seedinvert
+    ) {
+        $settings->add(new admin_setting_configselect(
+            'format_mnemo/' . $env . '_palette',
+            get_string('palette', 'format_mnemo'),
+            get_string('palette_help', 'format_mnemo'),
+            $seedpalette,
+            $paletteoptions
+        ));
+        $settings->add(new admin_setting_configselect(
+            'format_mnemo/' . $env . '_lighting',
+            get_string('lighting', 'format_mnemo'),
+            get_string('lighting_help', 'format_mnemo'),
+            $seedlighting,
+            $lightingoptions
+        ));
+        $settings->add(new admin_setting_configcheckbox(
+            'format_mnemo/' . $env . '_invertlook',
+            get_string('invertlook', 'format_mnemo'),
+            get_string('invertlook_help', 'format_mnemo'),
+            $seedinvert
+        ));
+        $settings->add(new admin_setting_configcheckbox(
+            'format_mnemo/' . $env . '_game',
+            get_string('game', 'format_mnemo'),
+            get_string('game_help', 'format_mnemo'),
+            0
+        ));
+    };
+
+    // Cyberspace and Grid: look only. Their shared street assets live in the
+    // "Streets" group below (both worlds have avenues and buildings).
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/envheading_cyberspace',
+        get_string('environment_cyberspace', 'format_mnemo'),
+        get_string('setting_envheading_desc', 'format_mnemo')
+    ));
+    $addlook('cyberspace');
+
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/envheading_grid',
+        get_string('environment_grid', 'format_mnemo'),
+        get_string('setting_envheading_desc', 'format_mnemo')
+    ));
+    $addlook('grid');
+
+    // Void: look plus its own space backdrop, planet maps and ring settings.
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/envheading_void',
+        get_string('environment_void', 'format_mnemo'),
+        get_string('setting_envheading_desc', 'format_mnemo')
+    ));
+    $addlook('void');
+
+    // Void backdrop: an equirectangular (2:1 lat-long) sky/starfield image that
+    // replaces the procedural stars in the Void environment. Left blank, the
+    // Void keeps its generated starfield and nebulae. URL, or upload below.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/spacetextureurl',
+        get_string('setting_spacetextureurl', 'format_mnemo'),
+        get_string('setting_spacetextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/spacetexture',
+        get_string('setting_spacetexture', 'format_mnemo'),
+        get_string('setting_spacetexture_desc', 'format_mnemo'),
+        'spacetexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Planet surface maps for the Void: upload up to nine equirectangular (2:1
+    // lat-long) images and each is applied to one of the Void's planets, in
+    // filename order. With none uploaded, the Void keeps its procedural planets.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/planettextures',
+        get_string('setting_planettextures', 'format_mnemo'),
+        get_string('setting_planettextures_desc', 'format_mnemo'),
+        'planettextures',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 9, 'accepted_types' => ['web_image']]
+    ));
+
+    // Which of the Void's planets wear a ring. The planets are numbered in the
+    // order their surface maps are uploaded (Planet 1 is the first, and so on);
+    // with no maps uploaded the Void shows three procedural planets. Only the
+    // planets selected here are ringed, so rings appear exactly where intended.
+    // Defaults to the three planets that were ringed by default before.
+    $ringchoices = [];
+    for ($i = 1; $i <= 9; $i++) {
+        $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
+    }
+    $settings->add(new admin_setting_configmultiselect(
+        'format_mnemo/ringplanets',
+        get_string('setting_ringplanets', 'format_mnemo'),
+        get_string('setting_ringplanets_desc', 'format_mnemo'),
+        [1, 5, 9],
+        $ringchoices
+    ));
+
+    // Ring image for the Void's ringed planets: a radial strip read from the
+    // inner edge (left) to the outer edge (right) and wrapped once around the
+    // ring, so it reads as concentric bands. Which planets are ringed is set by
+    // the "Ringed planets" setting above. Left blank, rings use a flat band.
+    // URL, or upload below.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/ringtextureurl',
+        get_string('setting_ringtextureurl', 'format_mnemo'),
+        get_string('setting_ringtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/ringtexture',
+        get_string('setting_ringtexture', 'format_mnemo'),
+        get_string('setting_ringtexture_desc', 'format_mnemo'),
+        'ringtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Streets: shared by the Cyberspace and Grid worlds (both have avenues,
+    // sidewalks and buildings). The Void has no streets, so these are ignored
+    // there.
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/streetsheading',
+        get_string('setting_streetsheading', 'format_mnemo'),
+        get_string('setting_streetsheading_desc', 'format_mnemo')
     ));
 
     // Road texture. Left blank, streets are the bundled flat wet-asphalt
@@ -272,116 +418,6 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
-    // Sun and moon. In every environment one celestial body follows the site
-    // clock — the sun by day, the moon by night. Each can be given its own
-    // asset: a flat image that skins the glowing disc, or a 3D .glb model placed
-    // in the sky. A model wins over an image, and either wins over the built-in
-    // procedural disc. The URL, if set, takes precedence over the upload.
-    $settings->add(new admin_setting_heading(
-        'format_mnemo/celestialheading',
-        get_string('setting_celestialheading', 'format_mnemo'),
-        get_string('setting_celestialheading_desc', 'format_mnemo')
-    ));
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/sunasseturl',
-        get_string('setting_sunasseturl', 'format_mnemo'),
-        get_string('setting_sunasseturl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/sunasset',
-        get_string('setting_sunasset', 'format_mnemo'),
-        get_string('setting_sunasset_desc', 'format_mnemo'),
-        'sunasset',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
-    ));
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/moonasseturl',
-        get_string('setting_moonasseturl', 'format_mnemo'),
-        get_string('setting_moonasseturl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/moonasset',
-        get_string('setting_moonasset', 'format_mnemo'),
-        get_string('setting_moonasset_desc', 'format_mnemo'),
-        'moonasset',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image', '.glb']]
-    ));
-
-    // Void backdrop: an equirectangular (2:1 lat-long) sky/starfield image that
-    // replaces the procedural stars in the Void environment. Left blank, the
-    // Void keeps its generated starfield and nebulae. URL, or upload below.
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/spacetextureurl',
-        get_string('setting_spacetextureurl', 'format_mnemo'),
-        get_string('setting_spacetextureurl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/spacetexture',
-        get_string('setting_spacetexture', 'format_mnemo'),
-        get_string('setting_spacetexture_desc', 'format_mnemo'),
-        'spacetexture',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
-    ));
-
-    // Planet surface maps for the Void: upload up to nine equirectangular (2:1
-    // lat-long) images and each is applied to one of the Void's planets, in
-    // filename order. With none uploaded, the Void keeps its procedural planets.
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/planettextures',
-        get_string('setting_planettextures', 'format_mnemo'),
-        get_string('setting_planettextures_desc', 'format_mnemo'),
-        'planettextures',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 9, 'accepted_types' => ['web_image']]
-    ));
-
-    // Ring image for the Void's ringed planets: a radial strip read from the
-    // inner edge (left) to the outer edge (right) and wrapped once around the
-    // ring, so it reads as concentric bands. Which planets are ringed is set by
-    // the "Ringed planets" setting below. Left blank, rings use a flat band.
-    // URL, or upload below.
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/ringtextureurl',
-        get_string('setting_ringtextureurl', 'format_mnemo'),
-        get_string('setting_ringtextureurl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/ringtexture',
-        get_string('setting_ringtexture', 'format_mnemo'),
-        get_string('setting_ringtexture_desc', 'format_mnemo'),
-        'ringtexture',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
-    ));
-
-    // Which of the Void's planets wear a ring. The planets are numbered in the
-    // order their surface maps are uploaded (Planet 1 is the first, and so on);
-    // with no maps uploaded the Void shows three procedural planets. Only the
-    // planets selected here are ringed, so rings appear exactly where intended.
-    // Defaults to the three planets that were ringed by default before.
-    $ringchoices = [];
-    for ($i = 1; $i <= 9; $i++) {
-        $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
-    }
-    $settings->add(new admin_setting_configmultiselect(
-        'format_mnemo/ringplanets',
-        get_string('setting_ringplanets', 'format_mnemo'),
-        get_string('setting_ringplanets_desc', 'format_mnemo'),
-        [1, 5, 9],
-        $ringchoices
-    ));
-
     // Texture tiling scale (world units per tile) for the road, ground and
     // sidewalk textures. Larger values stretch the texture over more ground
     // (fewer, more spread-out tiles); smaller values repeat it more densely.
@@ -417,15 +453,20 @@ if ($ADMIN->fulltree) {
         PARAM_INT
     ));
 
-    // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
-    // steering and moving. On by default; the camera is only used when the
-    // learner turns it on, is processed on the device and never uploaded. Untick
-    // to remove the control site-wide (e.g. to satisfy a camera policy).
-    $settings->add(new admin_setting_configcheckbox(
-        'format_mnemo/cameranav',
-        get_string('setting_cameranav', 'format_mnemo'),
-        get_string('setting_cameranav_desc', 'format_mnemo'),
-        1
+    // Flying-car traffic types. One car type per line, in the form
+    // "model | path | speed | height | land [| count]",
+    // where model is a placeable prop name (bundled or uploaded, e.g. "av"),
+    // path is avenue|cross|diagonal, speed and height are world units, land is
+    // none|ground|rooftop, and the optional count is how many of that car to
+    // spawn. Blank lines and lines starting with "#" are ignored; unknown
+    // models or bad values are skipped. Left blank, a single avenue vehicle
+    // flies as before. See setting_cartypes_desc for the worked example.
+    $settings->add(new admin_setting_configtextarea(
+        'format_mnemo/cartypes',
+        get_string('setting_cartypes', 'format_mnemo'),
+        get_string('setting_cartypes_desc', 'format_mnemo'),
+        '',
+        PARAM_RAW
     ));
 }
 
