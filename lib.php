@@ -44,6 +44,26 @@ class format_mnemo extends core_courseformat\base {
     const TOPIC_IMAGE_MAXBYTES = 5242880;
 
     /**
+     * The three worlds, each with its own self-contained set of course options
+     * (palette, lighting, invert look, arcade game). The 'mnemoenvironment'
+     * option picks which one is active; the scene reads that environment's
+     * settings. Per-environment option keys are "mnemo_<env>_<setting>".
+     */
+    const ENVIRONMENTS = ['cyberspace', 'grid', 'void'];
+
+    /**
+     * The per-environment settings, as key suffix => PARAM type. Combined with
+     * an environment from ENVIRONMENTS these form the stored option names, e.g.
+     * "mnemo_void_palette".
+     */
+    const ENVIRONMENT_SETTINGS = [
+        'palette' => PARAM_ALPHA,
+        'lighting' => PARAM_ALPHA,
+        'invertlook' => PARAM_INT,
+        'game' => PARAM_INT,
+    ];
+
+    /**
      * Returns true. This format uses sections.
      *
      * @return bool
@@ -134,26 +154,30 @@ class format_mnemo extends core_courseformat\base {
                     'default' => get_config('format_mnemo', 'defaultenvironment') ?: 'cyberspace',
                     'type' => PARAM_ALPHA,
                 ],
-                'mnemopalette' => [
-                    'default' => get_config('format_mnemo', 'defaultpalette') ?: 'cyan',
-                    'type' => PARAM_ALPHA,
-                ],
-                'mnemoinvertlook' => [
-                    'default' => get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0,
-                    'type' => PARAM_INT,
-                ],
-                'mnemolighting' => [
-                    // The value "inherit" resolves to the site default at render
-                    // time (see scene.php), so an admin's site-wide change
-                    // reaches every course that has not set its own value.
-                    'default' => 'inherit',
-                    'type' => PARAM_ALPHA,
-                ],
-                'mnemogame' => [
-                    'default' => 0,
-                    'type' => PARAM_INT,
-                ],
             ];
+            // Each environment carries its own self-contained settings, stored
+            // under "mnemo_<env>_<setting>", so configuring (or switching) one
+            // world never disturbs another. The site-wide defaults seed every
+            // environment's default.
+            $defaultpalette = get_config('format_mnemo', 'defaultpalette') ?: 'cyan';
+            $defaultinvert = get_config('format_mnemo', 'defaultinvertlook') ? 1 : 0;
+            $envdefaults = [
+                // The lighting value "inherit" resolves to the site default at
+                // render time (see scene.php), so an admin's site-wide change
+                // reaches every course that has not set its own value.
+                'palette' => $defaultpalette,
+                'lighting' => 'inherit',
+                'invertlook' => $defaultinvert,
+                'game' => 0,
+            ];
+            foreach (self::ENVIRONMENTS as $env) {
+                foreach (self::ENVIRONMENT_SETTINGS as $setting => $type) {
+                    $courseformatoptions['mnemo_' . $env . '_' . $setting] = [
+                        'default' => $envdefaults[$setting],
+                        'type' => $type,
+                    ];
+                }
+            }
         }
         if ($foreditform && !isset($courseformatoptions['coursedisplay']['label'])) {
             $courseformatoptionsedit = [
@@ -194,7 +218,13 @@ class format_mnemo extends core_courseformat\base {
                     'help' => 'environment',
                     'help_component' => 'format_mnemo',
                 ],
-                'mnemopalette' => [
+            ];
+            // The form metadata for each environment's settings. The labels and
+            // help are shared across environments (the same setting in each
+            // world); create_edit_form_elements groups them under a header per
+            // environment so each reads as a self-contained area.
+            $settingmeta = [
+                'palette' => [
                     'label' => new lang_string('palette', 'format_mnemo'),
                     'element_type' => 'select',
                     'element_attributes' => [
@@ -208,19 +238,7 @@ class format_mnemo extends core_courseformat\base {
                     'help' => 'palette',
                     'help_component' => 'format_mnemo',
                 ],
-                'mnemoinvertlook' => [
-                    'label' => new lang_string('invertlook', 'format_mnemo'),
-                    'element_type' => 'select',
-                    'element_attributes' => [
-                        [
-                            0 => new lang_string('no'),
-                            1 => new lang_string('yes'),
-                        ],
-                    ],
-                    'help' => 'invertlook',
-                    'help_component' => 'format_mnemo',
-                ],
-                'mnemolighting' => [
+                'lighting' => [
                     'label' => new lang_string('lighting', 'format_mnemo'),
                     'element_type' => 'select',
                     'element_attributes' => [
@@ -235,7 +253,19 @@ class format_mnemo extends core_courseformat\base {
                     'help' => 'lighting',
                     'help_component' => 'format_mnemo',
                 ],
-                'mnemogame' => [
+                'invertlook' => [
+                    'label' => new lang_string('invertlook', 'format_mnemo'),
+                    'element_type' => 'select',
+                    'element_attributes' => [
+                        [
+                            0 => new lang_string('no'),
+                            1 => new lang_string('yes'),
+                        ],
+                    ],
+                    'help' => 'invertlook',
+                    'help_component' => 'format_mnemo',
+                ],
+                'game' => [
                     'label' => new lang_string('game', 'format_mnemo'),
                     'element_type' => 'select',
                     'element_attributes' => [
@@ -248,9 +278,106 @@ class format_mnemo extends core_courseformat\base {
                     'help_component' => 'format_mnemo',
                 ],
             ];
+            foreach (self::ENVIRONMENTS as $env) {
+                foreach ($settingmeta as $setting => $meta) {
+                    $courseformatoptionsedit['mnemo_' . $env . '_' . $setting] = $meta;
+                }
+            }
             $courseformatoptions = array_merge_recursive($courseformatoptions, $courseformatoptionsedit);
         }
         return $courseformatoptions;
+    }
+
+    /**
+     * Render the course settings, grouping each environment's settings under its
+     * own collapsible header so the three worlds read as separate, self-contained
+     * configuration areas. The general options and the active-environment picker
+     * come first; the active environment's section is expanded, the others
+     * collapsed. Section options are rendered by the parent unchanged.
+     *
+     * @param \MoodleQuickForm $mform the course edit form
+     * @param bool $forsection whether this is the per-section edit form
+     * @return array the added form elements
+     */
+    public function create_edit_form_elements(&$mform, $forsection = false) {
+        if ($forsection) {
+            return parent::create_edit_form_elements($mform, $forsection);
+        }
+        $elements = [];
+        $options = $this->course_format_options(true);
+        $active = $this->active_environment();
+        // General display options and the environment picker, ungrouped.
+        foreach (['hiddensections', 'coursedisplay', 'mnemoenvironment'] as $name) {
+            if (isset($options[$name])) {
+                $elements[] = $this->add_format_option_element($mform, $options[$name], $name);
+            }
+        }
+        // One collapsible section per environment, each self-contained.
+        foreach (self::ENVIRONMENTS as $env) {
+            $header = 'mnemohdr_' . $env;
+            $mform->addElement('header', $header, new lang_string('environment_' . $env, 'format_mnemo'));
+            $mform->setExpanded($header, $env === $active);
+            foreach (array_keys(self::ENVIRONMENT_SETTINGS) as $setting) {
+                $name = 'mnemo_' . $env . '_' . $setting;
+                if (isset($options[$name])) {
+                    $elements[] = $this->add_format_option_element($mform, $options[$name], $name);
+                }
+            }
+        }
+        // Preserve the base behaviour of enabling the course end-date field by
+        // default on a new course (this method runs from definition_after_data).
+        if (empty($this->courseid) && get_config('moodlecourse', 'courseenddateenabled')) {
+            $mform->setDefault('enddate', $this->get_default_course_enddate($mform));
+        }
+        return $elements;
+    }
+
+    /**
+     * Add a single course-format option to the edit form (element, help button,
+     * type and default), mirroring the base renderer for one option so the
+     * grouped renderer above can place options between headers.
+     *
+     * @param \MoodleQuickForm $mform the form
+     * @param array $option the option definition (label, element_type, ...)
+     * @param string $name the option (element) name
+     * @return \HTML_QuickForm_element the added element
+     */
+    protected function add_format_option_element(&$mform, array $option, string $name) {
+        if (!isset($option['element_type'])) {
+            $option['element_type'] = 'text';
+        }
+        $args = [$option['element_type'], $name, $option['label']];
+        if (!empty($option['element_attributes'])) {
+            $args = array_merge($args, $option['element_attributes']);
+        }
+        $element = call_user_func_array([$mform, 'addElement'], $args);
+        if (isset($option['help'])) {
+            $helpcomponent = $option['help_component'] ?? ('format_' . $this->get_format());
+            $mform->addHelpButton($name, $option['help'], $helpcomponent);
+        }
+        if (isset($option['type'])) {
+            $mform->setType($name, $option['type']);
+        }
+        if (isset($option['default']) && !array_key_exists($name, $mform->_defaultValues)) {
+            $mform->setDefault($name, $option['default']);
+        }
+        return $element;
+    }
+
+    /**
+     * The environment whose settings are currently active for this course,
+     * validated against the known worlds. Falls back to the site default, then
+     * cyberspace, including for a course that does not exist yet (new course).
+     *
+     * @return string one of self::ENVIRONMENTS
+     */
+    public function active_environment(): string {
+        $env = get_config('format_mnemo', 'defaultenvironment') ?: 'cyberspace';
+        if (!empty($this->courseid)) {
+            $course = $this->get_course();
+            $env = $course->mnemoenvironment ?? $env;
+        }
+        return in_array($env, self::ENVIRONMENTS, true) ? $env : 'cyberspace';
     }
 
     /**
@@ -710,4 +837,68 @@ function format_mnemo_user_preferences(): array {
             'permissioncallback' => $ownonly,
         ],
     ];
+}
+
+/**
+ * Migrate the old single course options (mnemopalette, mnemolighting,
+ * mnemoinvertlook, mnemogame) to the per-environment keys introduced with the
+ * self-contained environment config. Each course's stored value is moved into
+ * the key for that course's active environment (mnemo_<env>_<setting>), so a
+ * teacher's existing look is preserved on the world they had selected; the
+ * other environments keep their defaults. The old rows are then removed.
+ *
+ * Idempotent: a course with no legacy rows left is skipped, so running it again
+ * is a no-op. Kept as a plain function so the upgrade step and the unit test can
+ * both call it.
+ */
+function format_mnemo_migrate_env_options(): void {
+    global $DB;
+    $map = [
+        'mnemopalette' => 'palette',
+        'mnemolighting' => 'lighting',
+        'mnemoinvertlook' => 'invertlook',
+        'mnemogame' => 'game',
+    ];
+    $legacy = array_keys($map);
+    [$insql, $params] = $DB->get_in_or_equal($legacy, SQL_PARAMS_NAMED);
+    $params['format'] = 'mnemo';
+    $courseids = $DB->get_fieldset_select(
+        'course_format_options',
+        'DISTINCT courseid',
+        "format = :format AND name $insql",
+        $params
+    );
+    foreach ($courseids as $courseid) {
+        $env = $DB->get_field('course_format_options', 'value', [
+            'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => 'mnemoenvironment',
+        ]);
+        if (!in_array($env, \format_mnemo::ENVIRONMENTS, true)) {
+            $env = 'cyberspace';
+        }
+        foreach ($map as $oldname => $setting) {
+            $old = $DB->get_record('course_format_options', [
+                'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => $oldname,
+            ]);
+            if (!$old) {
+                continue;
+            }
+            $newname = 'mnemo_' . $env . '_' . $setting;
+            $new = $DB->get_record('course_format_options', [
+                'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => $newname,
+            ]);
+            if ($new) {
+                $new->value = $old->value;
+                $DB->update_record('course_format_options', $new);
+            } else {
+                $DB->insert_record('course_format_options', (object)[
+                    'courseid' => $courseid,
+                    'format' => 'mnemo',
+                    'sectionid' => 0,
+                    'name' => $newname,
+                    'value' => $old->value,
+                ]);
+            }
+            $DB->delete_records('course_format_options', ['id' => $old->id]);
+        }
+    }
 }
