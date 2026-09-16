@@ -658,6 +658,7 @@ class scene implements renderable, templatable {
      * @return array
      */
     public function get_scene_config(renderer_base $output): array {
+        global $DB;
         $course = $this->format->get_course();
         $options = $this->format->get_format_options();
         $nodes = $this->build_nodes();
@@ -668,7 +669,24 @@ class scene implements renderable, templatable {
         if (!in_array($env, \format_mnemo::ENVIRONMENTS, true)) {
             $env = 'cyberspace';
         }
-        $envlighting = $options['mnemo_' . $env . '_lighting'] ?? 'inherit';
+        // Read the raw stored option rows so a legacy single value (mnemopalette
+        // etc.) survives: it appears when a pre-split course backup is restored
+        // after the site upgraded, and get_format_options() drops keys no longer
+        // declared. Resolve per-environment key first, then the legacy key for
+        // the active world, then the default.
+        $raw = $DB->get_records_menu('course_format_options', [
+            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0,
+        ], '', 'name, value');
+        $envopt = function (string $setting, $default) use ($raw, $env) {
+            $key = 'mnemo_' . $env . '_' . $setting;
+            if (array_key_exists($key, $raw)) {
+                return $raw[$key];
+            }
+            // The old single key, e.g. mnemopalette or mnemoinvertlook.
+            $legacy = 'mnemo' . $setting;
+            return array_key_exists($legacy, $raw) ? $raw[$legacy] : $default;
+        };
+        $envlighting = $envopt('lighting', 'inherit');
 
         // Default to the Three.js copy bundled with the plugin; an admin can
         // override the URL (e.g. a CDN or a shared local copy) in settings.
@@ -725,8 +743,8 @@ class scene implements renderable, templatable {
             // Empty when a custom threeurl is set (see above).
             'addonsbaseurl' => $addonsbaseurl,
             'environment' => $env,
-            'palette' => $options['mnemo_' . $env . '_palette'] ?? 'cyan',
-            'invertlook' => !empty($options['mnemo_' . $env . '_invertlook']),
+            'palette' => $envopt('palette', 'cyan'),
+            'invertlook' => !empty($envopt('invertlook', 0)),
             // Whether the opt-in webcam gesture-navigation control is offered to
             // flat-screen viewers. Site-wide admin setting, on unless explicitly
             // turned off (so an unset value defaults to available).
@@ -748,7 +766,7 @@ class scene implements renderable, templatable {
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/face_landmarker.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
-            'game' => !empty($options['mnemo_' . $env . '_game']),
+            'game' => !empty($envopt('game', 0)),
             // Street-lamp layout: the resolved spacing (world units between
             // lamps, 0 = no auto lamps) and whether to light the side-street
             // corners. Resolved from the per-course option, falling back to the

@@ -86,6 +86,36 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * A legacy single option (from a pre-split course backup restored after the
+     * upgrade, so the migration never ran for it) is still honoured for the
+     * active environment, rather than silently reverting to the default.
+     */
+    public function test_scene_config_legacy_option_fallback(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course([
+            'format' => 'mnemo', 'numsections' => 1, 'mnemoenvironment' => 'grid',
+        ], ['createsections' => true]);
+        // Simulate the restored backup: no per-environment palette row, but a
+        // legacy single value present.
+        $DB->delete_records('course_format_options', [
+            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0, 'name' => 'mnemo_grid_palette',
+        ]);
+        $DB->insert_record('course_format_options', (object)[
+            'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0,
+            'name' => 'mnemopalette', 'value' => 'amber',
+        ]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertSame('amber', $config['palette']); // Legacy value honoured.
+    }
+
+    /**
      * The legacy-option migration moves each course's old single settings onto
      * the environment it had selected, and clears the old rows.
      */
