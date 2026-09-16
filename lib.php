@@ -312,10 +312,13 @@ class format_mnemo extends core_courseformat\base {
                 $elements[] = $this->add_format_option_element($mform, $options[$name], $name);
             }
         }
-        // One collapsible section per environment, each self-contained.
+        // One collapsible section per environment, each self-contained. The
+        // header must be returned alongside its options: the course edit form
+        // only relocates the elements this method returns into the format
+        // section, so a header left out would be orphaned and no grouping shown.
         foreach (self::ENVIRONMENTS as $env) {
             $header = 'mnemohdr_' . $env;
-            $mform->addElement('header', $header, new lang_string('environment_' . $env, 'format_mnemo'));
+            $elements[] = $mform->addElement('header', $header, new lang_string('environment_' . $env, 'format_mnemo'));
             $mform->setExpanded($header, $env === $active);
             foreach (array_keys(self::ENVIRONMENT_SETTINGS) as $setting) {
                 $name = 'mnemo_' . $env . '_' . $setting;

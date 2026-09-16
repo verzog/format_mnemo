@@ -56,6 +56,90 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * The course settings form returns a header element per environment together
+     * with that environment's options, so the three worlds render as separate
+     * grouped areas. The course edit form only relocates the elements this method
+     * returns, so a header left out of the return value would show no grouping.
+     */
+    public function test_settings_form_returns_a_header_per_environment(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $format = course_get_format($course);
+
+        // A tiny stand-in for MoodleQuickForm. Every form call the format makes
+        // routes through __call (so the camelCase QuickForm API needs no real
+        // methods); only addElement returns a value - a name-bearing handle - so
+        // we can assert what the format returns without building a real form.
+        $mform = new class {
+            /**
+             * Any property read (the format checks $mform->_defaultValues) is an
+             * empty array, so no default is ever considered already set.
+             *
+             * @param string $name the property read
+             * @return array always empty
+             */
+            public function __get($name) {
+                return [];
+            }
+
+            /**
+             * Intercept every QuickForm call. addElement returns a name-bearing
+             * handle; every other call is a no-op.
+             *
+             * @param string $method the method called
+             * @param array $args its arguments
+             * @return object|null a handle for addElement, otherwise null
+             */
+            public function __call($method, $args) {
+                if ($method === 'addElement') {
+                    return new class ($args[1]) {
+                        /** @var string The element name. */
+                        private $elname;
+
+                        /**
+                         * Store the element name.
+                         *
+                         * @param string $elname the element name
+                         */
+                        public function __construct($elname) {
+                            $this->elname = $elname;
+                        }
+
+                        /**
+                         * Return the element name for any getter call.
+                         *
+                         * @param string $method the method called
+                         * @param array $args its arguments
+                         * @return string the element name
+                         */
+                        public function __call($method, $args) {
+                            return $this->elname;
+                        }
+                    };
+                }
+                return null;
+            }
+        };
+
+        $elements = $format->create_edit_form_elements($mform, false);
+        $names = [];
+        foreach ($elements as $element) {
+            $names[] = $element->getName();
+        }
+
+        foreach (['cyberspace', 'grid', 'void'] as $env) {
+            $this->assertContains('mnemohdr_' . $env, $names, "missing header for $env");
+            $this->assertContains('mnemo_' . $env . '_palette', $names);
+        }
+        // Each header precedes its own settings.
+        $this->assertLessThan(
+            array_search('mnemo_grid_palette', $names, true),
+            array_search('mnemohdr_grid', $names, true)
+        );
+    }
+
+    /**
      * The scene reads the settings of the active environment only: switching the
      * environment swaps in that world's palette/lighting/game, leaving the other
      * environments' settings untouched.
