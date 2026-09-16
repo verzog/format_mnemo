@@ -213,8 +213,10 @@ off).
   it.
 - **Topic images** — each section can carry an optional image (uploaded in the
   section's settings) that appears on its street sign.
-- **Per-course look** — teachers choose the environment (Cyberspace / Grid /
-  Void) and the neon palette (Cyan / Amber / Magenta / Green) in course settings.
+- **Per-course, per-environment look** — teachers pick the active environment
+  (Cyberspace / Grid / Void) in course settings, and each environment has its
+  own self-contained area (neon palette, street lighting, invert look and arcade
+  game). Configuring or switching one world never disturbs another's settings.
 - **Arcade / game mode** *(optional, off by default)* — a per-course toggle adds
   a small **Start Game** button to the scene. It drops shootable targets into the
   city and gives the learner a crosshair HUD (score and shields): **click** (or
@@ -256,9 +258,10 @@ Alternatively install the ZIP via
 
 1. In a course, open **Settings → Course format** and choose
    **Mnemo (VR cyberspace)**.
-2. Pick the **Environment**, **Neon palette** and **Street lighting**.
-   Optionally enable **Arcade / game mode** (off by default) to add the in-scene
-   shooting game, and add a **topic image** in each section's settings.
+2. Pick the active **Environment**, then open that world's section to set its
+   **Neon palette**, **Street lighting**, invert look and (optionally) **Arcade /
+   game mode** (off by default). Each environment keeps its own settings. Add a
+   **topic image** in each section's settings.
 3. With editing **on**, add sections and activities as usual (standard 2D UI).
 4. Turn editing **off** to fly through the course. Click **Enter VR** to jack in
    with a headset.

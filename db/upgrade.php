@@ -162,5 +162,17 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026091009, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026091600) {
+        // Each environment now has its own self-contained settings
+        // (mnemo_<env>_palette/lighting/invertlook/game). Move each course's
+        // old single values onto the environment it had selected, so existing
+        // courses keep their look, then drop the legacy option rows.
+        global $CFG;
+        require_once($CFG->dirroot . '/course/format/mnemo/lib.php');
+        format_mnemo_migrate_env_options();
+
+        upgrade_plugin_savepoint(true, 2026091600, 'format', 'mnemo');
+    }
+
     return true;
 }

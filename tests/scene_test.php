@@ -41,11 +41,87 @@ final class scene_test extends \advanced_testcase {
         $options = $format->get_format_options();
 
         $this->assertArrayHasKey('mnemoenvironment', $options);
-        $this->assertArrayHasKey('mnemopalette', $options);
         $this->assertSame('cyberspace', $options['mnemoenvironment']);
-        $this->assertSame('cyan', $options['mnemopalette']);
+        // Each environment carries its own self-contained settings.
+        $this->assertArrayHasKey('mnemo_cyberspace_palette', $options);
+        $this->assertArrayHasKey('mnemo_grid_palette', $options);
+        $this->assertArrayHasKey('mnemo_void_palette', $options);
+        $this->assertArrayHasKey('mnemo_void_game', $options);
+        $this->assertSame('cyan', $options['mnemo_cyberspace_palette']);
+        $this->assertSame('inherit', $options['mnemo_grid_lighting']);
+        // The old single keys are gone.
+        $this->assertArrayNotHasKey('mnemopalette', $options);
         $this->assertTrue($format->uses_sections());
         $this->assertTrue($format->supports_components());
+    }
+
+    /**
+     * The scene reads the settings of the active environment only: switching the
+     * environment swaps in that world's palette/lighting/game, leaving the other
+     * environments' settings untouched.
+     */
+    public function test_scene_config_uses_active_environment_options(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course([
+            'format' => 'mnemo',
+            'numsections' => 1,
+            // Grid is active; each world has its own look.
+            'mnemoenvironment' => 'grid',
+            'mnemo_cyberspace_palette' => 'green',
+            'mnemo_grid_palette' => 'amber',
+            'mnemo_grid_game' => 1,
+            'mnemo_void_palette' => 'magenta',
+        ], ['createsections' => true]);
+
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertSame('grid', $config['environment']);
+        $this->assertSame('amber', $config['palette']); // Grid's, not cyberspace's green.
+        $this->assertTrue($config['game']); // Grid's game is on.
+    }
+
+    /**
+     * The legacy-option migration moves each course's old single settings onto
+     * the environment it had selected, and clears the old rows.
+     */
+    public function test_migrate_env_options(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $set = function (string $name, string $value) use ($DB, $course) {
+            $DB->insert_record('course_format_options', (object)[
+                'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0,
+                'name' => $name, 'value' => $value,
+            ]);
+        };
+        // Simulate a pre-upgrade course: clear the options the generator stored,
+        // then write the old single settings with void as the active world.
+        $DB->delete_records('course_format_options', ['courseid' => $course->id, 'format' => 'mnemo']);
+        $set('mnemoenvironment', 'void');
+        $set('mnemopalette', 'magenta');
+        $set('mnemogame', '1');
+
+        format_mnemo_migrate_env_options();
+
+        $val = function (string $name) use ($DB, $course) {
+            return $DB->get_field('course_format_options', 'value', [
+                'courseid' => $course->id, 'format' => 'mnemo', 'sectionid' => 0, 'name' => $name,
+            ]);
+        };
+        // Moved onto void (the active world).
+        $this->assertSame('magenta', $val('mnemo_void_palette'));
+        $this->assertSame('1', $val('mnemo_void_game'));
+        // Old rows removed.
+        $this->assertFalse($val('mnemopalette'));
+        $this->assertFalse($val('mnemogame'));
+        // Untouched worlds have no stored value (fall back to defaults).
+        $this->assertFalse($val('mnemo_cyberspace_palette'));
     }
 
     /**

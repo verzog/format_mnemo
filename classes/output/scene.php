@@ -662,6 +662,14 @@ class scene implements renderable, templatable {
         $options = $this->format->get_format_options();
         $nodes = $this->build_nodes();
 
+        // The active environment and its own self-contained settings (each world
+        // stores its palette/lighting/invert/game under "mnemo_<env>_<setting>").
+        $env = $options['mnemoenvironment'] ?? 'cyberspace';
+        if (!in_array($env, \format_mnemo::ENVIRONMENTS, true)) {
+            $env = 'cyberspace';
+        }
+        $envlighting = $options['mnemo_' . $env . '_lighting'] ?? 'inherit';
+
         // Default to the Three.js copy bundled with the plugin; an admin can
         // override the URL (e.g. a CDN or a shared local copy) in settings.
         // The bundled glTF addon stack (GLTFLoader + Draco/KTX2/meshopt) imports
@@ -716,9 +724,9 @@ class scene implements renderable, templatable {
             // Draco/KTX2/meshopt decoders) so compressed glTF asset packs load.
             // Empty when a custom threeurl is set (see above).
             'addonsbaseurl' => $addonsbaseurl,
-            'environment' => $options['mnemoenvironment'] ?? 'cyberspace',
-            'palette' => $options['mnemopalette'] ?? 'cyan',
-            'invertlook' => !empty($options['mnemoinvertlook']),
+            'environment' => $env,
+            'palette' => $options['mnemo_' . $env . '_palette'] ?? 'cyan',
+            'invertlook' => !empty($options['mnemo_' . $env . '_invertlook']),
             // Whether the opt-in webcam gesture-navigation control is offered to
             // flat-screen viewers. Site-wide admin setting, on unless explicitly
             // turned off (so an unset value defaults to available).
@@ -740,13 +748,13 @@ class scene implements renderable, templatable {
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/face_landmarker.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
-            'game' => !empty($options['mnemogame']),
+            'game' => !empty($options['mnemo_' . $env . '_game']),
             // Street-lamp layout: the resolved spacing (world units between
             // lamps, 0 = no auto lamps) and whether to light the side-street
             // corners. Resolved from the per-course option, falling back to the
             // site-wide default when the course inherits.
-            'lightingspacing' => $this->lighting_spacing($options['mnemolighting'] ?? 'inherit'),
-            'lightingcorners' => $this->lighting_spacing($options['mnemolighting'] ?? 'inherit') > 0,
+            'lightingspacing' => $this->lighting_spacing($envlighting),
+            'lightingcorners' => $this->lighting_spacing($envlighting) > 0,
             // Hour of day (0-24 float) in the site's timezone, so the client can
             // run a day/night cycle that matches the Moodle site's clock.
             'hour' => $this->site_hour(),
