@@ -283,10 +283,13 @@ Alternatively install the ZIP via
 
 The immersive view is **WebXR**, so it runs in a browser — there is no native app
 to install. WebXR only starts in a **secure context**, so the course page must be
-served over **HTTPS** with a trusted certificate, or be `http://localhost`. When
-that holds and a headset is available to the browser, the **Enter VR** button
-appears once editing is turned **off**; over plain `http://` (or a self-signed LAN
-certificate) it does not, and the scene falls back to the flat-screen view.
+served over **HTTPS** with a trusted certificate, or be `http://localhost`. With
+editing turned **off**, a VR button is always shown on the scene: it is enabled and
+reads **Enter VR** only when the page is a secure context *and* the browser is
+presented an immersive-VR device; otherwise it stays **disabled** and reads
+**"VR headset not detected"** (for example over plain `http://`, a self-signed LAN
+certificate, or on a machine with no headset), and the scene stays on the
+flat-screen view.
 
 **Standalone, inside the headset (simplest — no PC link needed).** The Quest 2 has
 its own WebXR-capable browser:
@@ -296,8 +299,9 @@ its own WebXR-capable browser:
 3. Turn **editing off**, then click **Enter VR**. Point and squeeze the trigger (or
    pinch) to glide; point at a node and pinch/trigger to open it.
 
-Make sure the headset is on the same network as the site and the certificate is
-trusted — a LAN IP with a self-signed certificate is blocked by WebXR.
+The certificate must be trusted — a LAN IP with a self-signed certificate is
+blocked by WebXR. A publicly hosted site just needs the headset online; only when
+the site is on a **private LAN** does the headset also have to be on that network.
 
 **Tethered to a Windows PC (Quest Link / Air Link).** Use this to drive the scene
 from a desktop browser, e.g. against a Moodle running on `localhost`:
@@ -315,13 +319,16 @@ The tethered path is fussier — the OpenXR-runtime handoff is the usual failure
 point — so try the standalone path first to confirm the scene works.
 
 **Debugging the in-headset browser.** Enable **Developer Mode** for the headset (in
-the Meta Horizon phone app), connect it by USB, then open **`chrome://inspect`** in
-desktop Chrome to view the Quest browser tab's console and screencast it — useful
-for catching WebXR or client errors.
+the Meta Horizon phone app) and connect it by USB. The first time you connect to a
+given computer, **accept the "Allow USB debugging" prompt inside the headset**
+(otherwise the device never appears). Then open **`chrome://inspect`** in desktop
+Chrome to view the Quest browser tab's console and screencast it — useful for
+catching WebXR or client errors.
 
-**If Enter VR does not appear:** the page is not HTTPS/`localhost`; editing is still
-on; the browser is not being presented a WebXR device by the headset/runtime; or
-(tethered) the OpenXR runtime is not set to Meta Quest Link.
+**If the VR button stays disabled ("VR headset not detected"):** the page is not
+HTTPS/`localhost`; the browser is not being presented an immersive-VR device by the
+headset/runtime; or (tethered) the OpenXR runtime is not set to Meta Quest Link.
+(If no button shows at all, editing is probably still on.)
 
 ## Admin settings
 
