@@ -279,6 +279,57 @@ Alternatively install the ZIP via
 | Desktop / mobile | drag | `W`/`S`/`A`/`D` + `Shift` boost — learners walk (`Space` jumps), editing teachers fly (`R`/`F`/`Space` up/down) | click the node |
 | VR headset | head + point the controller/hand | point + **squeeze trigger** or **pinch** and hold to glide | point at the node and **pinch / trigger** |
 
+### Testing in VR (e.g. a Meta Quest 2)
+
+The immersive view is **WebXR**, so it runs in a browser — there is no native app
+to install. WebXR only starts in a **secure context**, so the course page must be
+served over **HTTPS** with a trusted certificate, or be `http://localhost`. With
+editing turned **off**, a VR button is always shown on the scene: it is enabled and
+reads **Enter VR** only when the page is a secure context *and* the browser is
+presented an immersive-VR device; otherwise it stays **disabled** and reads
+**"VR headset not detected"** (for example over plain `http://`, a self-signed LAN
+certificate, or on a machine with no headset), and the scene stays on the
+flat-screen view.
+
+**Standalone, inside the headset (simplest — no PC link needed).** The Quest 2 has
+its own WebXR-capable browser:
+
+1. In the headset, open the **Meta Quest Browser**.
+2. Go to your Moodle course URL (**HTTPS**), sign in and open the course.
+3. Turn **editing off**, then click **Enter VR**. Point and squeeze the trigger (or
+   pinch) to glide; point at a node and pinch/trigger to open it.
+
+The certificate must be trusted — a LAN IP with a self-signed certificate is
+blocked by WebXR. A publicly hosted site just needs the headset online; only when
+the site is on a **private LAN** does the headset also have to be on that network.
+
+**Tethered to a Windows PC (Quest Link / Air Link).** Use this to drive the scene
+from a desktop browser, e.g. against a Moodle running on `localhost`:
+
+1. Install the **Meta Quest Link** app on Windows and sign in.
+2. Connect the headset by **Link** (USB-C 3 cable) or **Air Link** (Wi-Fi) — enable
+   it in the headset under **Settings → System → Quest Link**.
+3. In the Meta Quest Link PC app, set the OpenXR runtime to Meta:
+   **Settings → General → OpenXR Runtime → "Set Meta Quest Link as active"**. This
+   is what lets a desktop browser hand a WebXR session to the headset.
+4. In **Chrome or Edge** on the PC, open the course page (HTTPS, or `http://localhost`
+   for local development), turn editing off and click **Enter VR**.
+
+The tethered path is fussier — the OpenXR-runtime handoff is the usual failure
+point — so try the standalone path first to confirm the scene works.
+
+**Debugging the in-headset browser.** Enable **Developer Mode** for the headset (in
+the Meta Horizon phone app) and connect it by USB. The first time you connect to a
+given computer, **accept the "Allow USB debugging" prompt inside the headset**
+(otherwise the device never appears). Then open **`chrome://inspect`** in desktop
+Chrome to view the Quest browser tab's console and screencast it — useful for
+catching WebXR or client errors.
+
+**If the VR button stays disabled ("VR headset not detected"):** the page is not
+HTTPS/`localhost`; the browser is not being presented an immersive-VR device by the
+headset/runtime; or (tethered) the OpenXR runtime is not set to Meta Quest Link.
+(If no button shows at all, editing is probably still on.)
+
 ## Admin settings
 
 Under **Plugins → Course formats → Mnemo (VR cyberspace)**, the settings are
