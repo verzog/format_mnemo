@@ -9380,6 +9380,22 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Whether this is a standalone headset browser (Meta Quest / Oculus, Pico),
+     * matched by user agent. Such browsers strobe the whole view when the scene
+     * is drawn through an offscreen multisampled target and composited back, so
+     * the bloom post-processing is skipped there in favour of a direct render.
+     *
+     * @return {Boolean} True on a known standalone-headset browser.
+     */
+    Cyberspace.prototype.isHeadsetBrowser = function() {
+        try {
+            return /OculusBrowser|Quest|Pico/i.test(navigator.userAgent || '');
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /**
      * Build the on-screen post-processing pipeline: a threshold + separable
      * blur bloom composited back over the scene. Hand-rolled on core Three.js
      * (render targets + fullscreen shader passes) so it needs no addon modules,
@@ -9387,6 +9403,14 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildPostFX = function() {
         var THREE = this.THREE;
+        // Standalone-headset browsers (e.g. the Meta Quest browser) strobe the
+        // whole frame when the scene is routed through an offscreen multisampled
+        // target and composited back. Leave this.postfx unset there so tick()
+        // renders the scene directly (the same path the headset uses), which is
+        // stable; bloom is a cosmetic loss only on those browsers.
+        if (this.isHeadsetBrowser()) {
+            return;
+        }
         var w = Math.max(1, this.root.clientWidth);
         var h = Math.max(1, this.root.clientHeight || 480);
         // Multisample the scene target so geometry/neon edges stay smooth; the
