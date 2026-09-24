@@ -419,12 +419,13 @@ define('format_mnemo/vr', [], function() {
         }
         this.scene = scene;
 
-        // A larger near plane on headset browsers further improves depth
-        // precision (it scales inversely with the near distance), belt-and-braces
-        // with the 24-bit depth buffer above; 0.3 m is still closer than anything
-        // the learner reaches. Desktop keeps the tighter 0.1 m near.
+        // A 0.1 m near plane everywhere: in a headset a larger near would clip
+        // the controllers/grips and anything the viewer leans toward (the
+        // physical WebXR camera pose is not constrained to the rig), so the depth
+        // z-fighting is addressed by the 24-bit depth buffer above (no MSAA)
+        // rather than by pushing the near plane out.
         var camera = new THREE.PerspectiveCamera(
-            72, this.aspect(), headset ? 0.3 : 0.1, 600
+            72, this.aspect(), 0.1, 600
         );
         camera.position.set(0, 1.6, 0);
         this.camera = camera;
