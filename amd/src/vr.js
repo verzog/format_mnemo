@@ -369,8 +369,14 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.build = function() {
         var THREE = this.THREE;
 
-        // Renderer.
-        var renderer = new THREE.WebGLRenderer({antialias: true, alpha: false});
+        // Renderer. Standalone-headset browsers (e.g. the Meta Quest browser)
+        // tend to back an antialiased default framebuffer with a low-precision
+        // (16-bit) depth buffer, which z-fights badly across the scene's stacked
+        // near-coplanar ground/road/sidewalk planes. Dropping MSAA there lets the
+        // browser hand back the 24-bit depth buffer (as desktop already gets),
+        // curing the flicker at the cost of slightly softer edges.
+        var headset = this.isHeadsetBrowser();
+        var renderer = new THREE.WebGLRenderer({antialias: !headset, alpha: false});
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         // Do not let Three.js write inline width/height on the canvas; the
         // stylesheet sizes it responsively to the stage instead.
@@ -413,8 +419,12 @@ define('format_mnemo/vr', [], function() {
         }
         this.scene = scene;
 
+        // A larger near plane on headset browsers further improves depth
+        // precision (it scales inversely with the near distance), belt-and-braces
+        // with the 24-bit depth buffer above; 0.3 m is still closer than anything
+        // the learner reaches. Desktop keeps the tighter 0.1 m near.
         var camera = new THREE.PerspectiveCamera(
-            72, this.aspect(), 0.1, 600
+            72, this.aspect(), headset ? 0.3 : 0.1, 600
         );
         camera.position.set(0, 1.6, 0);
         this.camera = camera;
