@@ -310,16 +310,25 @@ if ($ADMIN->fulltree) {
     // "Planet 1 — jupiter") so the admin can tell which planet they are ringing;
     // a slot with no uploaded map yet falls back to a plain "Planet N".
     $planetnames = [];
-    foreach (get_file_storage()->get_area_files(
-        \context_system::instance()->id, 'format_mnemo', 'planettextures', 0, 'filename', false
-    ) as $planetfile) {
+    $planetfiles = get_file_storage()->get_area_files(
+        \context_system::instance()->id,
+        'format_mnemo',
+        'planettextures',
+        0,
+        'filename',
+        false
+    );
+    foreach ($planetfiles as $planetfile) {
         $planetnames[] = pathinfo($planetfile->get_filename(), PATHINFO_FILENAME);
     }
     $ringchoices = [];
     for ($i = 1; $i <= 9; $i++) {
         if (isset($planetnames[$i - 1]) && $planetnames[$i - 1] !== '') {
-            $ringchoices[$i] = get_string('setting_ringplanet_named', 'format_mnemo',
-                ['num' => $i, 'name' => $planetnames[$i - 1]]);
+            $ringchoices[$i] = get_string(
+                'setting_ringplanet_named',
+                'format_mnemo',
+                ['num' => $i, 'name' => $planetnames[$i - 1]]
+            );
         } else {
             $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
         }
