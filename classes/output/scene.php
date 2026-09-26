@@ -348,7 +348,7 @@ class scene implements renderable, templatable {
         }
         $paths = ['avenue' => true, 'cross' => true, 'diagonal' => true];
         $lands = ['none' => true, 'ground' => true, 'rooftop' => true];
-        $models = array_flip(\format_mnemo\output\asset_gallery::placer_prop_names());
+        $models = array_flip($this->vehicle_model_names());
         $out = [];
         foreach (preg_split('/\r\n|\r|\n/', (string)$raw) as $line) {
             $line = trim($line);
@@ -779,9 +779,17 @@ class scene implements renderable, templatable {
             // URL we cannot enumerate (the client then probes every prop, with
             // the bundled fallback), or when there is no pack at all.
             'packmodels' => $this->pack_model_names(),
+            // Base URL for flying-car (vehicle) models, and the .glb base names
+            // present in the uploaded vehicle pack (null when none is uploaded,
+            // so the client probes with the bundled fallback). Kept separate from
+            // the prop models base so vehicles have their own upload area.
+            'vehiclesbaseurl' => $this->vehicles_base_url(),
+            'vehiclepack' => $this->uploaded_glb_names('vehicleassets'),
+            // Base URL for per-activity building models, separate from props.
+            'buildingsbaseurl' => $this->buildings_base_url(),
             // Module types that have a building-<modname>.glb model available, so
             // the client only attempts to load buildings it can expect to find.
-            'buildingmodels' => $this->building_models($nodes),
+            'buildingmodels' => $this->building_models(),
             // Optional site-wide assets, each resolving to an admin-set URL, then
             // an uploaded file, then null (the client keeps its bundled look).
             // See resolve_asset_url().
@@ -963,16 +971,19 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * The pluginfile base URL for an admin-uploaded prop asset pack, or null
-     * when none has been uploaded. The client appends "<name>.glb" to this, so
-     * the returned URL is slash-terminated (or ends where a filename belongs).
+     * The pluginfile base URL for an admin-uploaded model file area, or null
+     * when none has been uploaded there. The client appends "<name>.glb" to
+     * this, so the returned URL is slash-terminated (or ends where a filename
+     * belongs).
      *
+     * @param string $filearea The system-context file area (assetpack for props,
+     *     vehicleassets for vehicles, buildingassets for buildings).
      * @return string|null
      */
-    protected function uploaded_pack_base_url(): ?string {
+    protected function uploaded_pack_base_url(string $filearea = 'assetpack'): ?string {
         $context = \context_system::instance();
         $fs = get_file_storage();
-        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
+        $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
         if (empty($files)) {
             return null;
         }
@@ -989,12 +1000,72 @@ class scene implements renderable, templatable {
         $url = moodle_url::make_pluginfile_url(
             $context->id,
             'format_mnemo',
-            'assetpack',
+            $filearea,
             $rev,
             '/',
             $sentinel
         )->out(false);
         return substr($url, 0, -strlen($sentinel));
+    }
+
+    /**
+     * The base URL the client loads flying-car (vehicle) models from: an
+     * uploaded vehicle pack if present, otherwise the plugin's bundled models.
+     *
+     * @return string
+     */
+    protected function vehicles_base_url(): string {
+        return $this->uploaded_pack_base_url('vehicleassets')
+            ?? (new moodle_url('/course/format/mnemo/models/'))->out(false);
+    }
+
+    /**
+     * The base URL the client loads per-activity building models from: an
+     * uploaded building pack if present, otherwise the plugin's bundled models.
+     *
+     * @return string
+     */
+    protected function buildings_base_url(): string {
+        return $this->uploaded_pack_base_url('buildingassets')
+            ?? (new moodle_url('/course/format/mnemo/models/'))->out(false);
+    }
+
+    /**
+     * The .glb base names uploaded into a model file area, or null when the area
+     * is empty (nothing to enumerate). Used so the client can skip probing an
+     * area for a model it does not hold and load the bundled fallback directly.
+     *
+     * @param string $filearea The system-context file area.
+     * @return array|null
+     */
+    protected function uploaded_glb_names(string $filearea): ?array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+        if (empty($files)) {
+            return null;
+        }
+        $names = [];
+        foreach ($files as $file) {
+            if (preg_match('/^(.*)\.glb$/i', $file->get_filename(), $m)) {
+                $names[] = $m[1];
+            }
+        }
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * The vehicle model names a flying-car type may reference: the bundled "av"
+     * plus every .glb uploaded to the vehicle file area.
+     *
+     * @return array List of vehicle model base names.
+     */
+    protected function vehicle_model_names(): array {
+        $names = ['av'];
+        foreach (($this->uploaded_glb_names('vehicleassets') ?? []) as $name) {
+            $names[$name === 'av' ? 0 : count($names)] = $name;
+        }
+        return array_values(array_unique($names));
     }
 
     /**
@@ -1015,19 +1086,7 @@ class scene implements renderable, templatable {
         if (!empty(get_config('format_mnemo', 'assetbaseurl'))) {
             return null;
         }
-        $context = \context_system::instance();
-        $fs = get_file_storage();
-        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
-        if (empty($files)) {
-            return null;
-        }
-        $names = [];
-        foreach ($files as $file) {
-            if (preg_match('/^(.*)\.glb$/i', $file->get_filename(), $m)) {
-                $names[] = $m[1];
-            }
-        }
-        return array_values(array_unique($names));
+        return $this->uploaded_glb_names('assetpack');
     }
 
     /**
@@ -1211,21 +1270,15 @@ class scene implements renderable, templatable {
 
     /**
      * The module types (modnames) that have a building model
-     * (<code>building-&lt;modname&gt;.glb</code>) available at the models base
+     * (<code>building-&lt;modname&gt;.glb</code>) available at the buildings base
      * URL, so the client only attempts to load buildings it can expect to find.
      *
-     * The source is matched to models_base_url()'s precedence: an external URL
-     * pack cannot be enumerated, so every module type the course actually uses is
-     * offered (missing ones fall back to the procedural building); an uploaded or
-     * bundled pack is enumerated exactly.
+     * Matched to buildings_base_url()'s precedence: an uploaded building pack if
+     * present (enumerated exactly), otherwise the bundled building models.
      *
-     * @param array $nodes The build_nodes() result.
      * @return array List of modname strings.
      */
-    protected function building_models(array $nodes): array {
-        if (!empty(get_config('format_mnemo', 'assetbaseurl'))) {
-            return $this->course_modnames($nodes);
-        }
+    protected function building_models(): array {
         $uploaded = $this->uploaded_building_modnames();
         if (!empty($uploaded)) {
             return $uploaded;
@@ -1234,30 +1287,14 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * The distinct module types used across the course's activities.
-     *
-     * @param array $nodes The build_nodes() result.
-     * @return array List of modname strings.
-     */
-    protected function course_modnames(array $nodes): array {
-        $set = [];
-        foreach ($nodes['sections'] as $section) {
-            foreach ($section['activities'] as $act) {
-                $set[$act['modname']] = true;
-            }
-        }
-        return array_keys($set);
-    }
-
-    /**
-     * The modnames of building models uploaded into the asset-pack file area.
+     * The modnames of building models uploaded into the building file area.
      *
      * @return array List of modname strings.
      */
     protected function uploaded_building_modnames(): array {
         $context = \context_system::instance();
         $fs = get_file_storage();
-        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
+        $files = $fs->get_area_files($context->id, 'format_mnemo', 'buildingassets', 0, 'filename', false);
         $names = [];
         foreach ($files as $file) {
             if (preg_match('/^building-(.+)\.glb$/', $file->get_filename(), $m)) {

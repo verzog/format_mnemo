@@ -273,8 +273,10 @@ echo html_writer::end_div();
 
 // Models.
 echo $OUTPUT->heading(get_string('preview_models', 'format_mnemo'), 3);
-echo html_writer::start_div('format-mnemo-preview__grid');
-foreach ($models as $i => $model) {
+
+// Render one model card. The canvas id keeps the model's index in the full list
+// so it stays aligned with $modelconfig (the client renders into it by id).
+$rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $placeable, $PAGE): string {
     $canvas = html_writer::tag('canvas', '', [
         'id' => $rootid . '-model-' . $i,
         'class' => 'format-mnemo-preview__canvas',
@@ -307,12 +309,33 @@ foreach ($models as $i => $model) {
     if (in_array($model['key'], $placeable, true)) {
         $body .= mnemo_model_settings_panel($model['key'], model_config::get($model['key']), $PAGE->url);
     }
-    echo html_writer::div(
+    return html_writer::div(
         $canvas . html_writer::div($body, 'format-mnemo-preview__meta'),
         'format-mnemo-preview__card'
     );
+};
+
+// Group the model cards into Props / Vehicles / Buildings / Sun & moon so each
+// upload area's models are shown together, matching the separate uploaders.
+$modelcats = [
+    'prop' => get_string('preview_cat_props', 'format_mnemo'),
+    'vehicle' => get_string('preview_cat_vehicles', 'format_mnemo'),
+    'building' => get_string('preview_cat_buildings', 'format_mnemo'),
+    'celestial' => get_string('preview_cat_celestial', 'format_mnemo'),
+];
+foreach ($modelcats as $cat => $catlabel) {
+    $cards = '';
+    foreach ($models as $i => $model) {
+        if (($model['category'] ?? 'prop') === $cat) {
+            $cards .= $rendermodelcard($i, $model);
+        }
+    }
+    if ($cards === '') {
+        continue;
+    }
+    echo $OUTPUT->heading($catlabel, 4);
+    echo html_writer::div($cards, 'format-mnemo-preview__grid');
 }
-echo html_writer::end_div();
 
 echo html_writer::end_div();
 

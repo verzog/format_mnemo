@@ -2998,6 +2998,32 @@ define('format_mnemo/vr', [], function() {
     };
 
     Cyberspace.prototype.loadProp = function(name) {
+        return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
+    };
+
+    /**
+     * Load a flying-car (vehicle) model by name from the vehicle asset area,
+     * falling back to the bundled model. Kept separate from loadProp so vehicles
+     * resolve from their own upload area (config.vehiclesbaseurl).
+     *
+     * @param {String} name The vehicle model base name.
+     * @return {Promise} Resolves with a Three.Group template.
+     */
+    Cyberspace.prototype.loadVehicle = function(name) {
+        return this.loadNamedModel(name, this.config.vehiclesbaseurl, this.config.vehiclepack);
+    };
+
+    /**
+     * Load a model by base name from a category's base URL, falling back to the
+     * bundled models. Shared by loadProp (props) and loadVehicle (vehicles).
+     *
+     * @param {String} name The model base name (a "<name>.glb" is requested).
+     * @param {String} base The category's base URL.
+     * @param {Array|null} pack The .glb base names the server enumerated in that
+     *     upload area, or null when unknown (then every name is probed).
+     * @return {Promise} Resolves with a Three.Group template.
+     */
+    Cyberspace.prototype.loadNamedModel = function(name, base, pack) {
         var self = this;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
@@ -3008,14 +3034,13 @@ define('format_mnemo/vr', [], function() {
             return Promise.reject(new Error(
                 'format_mnemo: ' + name + ' not enabled for ' + this.config.environment));
         }
-        var base = this.config.modelsbaseurl;
+        base = base || this.config.modelsbaseurl;
         var fallback = this.config.modelsfallbackurl;
-        // When the server enumerated the (Moodle-hosted) asset pack and this prop
-        // is not in it, skip the pack probe and load the bundled model directly,
-        // so the console is not littered with a 404 for every omitted prop. When
-        // packmodels is null (an external, unenumerable pack) every prop is still
-        // probed against the base and falls back to bundled, as before.
-        var pack = this.config.packmodels;
+        // When the server enumerated the (Moodle-hosted) upload area and this
+        // model is not in it, skip the probe and load the bundled model directly,
+        // so the console is not littered with a 404 for every omitted model. When
+        // pack is null (an external, unenumerable pack) every name is still probed
+        // against the base and falls back to bundled, as before.
         if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
             return this.loadModel(this.joinBase(fallback, name + '.glb'));
         }
@@ -3339,7 +3364,7 @@ define('format_mnemo/vr', [], function() {
             (byModel[ct.model] = byModel[ct.model] || []).push({ct: ct, count: allocs[i]});
         });
         Object.keys(byModel).forEach(function(model) {
-            self.loadProp(model).then(function(tpl) {
+            self.loadVehicle(model).then(function(tpl) {
                 byModel[model].forEach(function(entry) {
                     self.spawnTrafficType(tpl, entry.ct, entry.count);
                 });
@@ -4560,15 +4585,17 @@ define('format_mnemo/vr', [], function() {
     /**
      * The URL of a building model to attach to an activity, or null to keep the
      * procedural building. A per-activity override (act.building) wins — either a
-     * full URL/data URI or a filename resolved against the models base URL.
+     * full URL/data URI or a filename resolved against the buildings base URL.
      * Otherwise a type-based model (building-<modname>.glb) is used, but only for
      * module types the server confirmed a model exists for (config.buildingmodels).
+     * Buildings resolve from their own upload area (config.buildingsbaseurl),
+     * separate from the props base.
      *
      * @param {Object} act The activity node (modname, building).
      * @return {String|null} The model URL, or null.
      */
     Cyberspace.prototype.buildingModelUrl = function(act) {
-        var base = this.config.modelsbaseurl;
+        var base = this.config.buildingsbaseurl || this.config.modelsbaseurl;
         if (act.building) {
             if (/^https?:/.test(act.building) || act.building.charAt(0) === '/' ||
                 act.building.indexOf('data:') === 0) {

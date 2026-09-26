@@ -694,6 +694,7 @@ const scenarios = [
                 config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/'},
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
+                loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
                     return url.indexOf('pack/') === 0
@@ -716,6 +717,7 @@ const scenarios = [
                 config: {modelsbaseurl: 'm/', modelsfallbackurl: 'm/'},
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
+                loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
                     return Promise.resolve({});
@@ -1672,7 +1674,8 @@ const scenarios = [
                 modelCfg: CS.prototype.modelCfg,
                 joinBase: () => 'x',
                 loadModel: () => Promise.resolve({}),
-                loadProp: CS.prototype.loadProp
+                loadProp: CS.prototype.loadProp,
+                loadNamedModel: CS.prototype.loadNamedModel
             };
             let rejected = false;
             try {
