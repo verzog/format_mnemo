@@ -633,6 +633,58 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * packmodels lists the .glb base names in an uploaded (Moodle-hosted) asset
+     * pack, so the client only probes the pack for props it actually holds. It
+     * is null when there is no pack, and null for an unenumerable external pack.
+     */
+    public function test_scene_config_pack_models(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // No pack uploaded and no external URL: null (models base is the bundled
+        // dir, so there is nothing to skip).
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertNull($config['packmodels']);
+        $this->assertStringEndsWith('/course/format/mnemo/models/', $config['modelsbaseurl']);
+
+        // Upload a partial pack (a themed lamp and an extra prop, plus a .gltf
+        // and a stray non-model file that must be ignored).
+        $fs = get_file_storage();
+        $base = [
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'assetpack',
+            'itemid' => 0,
+            'filepath' => '/',
+        ];
+        foreach (['lamp.glb', 'tower.glb', 'shrine.gltf', 'readme.txt'] as $name) {
+            $fs->create_file_from_string(['filename' => $name] + $base, 'x');
+        }
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $names = $config['packmodels'];
+        sort($names);
+        // Only the two .glb base names, no extension, no .gltf or .txt entries.
+        $this->assertSame(['lamp', 'tower'], $names);
+        // The models base now points at the uploaded pack.
+        $this->assertStringContainsString('/format_mnemo/assetpack/', $config['modelsbaseurl']);
+
+        // An external asset-pack URL is opaque, so packmodels is null even though
+        // an upload exists - the client keeps probing every prop against it.
+        set_config('assetbaseurl', 'https://cdn.example/pack/', 'format_mnemo');
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertNull($config['packmodels']);
+        $this->assertSame('https://cdn.example/pack/', $config['modelsbaseurl']);
+    }
+
+    /**
      * canedit is true for a user who can edit activities (editing teacher) and
      * false for a student, gating the in-view editor.
      */

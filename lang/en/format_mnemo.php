@@ -242,6 +242,7 @@ $string['setting_moonasseturl_desc'] = 'URL of an image (skins the moon\'s disc)
 $string['setting_planettextures'] = 'Upload planet textures';
 $string['setting_planettextures_desc'] = 'Upload up to nine equirectangular (2:1 lat-long) images to use as the surfaces of the planets in the Void environment. Each image is applied to one planet, in filename order (Planet 1 is the first). Which planets are ringed is set by "Ringed planets" below. Leave empty to keep the procedural planets. Only used in the Void environment.';
 $string['setting_ringplanet'] = 'Planet {$a}';
+$string['setting_ringplanet_named'] = 'Planet {$a->num} — {$a->name}';
 $string['setting_ringplanets'] = 'Ringed planets';
 $string['setting_ringplanets_desc'] = 'Which of the Void\'s planets wear a ring. Planets are numbered in the order their surface maps are uploaded (Planet 1 is the first); with no maps uploaded the Void shows three procedural planets. Only the planets selected here are ringed, so rings appear exactly where intended.';
 $string['setting_ringtexture'] = 'Upload ring texture';

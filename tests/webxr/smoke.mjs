@@ -2663,17 +2663,21 @@ const scenarios = [
                 markVrComfortActive: CS.prototype.markVrComfortActive
             };
             self.buildVrComfortPanel();
-            const built = !!self.vrComfort && self.vrComfort.buttons.length === 13;
+            // 13 comfort option tiles plus the Exit VR tile.
+            const built = !!self.vrComfort && self.vrComfort.buttons.length === 14;
             const tele = self.vrComfort.buttons.find((b) =>
                 b.userData.comfortField === 'locomotion' && b.userData.comfortValueStr === 'teleport');
             const teleActive = tele.material.map === tele.userData.mapOn;
+            // The Exit VR tile carries an exitVr action, not a comfort field.
+            const exit = self.vrComfort.buttons.find((b) => b.userData.exitVr === true);
+            const hasExit = !!exit && !exit.userData.comfortField;
             self.toggleVrComfort();
             const shown = self.vrComfort.visible === true &&
                 self.interactive.length === self.vrComfort.buttons.length;
             self.toggleVrComfort();
             const hidden = self.vrComfort.visible === false && self.interactive.length === 0;
-            return {pass: built && teleActive && shown && hidden,
-                detail: `built=${built} teleActive=${teleActive} shown=${shown} hidden=${hidden}`};
+            return {pass: built && teleActive && hasExit && shown && hidden,
+                detail: `built=${built} teleActive=${teleActive} hasExit=${hasExit} shown=${shown} hidden=${hidden}`};
         }
     },
     {

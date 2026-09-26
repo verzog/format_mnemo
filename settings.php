@@ -306,9 +306,32 @@ if ($ADMIN->fulltree) {
     // with no maps uploaded the Void shows three procedural planets. Only the
     // planets selected here are ringed, so rings appear exactly where intended.
     // Defaults to the three planets that were ringed by default before.
+    // Each option is labelled with the uploaded surface-map's name (e.g.
+    // "Planet 1 — jupiter") so the admin can tell which planet they are ringing;
+    // a slot with no uploaded map yet falls back to a plain "Planet N".
+    $planetnames = [];
+    $planetfiles = get_file_storage()->get_area_files(
+        \context_system::instance()->id,
+        'format_mnemo',
+        'planettextures',
+        0,
+        'filename',
+        false
+    );
+    foreach ($planetfiles as $planetfile) {
+        $planetnames[] = pathinfo($planetfile->get_filename(), PATHINFO_FILENAME);
+    }
     $ringchoices = [];
     for ($i = 1; $i <= 9; $i++) {
-        $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
+        if (isset($planetnames[$i - 1]) && $planetnames[$i - 1] !== '') {
+            $ringchoices[$i] = get_string(
+                'setting_ringplanet_named',
+                'format_mnemo',
+                ['num' => $i, 'name' => $planetnames[$i - 1]]
+            );
+        } else {
+            $ringchoices[$i] = get_string('setting_ringplanet', 'format_mnemo', $i);
+        }
     }
     $settings->add(new admin_setting_configmultiselect(
         'format_mnemo/ringplanets',
