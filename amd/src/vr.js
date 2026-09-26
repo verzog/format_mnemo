@@ -300,6 +300,7 @@ define('format_mnemo/vr', [], function() {
         this.lastShadowPos = new THREE.Vector3(1e9, 0, 1e9); // Last shadow recentre.
         this.modelCache = {}; // Loaded .glb templates, keyed by URL.
         this.traffic = []; // Flying-car instances animated each frame.
+        this.mixers = []; // AnimationMixers for placed models that autoplay a clip.
         this.planetField = null; // Void planet group; revolves slowly each frame.
 
         this.build();
@@ -2120,6 +2121,14 @@ define('format_mnemo/vr', [], function() {
         if (this.loaders.GLTFLoader) {
             promise = this.gltf().loadAsync(url).then(function(gltf) {
                 self.dressLoadedModel(gltf.scene);
+                // Keep the authored animation clips with the template so a placed
+                // clone can be driven by its own mixer (see animateClone). Stored
+                // as a plain property, NOT in userData: Object3D.clone()
+                // JSON-round-trips userData, which would serialise every clip for
+                // each placed instance. Only the template's clips are ever read.
+                // The built-in fallback parser decodes no clips, so a CSP-blocked
+                // page simply renders the model static.
+                gltf.scene.mnemoClips = gltf.animations || [];
                 return gltf.scene;
             });
         } else {
@@ -2940,6 +2949,7 @@ define('format_mnemo/vr', [], function() {
                 continue;
             }
             var m = tpl.clone();
+            this.animateClone(tpl, m);
             m.position.set(p.x, y, p.z);
             if (type === 'lamp') {
                 this.addLampLight(m);
@@ -2997,6 +3007,59 @@ define('format_mnemo/vr', [], function() {
         return (mc && mc.behaviour && typeof mc.behaviour === 'object') ? mc.behaviour : {};
     };
 
+    // A placed model animates only when its template is tagged animate (the
+    // per-model toggle) and the .glb actually carries clips. Cap the number of
+    // live mixers so a long avenue of animated props cannot flood the frame.
+    var MIXERS_MAX = 40;
+
+    /**
+     * If a freshly placed clone comes from a template tagged to autoplay its
+     * animation, spin up a looping AnimationMixer for it and register it so the
+     * frame loop advances it (see updateMixers). Skinned (rigged) models are
+     * skipped: a plain clone shares their skeleton, so a mixer would corrupt
+     * every instance - rigged-character support needs SkeletonUtils cloning and
+     * is a later addition. A no-op for a static or untagged model, so it is safe
+     * to call at every clone site.
+     *
+     * @param {Object} tpl The source template (carries mnemoAnimate/mnemoClips).
+     * @param {Object} clone The placed clone to animate.
+     */
+    Cyberspace.prototype.animateClone = function(tpl, clone) {
+        if (!tpl || !clone || !tpl.mnemoAnimate) {
+            return;
+        }
+        var clips = tpl.mnemoClips;
+        if (!Array.isArray(clips) || !clips.length || this.mixers.length >= MIXERS_MAX) {
+            return;
+        }
+        var skinned = false;
+        clone.traverse(function(o) {
+            if (o.isSkinnedMesh) {
+                skinned = true;
+            }
+        });
+        if (skinned) {
+            return;
+        }
+        var mixer = new this.THREE.AnimationMixer(clone);
+        for (var i = 0; i < clips.length; i++) {
+            mixer.clipAction(clips[i]).play();
+        }
+        this.mixers.push(mixer);
+    };
+
+    /**
+     * Advance every registered animation mixer by the frame delta. Runs on flat
+     * screen and in a headset alike, so autoplay loops keep playing in VR.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateMixers = function(dt) {
+        for (var i = 0; i < this.mixers.length; i++) {
+            this.mixers[i].update(dt);
+        }
+    };
+
     Cyberspace.prototype.loadProp = function(name) {
         return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
     };
@@ -3036,21 +3099,32 @@ define('format_mnemo/vr', [], function() {
         }
         base = base || this.config.modelsbaseurl;
         var fallback = this.config.modelsfallbackurl;
+        // Whether this model plays its authored animation on a loop (the
+        // per-model "animate" behaviour toggle, off by default). Stamped on the
+        // resolved template so every placed clone knows to spin up a mixer.
+        var animate = !!this.modelBehaviour(name).animate;
+        var p;
         // When the server enumerated the (Moodle-hosted) upload area and this
         // model is not in it, skip the probe and load the bundled model directly,
         // so the console is not littered with a 404 for every omitted model. When
         // pack is null (an external, unenumerable pack) every name is still probed
         // against the base and falls back to bundled, as before.
         if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
-            return this.loadModel(this.joinBase(fallback, name + '.glb'));
+            p = this.loadModel(this.joinBase(fallback, name + '.glb'));
+        } else {
+            p = this.loadModel(this.joinBase(base, name + '.glb'));
+            if (fallback && fallback !== base) {
+                p = p.catch(function() {
+                    return self.loadModel(self.joinBase(fallback, name + '.glb'));
+                });
+            }
         }
-        var p = this.loadModel(this.joinBase(base, name + '.glb'));
-        if (fallback && fallback !== base) {
-            p = p.catch(function() {
-                return self.loadModel(self.joinBase(fallback, name + '.glb'));
-            });
-        }
-        return p;
+        return p.then(function(tpl) {
+            if (tpl) {
+                tpl.mnemoAnimate = animate;
+            }
+            return tpl;
+        });
     };
 
     /**
@@ -3116,6 +3190,7 @@ define('format_mnemo/vr', [], function() {
                     continue;
                 }
                 var m = tpl.clone();
+                this.animateClone(tpl, m);
                 m.position.set(px, 0, pz);
                 if (s < 0 && kind === 'lamp') {
                     m.rotation.y = Math.PI; // Arm faces the road on both sides.
@@ -3240,6 +3315,7 @@ define('format_mnemo/vr', [], function() {
             // raised sidewalk stands on the slab rather than sinking into it.
             var py = this.surfaceHeightAt(px, pz);
             var m = tpl.clone();
+            this.animateClone(tpl, m);
             m.position.set(px, py, pz);
             m.rotation.y = slot.rotY;
             this.addLampLight(m);
@@ -3284,6 +3360,7 @@ define('format_mnemo/vr', [], function() {
             kx = this.snapBase(kx, kioskstored);
             kz = this.snapBase(kz, kioskstored);
             var m = tpl.clone();
+            this.animateClone(tpl, m);
             m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
             this.setShadow(m, true);
@@ -3424,6 +3501,7 @@ define('format_mnemo/vr', [], function() {
                 break;
             }
             var car = tpl.clone();
+            this.animateClone(tpl, car);
             // The random size jitter times the model's asset-viewer scale.
             car.scale.setScalar((0.9 + Math.random() * 0.5) * this.modelScale(ct.model));
             var dir = i % 2 === 0 ? 1 : -1;
@@ -4637,6 +4715,11 @@ define('format_mnemo/vr', [], function() {
         }
         var self = this;
         return this.loadModel(url).then(function(tpl) {
+            // Buildings bypass loadNamedModel, so stamp the animate toggle here
+            // from the model's name (its .glb basename, e.g. "building-forum"),
+            // matching how the asset viewer keys a building card.
+            var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.glb$/i, '');
+            tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
             // Box3 (infinite bounds -> NaN placement); keep the procedural
@@ -4644,6 +4727,9 @@ define('format_mnemo/vr', [], function() {
             if (new self.THREE.Box3().setFromObject(model).isEmpty()) {
                 return null;
             }
+            // Animate only the clone we are keeping (a discarded empty clone must
+            // not leave a live mixer behind).
+            self.animateClone(tpl, model);
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close
             // together) rather than appearing to merge with them.
@@ -7357,6 +7443,7 @@ define('format_mnemo/vr', [], function() {
         }
         var y = this.placedBaseY(type);
         var m = tpl.clone();
+        this.animateClone(tpl, m);
         m.position.set(x, y, z);
         if (type === 'lamp') {
             this.addLampLight(m);
@@ -9403,6 +9490,9 @@ define('format_mnemo/vr', [], function() {
         for (var b = 0; b < this.beacons.length; b++) {
             this.beacons[b].material.opacity = on ? 0.95 : 0.12;
         }
+
+        // Advance any autoplay model animations (searchlights, moving parts).
+        this.updateMixers(dt);
 
         // Glide the flying-car traffic.
         this.updateTraffic(dt);

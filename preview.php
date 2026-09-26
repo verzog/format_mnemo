@@ -188,7 +188,11 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
             'span',
             get_string('preview_behaviour', 'format_mnemo'),
             ['class' => 'format-mnemo-preview__field-label']
-        ) . $behboxes,
+        ) . $behboxes . html_writer::tag(
+            'small',
+            get_string('preview_beh_animate_note', 'format_mnemo'),
+            ['class' => 'format-mnemo-preview__hint']
+        ),
         'format-mnemo-preview__field'
     );
 
