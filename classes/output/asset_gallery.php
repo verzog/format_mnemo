@@ -497,6 +497,27 @@ class asset_gallery {
     }
 
     /**
+     * The model names whose per-model settings (environments, facing, scale and
+     * behaviour flags such as "animate") may be edited in the asset viewer: every
+     * model card the viewer shows except the sun/moon celestials, which carry
+     * their own URL config rather than a model-config entry. This is the single
+     * source of truth shared by the preview page's settings form (which cards
+     * get one) and its save handler (which names it accepts), so a vehicle or
+     * building model can be configured, not just a placeable prop.
+     *
+     * @return string[] The configurable model base names.
+     */
+    public static function configurable_model_names(): array {
+        $names = [];
+        foreach (self::models() as $model) {
+            if (($model['category'] ?? 'prop') !== 'celestial') {
+                $names[(string)$model['key']] = true;
+            }
+        }
+        return array_map('strval', array_keys($names));
+    }
+
+    /**
      * The base names of the models bundled with the plugin, as a lookup set.
      *
      * @return array<string, bool> Map of model name => true.

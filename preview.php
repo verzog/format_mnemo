@@ -39,8 +39,9 @@ $PAGE->set_heading(get_string('preview_title', 'format_mnemo'));
 // external page already gates access to site config; a sesskey guards the POST.
 $savemodel = optional_param('savemodel', '', PARAM_RAW_TRIMMED);
 if ($savemodel !== '' && confirm_sesskey()) {
-    // Only accept a name that is a real, placeable model.
-    $known = asset_gallery::placer_prop_names();
+    // Only accept a name that is a real, configurable model (props, vehicles
+    // and buildings — every viewer model bar the celestials).
+    $known = asset_gallery::configurable_model_names();
     if (in_array($savemodel, $known, true)) {
         $envs = [];
         foreach (model_config::ENVIRONMENTS as $env) {
@@ -75,7 +76,7 @@ if ($savemodel !== '' && confirm_sesskey()) {
 
 $textures = asset_gallery::textures();
 $models = asset_gallery::models();
-$placeable = asset_gallery::placer_prop_names();
+$configurable = asset_gallery::configurable_model_names();
 $rootid = 'mnemo-preview-' . uniqid();
 
 /**
@@ -280,7 +281,7 @@ echo $OUTPUT->heading(get_string('preview_models', 'format_mnemo'), 3);
 
 // Render one model card. The canvas id keeps the model's index in the full list
 // so it stays aligned with $modelconfig (the client renders into it by id).
-$rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $placeable, $PAGE): string {
+$rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $configurable, $PAGE): string {
     $canvas = html_writer::tag('canvas', '', [
         'id' => $rootid . '-model-' . $i,
         'class' => 'format-mnemo-preview__canvas',
@@ -307,10 +308,11 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
             'format-mnemo-preview__use text-muted'
         );
     }
-    // Per-model settings panel: environments, facing and scale, saved to
-    // model_config. Only offered for placeable models (named building models
-    // are activity-bound and not free props).
-    if (in_array($model['key'], $placeable, true)) {
+    // Per-model settings panel: environments, facing, scale and behaviour
+    // (including "animate"), saved to model_config. Offered for every
+    // configurable model - props, vehicles and buildings - but not the
+    // celestials, which carry their own URL config.
+    if (in_array($model['key'], $configurable, true)) {
         $body .= mnemo_model_settings_panel($model['key'], model_config::get($model['key']), $PAGE->url);
     }
     return html_writer::div(

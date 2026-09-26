@@ -3041,22 +3041,43 @@ define('format_mnemo/vr', [], function() {
         if (skinned) {
             return;
         }
+        // Flag the clone's meshes as animated so setShadow never lets them cast:
+        // the shadow map is static (autoUpdate off, refreshed only when the
+        // learner moves), so a moving part's cast shadow would freeze in an
+        // earlier pose. They still receive shadows. This matches the moving
+        // traffic, which casts no shadow for the same reason.
+        clone.traverse(function(o) {
+            if (o.isMesh) {
+                o.userData.mnemoAnimated = true;
+                o.castShadow = false;
+            }
+        });
         var mixer = new this.THREE.AnimationMixer(clone);
         for (var i = 0; i < clips.length; i++) {
             mixer.clipAction(clips[i]).play();
         }
-        this.mixers.push(mixer);
+        this.mixers.push({mixer: mixer, root: clone});
     };
 
     /**
-     * Advance every registered animation mixer by the frame delta. Runs on flat
-     * screen and in a headset alike, so autoplay loops keep playing in VR.
+     * Advance every registered animation mixer by the frame delta, and drop any
+     * whose model has been detached from the scene (a deleted placed/generated
+     * prop), so a stale mixer neither animates an invisible object nor
+     * permanently holds a slot against MIXERS_MAX. Runs on flat screen and in a
+     * headset alike, so autoplay loops keep playing in VR.
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateMixers = function(dt) {
-        for (var i = 0; i < this.mixers.length; i++) {
-            this.mixers[i].update(dt);
+        for (var i = this.mixers.length - 1; i >= 0; i--) {
+            var entry = this.mixers[i];
+            if (!entry.root.parent) {
+                entry.mixer.stopAllAction();
+                entry.mixer.uncacheRoot(entry.root);
+                this.mixers.splice(i, 1);
+                continue;
+            }
+            entry.mixer.update(dt);
         }
     };
 
@@ -3769,7 +3790,9 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.setShadow = function(obj, on) {
         obj.traverse(function(child) {
             if (child.isMesh) {
-                child.castShadow = on;
+                // An animated mesh never casts (its moving parts would freeze in
+                // the static shadow map); see animateClone. It still receives.
+                child.castShadow = on && !child.userData.mnemoAnimated;
                 child.receiveShadow = on;
             }
         });

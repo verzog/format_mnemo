@@ -1744,12 +1744,29 @@ const scenarios = [
                 new THREE.VectorKeyframeTrack('.position', [0, 1], [0, 0, 0, 0, 1, 0])
             ]);
             const self = {THREE: THREE, mixers: []};
+            const scene = new THREE.Scene();
 
-            // Tagged template with a clip: one mixer registered on the clone.
+            // Tagged template with a clip: one mixer registered on the clone, and
+            // its meshes are flagged non-casting so the static shadow map is not
+            // left with a frozen pose.
             const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
             tpl.mnemoAnimate = true;
             tpl.mnemoClips = [clip];
-            CS.prototype.animateClone.call(self, tpl, tpl.clone());
+            const live = tpl.clone();
+            live.traverse((o) => {
+                if (o.isMesh) {
+                    o.castShadow = true;
+                }
+            });
+            CS.prototype.animateClone.call(self, tpl, live);
+            scene.add(live);
+            let flaggedNoCast = true;
+            live.traverse((o) => {
+                if (o.isMesh && (o.castShadow || !o.userData.mnemoAnimated)) {
+                    flaggedNoCast = false;
+                }
+            });
             const started = self.mixers.length === 1;
 
             // Untagged template with the same clip: no mixer.
@@ -1763,15 +1780,22 @@ const scenarios = [
             skinned.mnemoAnimate = true;
             skinned.mnemoClips = [clip];
             const skclone = new THREE.Group();
-            const sk = new THREE.SkinnedMesh(new THREE.BoxGeometry(1, 1, 1));
-            skclone.add(sk);
+            skclone.add(new THREE.SkinnedMesh(new THREE.BoxGeometry(1, 1, 1)));
             CS.prototype.animateClone.call(self, skinned, skclone);
             const skippedSkinned = self.mixers.length === 1;
 
-            // The registered mixer advances without throwing.
-            self.mixers[0].update(0.016);
-            return {pass: started && gatedOff && skippedSkinned,
-                detail: `started=${started} gatedOff=${gatedOff} skinned=${skippedSkinned}`};
+            // updateMixers advances a live mixer, then drops it once its model is
+            // detached from the scene (a deleted prop), freeing the cap slot.
+            self.updateMixers = CS.prototype.updateMixers;
+            self.updateMixers(0.016);
+            const stillLive = self.mixers.length === 1;
+            scene.remove(live);
+            self.updateMixers(0.016);
+            const pruned = self.mixers.length === 0;
+
+            return {pass: started && gatedOff && skippedSkinned && flaggedNoCast && stillLive && pruned,
+                detail: `started=${started} off=${gatedOff} skin=${skippedSkinned} ` +
+                    `nocast=${flaggedNoCast} live=${stillLive} pruned=${pruned}`};
         }
     },
     {
