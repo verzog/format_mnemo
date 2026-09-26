@@ -872,10 +872,8 @@ final class scene_test extends \advanced_testcase {
             'itemid' => 0,
             'filepath' => '/',
         ];
-        $fs->create_file_from_string(
-            ['filearea' => 'vehicleassets', 'filename' => 'hovercar.glb'] + $base, 'x');
-        $fs->create_file_from_string(
-            ['filearea' => 'buildingassets', 'filename' => 'building-forum.glb'] + $base, 'x');
+        $fs->create_file_from_string(['filearea' => 'vehicleassets', 'filename' => 'hovercar.glb'] + $base, 'x');
+        $fs->create_file_from_string(['filearea' => 'buildingassets', 'filename' => 'building-forum.glb'] + $base, 'x');
 
         // A car type may now reference the uploaded vehicle by base name.
         set_config('cartypes', 'hovercar | avenue | 10 | 20 | none', 'format_mnemo');

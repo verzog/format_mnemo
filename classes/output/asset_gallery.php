@@ -218,9 +218,9 @@ class asset_gallery {
         // Props resolve like the scene: external URL pack, then the uploaded
         // prop pack, then bundled. Vehicles and buildings each have their own
         // upload area (no external URL), then bundled.
+        $externalpack = (string)get_config('format_mnemo', 'assetbaseurl');
         $out = array_merge(
-            self::area_model_cards('prop', 'assetpack', $bundledprops,
-                (string)get_config('format_mnemo', 'assetbaseurl')),
+            self::area_model_cards('prop', 'assetpack', $bundledprops, $externalpack),
             self::area_model_cards('vehicle', 'vehicleassets', $bundledvehicles, ''),
             self::area_model_cards('building', 'buildingassets', $bundledbuildings, '')
         );
@@ -253,12 +253,16 @@ class asset_gallery {
      *
      * @param string $category The category tag (prop, vehicle, building).
      * @param string $filearea The upload file area for this category.
-     * @param array<string, bool> $bundledset The bundled model names in this category.
+     * @param array $bundledset The bundled model names in this category, as keys.
      * @param string $externalbase An external asset-pack base URL, or '' if none.
      * @return array[] The model entries.
      */
-    protected static function area_model_cards(string $category, string $filearea,
-            array $bundledset, string $externalbase): array {
+    protected static function area_model_cards(
+        string $category,
+        string $filearea,
+        array $bundledset,
+        string $externalbase
+    ): array {
         global $CFG;
         $uploaded = self::stored_glb_files($filearea);
         $names = $bundledset;
