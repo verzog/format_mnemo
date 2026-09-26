@@ -156,4 +156,21 @@ final class model_config_test extends \advanced_testcase {
         $this->assertArrayHasKey('d', $client);
         $this->assertTrue($client['d']['behaviour']['grounded']);
     }
+
+    /**
+     * The "animate" behaviour flag (autoplay a model's looping glTF animation)
+     * is a known flag: it is stored when turned on, dropped when left at its
+     * off default, and reaches the scene client through for_client().
+     */
+    public function test_animate_behaviour_flag(): void {
+        $this->resetAfterTest();
+        // Off is the default, so an animate-only-off config stores nothing.
+        model_config::set('still', ['behaviour' => ['animate' => false]]);
+        $this->assertArrayNotHasKey('still', model_config::all());
+        // Turned on, it round-trips and is exposed to the client.
+        model_config::set('beacon', ['behaviour' => ['animate' => true]]);
+        $this->assertTrue(model_config::get('beacon')['behaviour']['animate']);
+        $client = model_config::for_client();
+        $this->assertTrue($client['beacon']['behaviour']['animate']);
+    }
 }

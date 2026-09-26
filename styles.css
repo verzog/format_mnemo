@@ -1010,6 +1010,12 @@
     max-width: 6em;
 }
 
+.format-mnemo-preview__hint {
+    display: block;
+    margin-top: 4px;
+    opacity: 0.75;
+}
+
 /* Narrow (phone) screens: the pop-out panels already open below the bar (its
    real height drives --mnemo-controls-inset), so here only cap their width so
    they never overflow a ~360px viewport. */

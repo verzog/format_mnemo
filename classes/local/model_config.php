@@ -46,6 +46,7 @@ class model_config {
         'takeoffland' => false,
         'avoid' => true,
         'face' => true,
+        'animate' => false,
     ];
 
     /**

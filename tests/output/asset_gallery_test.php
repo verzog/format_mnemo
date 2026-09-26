@@ -300,4 +300,32 @@ final class asset_gallery_test extends \advanced_testcase {
         $this->assertNotContains('spaceship', $names);
         $this->assertNotContains('123', $names);
     }
+
+    /**
+     * The configurable-model set (which models the asset viewer offers a
+     * settings form for, and which its save handler accepts) spans props,
+     * vehicles and buildings, but never a sun/moon celestial. Unlike the placer
+     * names it includes the named building and uploaded vehicle models, so their
+     * per-model behaviour (e.g. "animate") can be set in the UI.
+     */
+    public function test_configurable_model_names(): void {
+        $this->resetAfterTest();
+
+        $this->make_file('vehicleassets', 'hovercar.glb');
+        $this->make_file('buildingassets', 'building-forum.glb');
+        set_config('moonasseturl', 'https://cdn.example.org/moon.glb', 'format_mnemo');
+
+        $names = asset_gallery::configurable_model_names();
+        // A bundled prop, the uploaded vehicle and the uploaded building model.
+        $this->assertContains('lamp', $names);
+        $this->assertContains('hovercar', $names);
+        $this->assertContains('building-forum', $names);
+        // The moon is a celestial with its own URL config, not a model-config
+        // entry, so it is never offered a per-model settings form.
+        $this->assertNotContains('moon', $names);
+        // Every name is a string (a numeric base name must not slip back to int).
+        foreach ($names as $name) {
+            $this->assertIsString($name);
+        }
+    }
 }

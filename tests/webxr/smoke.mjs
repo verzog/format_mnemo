@@ -694,6 +694,7 @@ const scenarios = [
                 config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/'},
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
@@ -717,6 +718,7 @@ const scenarios = [
                 config: {modelsbaseurl: 'm/', modelsfallbackurl: 'm/'},
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
@@ -736,6 +738,8 @@ const scenarios = [
             const self = {
                 THREE: THREE, renderer: {shadowMap: {}},
                 buildingModelUrl: () => 'x.glb',
+                modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
+                animateClone: CS.prototype.animateClone,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
             };
@@ -758,6 +762,8 @@ const scenarios = [
             const self = {
                 THREE: THREE, renderer: {shadowMap: sm},
                 buildingModelUrl: () => 'x.glb',
+                modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
+                animateClone: CS.prototype.animateClone,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(tpl)
             };
@@ -1376,6 +1382,7 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                animateClone: CS.prototype.animateClone,
                 placeProp: CS.prototype.placeProp
             };
             self.placeProp('lamp', 7, 4, -6);
@@ -1411,6 +1418,7 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                animateClone: CS.prototype.animateClone,
                 buildPlacedObjectsOfType: CS.prototype.buildPlacedObjectsOfType
             };
             self.buildPlacedObjectsOfType('kiosk', tpl);
@@ -1672,6 +1680,7 @@ const scenarios = [
                 config: {environment: 'void', modelsbaseurl: 'm/',
                     modelconfig: {gridonly: {envs: ['grid']}}},
                 modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
                 joinBase: () => 'x',
                 loadModel: () => Promise.resolve({}),
                 loadProp: CS.prototype.loadProp,
@@ -1704,6 +1713,89 @@ const scenarios = [
             const none = self.modelBehaviour('other');
             return {pass: set.grounded === true && Object.keys(none).length === 0,
                 detail: `set=${JSON.stringify(set)} none=${JSON.stringify(none)}`};
+        }
+    },
+    {
+        name: 'animate: loadNamedModel stamps the animate toggle onto the template',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const self = {
+                config: {modelsbaseurl: 'm/',
+                    modelconfig: {beacon: {behaviour: {animate: true}}}},
+                joinBase: CS.prototype.joinBase,
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                loadNamedModel: CS.prototype.loadNamedModel,
+                loadModel: () => Promise.resolve(new THREE.Group())
+            };
+            const on = await CS.prototype.loadProp.call(self, 'beacon');
+            const off = await CS.prototype.loadProp.call(self, 'plain');
+            return {pass: on.mnemoAnimate === true && off.mnemoAnimate === false,
+                detail: `on=${on.mnemoAnimate} off=${off.mnemoAnimate}`};
+        }
+    },
+    {
+        name: 'animate: animateClone starts a looping mixer only for a tagged, clip-bearing template',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const clip = new THREE.AnimationClip('bob', -1, [
+                new THREE.VectorKeyframeTrack('.position', [0, 1], [0, 0, 0, 0, 1, 0])
+            ]);
+            const self = {THREE: THREE, mixers: []};
+            const scene = new THREE.Scene();
+
+            // Tagged template with a clip: one mixer registered on the clone, and
+            // its meshes are flagged non-casting so the static shadow map is not
+            // left with a frozen pose.
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+            tpl.mnemoAnimate = true;
+            tpl.mnemoClips = [clip];
+            const live = tpl.clone();
+            live.traverse((o) => {
+                if (o.isMesh) {
+                    o.castShadow = true;
+                }
+            });
+            CS.prototype.animateClone.call(self, tpl, live);
+            scene.add(live);
+            let flaggedNoCast = true;
+            live.traverse((o) => {
+                if (o.isMesh && (o.castShadow || !o.userData.mnemoAnimated)) {
+                    flaggedNoCast = false;
+                }
+            });
+            const started = self.mixers.length === 1;
+
+            // Untagged template with the same clip: no mixer.
+            const off = new THREE.Group();
+            off.mnemoClips = [clip];
+            CS.prototype.animateClone.call(self, off, off.clone());
+            const gatedOff = self.mixers.length === 1;
+
+            // A skinned model is skipped (a plain clone shares its skeleton).
+            const skinned = new THREE.Group();
+            skinned.mnemoAnimate = true;
+            skinned.mnemoClips = [clip];
+            const skclone = new THREE.Group();
+            skclone.add(new THREE.SkinnedMesh(new THREE.BoxGeometry(1, 1, 1)));
+            CS.prototype.animateClone.call(self, skinned, skclone);
+            const skippedSkinned = self.mixers.length === 1;
+
+            // updateMixers advances a live mixer, then drops it once its model is
+            // detached from the scene (a deleted prop), freeing the cap slot.
+            self.updateMixers = CS.prototype.updateMixers;
+            self.updateMixers(0.016);
+            const stillLive = self.mixers.length === 1;
+            scene.remove(live);
+            self.updateMixers(0.016);
+            const pruned = self.mixers.length === 0;
+
+            return {pass: started && gatedOff && skippedSkinned && flaggedNoCast && stillLive && pruned,
+                detail: `started=${started} off=${gatedOff} skin=${skippedSkinned} ` +
+                    `nocast=${flaggedNoCast} live=${stillLive} pruned=${pruned}`};
         }
     },
     {
@@ -1904,6 +1996,7 @@ const scenarios = [
                 pickTrafficDest: CS.prototype.pickTrafficDest,
                 trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
+                animateClone: CS.prototype.animateClone,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });
             // A count above the per-type limit is clamped to 16.
@@ -3048,6 +3141,7 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                animateClone: CS.prototype.animateClone,
                 placeLampSlots: CS.prototype.placeLampSlots
             };
             self.placeLampSlots(tpl);
@@ -3572,6 +3666,7 @@ const scenarios = [
                 applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                animateClone: CS.prototype.animateClone,
                 placeLampSlots: CS.prototype.placeLampSlots
             };
             self.placeLampSlots(tpl);
