@@ -10152,8 +10152,16 @@ define('format_mnemo/vr', [], function() {
             map: tex, transparent: true, opacity: 0,
             depthTest: false, depthWrite: false
         });
-        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat);
-        mesh.position.set(0, 0, -1);
+        // Push the vignette far from the eye (and scale it up to keep the same
+        // angular coverage) so it has negligible binocular disparity. At 1 m in
+        // front of the camera the dark ring projected to very different screen
+        // positions in each eye (~1.8° apart), which in a headset read as "one
+        // eye flickering over the other" whenever the vignette faded in on
+        // movement. At ~300 m the per-eye offset is far below stereo acuity, so
+        // both eyes see the ring in the same place. depthTest is off, so its
+        // distance never lets scene geometry occlude it.
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(660, 660), mat);
+        mesh.position.set(0, 0, -300);
         mesh.renderOrder = 999;
         mesh.frustumCulled = false;
         this.camera.add(mesh);
