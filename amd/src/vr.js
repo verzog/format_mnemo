@@ -2998,6 +2998,15 @@ define('format_mnemo/vr', [], function() {
         }
         var base = this.config.modelsbaseurl;
         var fallback = this.config.modelsfallbackurl;
+        // When the server enumerated the (Moodle-hosted) asset pack and this prop
+        // is not in it, skip the pack probe and load the bundled model directly,
+        // so the console is not littered with a 404 for every omitted prop. When
+        // packmodels is null (an external, unenumerable pack) every prop is still
+        // probed against the base and falls back to bundled, as before.
+        var pack = this.config.packmodels;
+        if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
+            return this.loadModel(this.joinBase(fallback, name + '.glb'));
+        }
         var p = this.loadModel(this.joinBase(base, name + '.glb'));
         if (fallback && fallback !== base) {
             p = p.catch(function() {

@@ -772,6 +772,13 @@ class scene implements renderable, templatable {
             // per-model fallback so a partial asset pack (only some props) keeps
             // the bundled models for the props it omits.
             'modelsfallbackurl' => (new moodle_url('/course/format/mnemo/models/'))->out(false),
+            // The prop base names present in an uploaded (Moodle-hosted) asset
+            // pack, so the client only probes the pack for models it actually
+            // holds and loads the rest straight from the bundled fallback (no
+            // 404 for props the pack omits). Null when the pack is an external
+            // URL we cannot enumerate (the client then probes every prop, with
+            // the bundled fallback), or when there is no pack at all.
+            'packmodels' => $this->pack_model_names(),
             // Module types that have a building-<modname>.glb model available, so
             // the client only attempts to load buildings it can expect to find.
             'buildingmodels' => $this->building_models($nodes),
@@ -988,6 +995,39 @@ class scene implements renderable, templatable {
             $sentinel
         )->out(false);
         return substr($url, 0, -strlen($sentinel));
+    }
+
+    /**
+     * The prop base names (without extension) present in an uploaded asset pack,
+     * so the client can avoid probing the pack for props it does not contain and
+     * load those straight from the bundled fallback instead.
+     *
+     * Only the Moodle-hosted upload can be enumerated: an external asset-pack URL
+     * (assetbaseurl) is opaque, so this returns null there to keep the client
+     * probing every prop (with the bundled fallback). It also returns null when
+     * there is no uploaded pack, since then the models base is the bundled dir
+     * and there is nothing to skip. Only ".glb" files are listed, matching the
+     * "<name>.glb" the client requests for a prop.
+     *
+     * @return array|null
+     */
+    protected function pack_model_names(): ?array {
+        if (!empty(get_config('format_mnemo', 'assetbaseurl'))) {
+            return null;
+        }
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, 'format_mnemo', 'assetpack', 0, 'filename', false);
+        if (empty($files)) {
+            return null;
+        }
+        $names = [];
+        foreach ($files as $file) {
+            if (preg_match('/^(.*)\.glb$/i', $file->get_filename(), $m)) {
+                $names[] = $m[1];
+            }
+        }
+        return array_values(array_unique($names));
     }
 
     /**
