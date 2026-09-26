@@ -424,8 +424,14 @@ define('format_mnemo/vr', [], function() {
         // physical WebXR camera pose is not constrained to the rig), so the depth
         // z-fighting is addressed by the 24-bit depth buffer above (no MSAA)
         // rather than by pushing the near plane out.
+        // Far plane sits well beyond the sky dome (radius 600, pinned to the eye
+        // in updateCelestials) so the dome never touches the far clip. When the
+        // dome radius equalled the far distance it was clipped/again z-fought the
+        // cleared far depth, and each eye resolved that differently - a stereo
+        // strobe of the whole sky, worst while moving. 1200 keeps the dome at
+        // ~half depth; the floor layers are protected separately by polygonOffset.
         var camera = new THREE.PerspectiveCamera(
-            72, this.aspect(), 0.1, 600
+            72, this.aspect(), 0.1, 1200
         );
         camera.position.set(0, 1.6, 0);
         this.camera = camera;
@@ -684,6 +690,10 @@ define('format_mnemo/vr', [], function() {
             })
         );
         this.scene.add(dome);
+        // Pinned to the eye each frame (see updateCelestials) so it reads as a
+        // true backdrop and the viewer can never move far enough for its far
+        // hemisphere to cross the camera far plane.
+        this.skyDome = dome;
 
         // A single celestial body that follows the Moodle site clock: the sun
         // by day, the moon by night. It rides the sun's path (so the disc and
@@ -931,10 +941,12 @@ define('format_mnemo/vr', [], function() {
      * a world-fixed disc once they moved away from it).
      */
     Cyberspace.prototype.updateCelestials = function() {
-        if (!this.celestials.length) {
-            return;
-        }
         var cam = this.camera.getWorldPosition(this.tmp);
+        // Keep the sky dome centred on the eye so it stays a fixed backdrop and
+        // never crosses the far plane as the viewer moves through the city.
+        if (this.skyDome) {
+            this.skyDome.position.copy(cam);
+        }
         for (var i = 0; i < this.celestials.length; i++) {
             var c = this.celestials[i];
             c.sprite.position.set(
@@ -10140,8 +10152,16 @@ define('format_mnemo/vr', [], function() {
             map: tex, transparent: true, opacity: 0,
             depthTest: false, depthWrite: false
         });
-        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), mat);
-        mesh.position.set(0, 0, -1);
+        // Push the vignette far from the eye (and scale it up to keep the same
+        // angular coverage) so it has negligible binocular disparity. At 1 m in
+        // front of the camera the dark ring projected to very different screen
+        // positions in each eye (~1.8° apart), which in a headset read as "one
+        // eye flickering over the other" whenever the vignette faded in on
+        // movement. At ~300 m the per-eye offset is far below stereo acuity, so
+        // both eyes see the ring in the same place. depthTest is off, so its
+        // distance never lets scene geometry occlude it.
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(660, 660), mat);
+        mesh.position.set(0, 0, -300);
         mesh.renderOrder = 999;
         mesh.frustumCulled = false;
         this.camera.add(mesh);
