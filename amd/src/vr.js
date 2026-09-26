@@ -3874,7 +3874,15 @@ define('format_mnemo/vr', [], function() {
         // chosen scale; otherwise the flat wet-asphalt colour is kept.
         var mat = new THREE.MeshStandardMaterial({
             color: this.roadTexture ? 0xffffff : 0x05070d,
-            roughness: 0.5, metalness: 0.5
+            roughness: 0.5, metalness: 0.5,
+            // Bias the road toward the camera in depth so it always wins over
+            // the base ground plane beneath it, regardless of depth-buffer
+            // precision. Without this the two near-coplanar surfaces z-fight at
+            // distance, which reads as a strobe - and in stereo (a headset) each
+            // eye resolves the fight differently, so it looks like one side
+            // flickering over the other. polygonOffset is a per-draw raster
+            // state, so it is deterministic and identical in both eyes.
+            polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
         });
         if (this.roadTexture) {
             var rdiv = this.roadScale * this.roadTexMult;
@@ -3999,7 +4007,11 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         var size = this.groundPatch;
         var gdiv = this.groundScale * this.groundTexMult;
-        var mat = new THREE.MeshStandardMaterial({roughness: 0.8, metalness: 0.2});
+        // Bias the plaza patch further toward the camera than the road strips
+        // (which use -1) so it wins over both the road and the base ground and
+        // never z-fights them - the same strobe/one-eye-flicker fix as the road.
+        var mat = new THREE.MeshStandardMaterial({roughness: 0.8, metalness: 0.2,
+            polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2});
         this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, size / gdiv, size / gdiv));
         var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
         patch.rotation.x = -Math.PI / 2;
@@ -5056,7 +5068,9 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var ud = target.userData;
-        if (ud.comfortField) {
+        if (ud.exitVr) {
+            this.exitVrSession();
+        } else if (ud.comfortField) {
             this.setComfort(ud.comfortField, ud.comfortValue);
         } else if (ud.readerAction) {
             this.readerControl(ud.readerAction);
@@ -6467,6 +6481,24 @@ define('format_mnemo/vr', [], function() {
             }
         }
 
+        // A compact Exit VR control in the panel's top-right corner: the only
+        // in-headset way to end the immersive session (the on-page Enter/Exit
+        // button is unreachable while wearing the headset). It reuses the tile
+        // look but carries an exitVr action instead of a comfort field; the
+        // sentinel field never matches a real comfort value, so it always shows
+        // its "off" face and activate() routes it to exitVrSession().
+        var exitBtn = this.makeComfortButton(s.exitvr || 'Exit VR', '__exitvr__', '1', accent);
+        exitBtn.userData.exitVr = true;
+        // Drop the comfort keys so it is purely an exit action: activate() routes
+        // it to exitVrSession(), and markVrComfortActive() leaves it on its "off"
+        // face (its sentinel field never matches a real comfort value anyway).
+        delete exitBtn.userData.comfortField;
+        delete exitBtn.userData.comfortValue;
+        delete exitBtn.userData.comfortValueStr;
+        exitBtn.position.set(bgW / 2 - 0.13, topRowY + 0.18, 0);
+        group.add(exitBtn);
+        buttons.push(exitBtn);
+
         this.scene.add(group);
         this.vrComfort = {group: group, buttons: buttons, visible: false, inInteractive: false};
         this.markVrComfortActive();
@@ -7489,10 +7521,7 @@ define('format_mnemo/vr', [], function() {
             button.disabled = false;
             button.addEventListener('click', function() {
                 if (self.renderer.xr.isPresenting) {
-                    var s = self.renderer.xr.getSession();
-                    if (s) {
-                        s.end();
-                    }
+                    self.exitVrSession();
                 } else {
                     self.enterVr();
                 }
@@ -7517,6 +7546,19 @@ define('format_mnemo/vr', [], function() {
         }).catch(function() {
             self.vrButton.textContent = self.config.strings.vrnotsupported;
         });
+    };
+
+    /**
+     * End the immersive session, if one is running. The single exit path used by
+     * both the on-page Enter/Exit button and the in-headset Exit VR tile (the
+     * page button is not reachable while wearing the headset, so the in-VR tile
+     * is the only way out from inside the session).
+     */
+    Cyberspace.prototype.exitVrSession = function() {
+        var session = this.renderer.xr.getSession();
+        if (session) {
+            session.end();
+        }
     };
 
     /**
@@ -10331,7 +10373,13 @@ define('format_mnemo/vr', [], function() {
      */
     GestureManager.prototype.handleMenu = function(menuPress) {
         if (menuPress > 0 && this.menuArmed) {
-            if (this.cs.toggleVrComfort) {
+            // The face button doubles as a "dismiss" for whatever panel is up:
+            // if the activity reader is open, close it first (so there is a
+            // reliable hardware way out of it without having to point at its
+            // small ✕); otherwise toggle the comfort panel.
+            if (this.cs.readerOpen && this.cs.closeReader) {
+                this.cs.closeReader();
+            } else if (this.cs.toggleVrComfort) {
                 this.cs.toggleVrComfort();
             }
             this.menuArmed = false;
