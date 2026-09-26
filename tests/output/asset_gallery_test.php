@@ -164,26 +164,31 @@ final class asset_gallery_test extends \advanced_testcase {
             $this->assertSame('bundled', $model['source']);
         }
 
-        // Upload a replacement lamp, and an uploaded-only building model with no
-        // bundled counterpart: the lamp flips to uploaded and the building model
-        // gains its own card.
+        // Upload a replacement lamp (a prop) and an uploaded-only building model
+        // into its own area: the lamp flips to uploaded and the building model
+        // gains its own card in the buildings group.
         $this->make_file('assetpack', 'lamp.glb');
-        $this->make_file('assetpack', 'building-forum.glb');
+        $this->make_file('buildingassets', 'building-forum.glb');
         $models = asset_gallery::models();
         $bykey = [];
         foreach ($models as $model) {
             $bykey[$model['key']] = $model;
         }
         $this->assertSame('uploaded', $bykey['lamp']['source']);
+        $this->assertSame('prop', $bykey['lamp']['category']);
         $this->assertStringContainsString('lamp.glb', $bykey['lamp']['url']);
         $this->assertArrayHasKey('building-forum', $bykey);
         $this->assertSame('uploaded', $bykey['building-forum']['source']);
+        $this->assertSame('building', $bykey['building-forum']['category']);
 
-        // A configured external pack URL wins over uploads (matching the scene).
+        // A configured external pack URL wins over uploads for props (matching
+        // the scene); vehicles and buildings keep their own areas.
         set_config('assetbaseurl', 'https://cdn.example.org/pack/', 'format_mnemo');
         foreach (asset_gallery::models() as $model) {
-            $this->assertSame('url', $model['source']);
-            $this->assertStringStartsWith('https://cdn.example.org/pack/', $model['url']);
+            if ($model['category'] === 'prop') {
+                $this->assertSame('url', $model['source']);
+                $this->assertStringStartsWith('https://cdn.example.org/pack/', $model['url']);
+            }
         }
     }
 

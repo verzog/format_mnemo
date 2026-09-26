@@ -84,6 +84,35 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
     ));
 
+    // Upload flying-car (vehicle) models straight into Moodle, kept separate
+    // from the props above. Files land in the 'vehicleassets' file area; the
+    // flying-car types setting references them by file base name (e.g. a
+    // "hovercar.glb" here is referenced as "hovercar"). A car type naming a
+    // model not uploaded here falls back to the bundled "av" vehicle.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/vehicleassets',
+        get_string('setting_vehicleassets', 'format_mnemo'),
+        get_string('setting_vehicleassets_desc', 'format_mnemo'),
+        'vehicleassets',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+    ));
+
+    // Upload per-activity building models straight into Moodle, kept separate
+    // from the props above. Files land in the 'buildingassets' file area, named
+    // building-<modname>.glb (e.g. building-quiz.glb, building-forum.glb);
+    // matching activities render that building instead of the procedural one.
+    // Any activity type without an uploaded (or bundled) building keeps the
+    // procedural building.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/buildingassets',
+        get_string('setting_buildingassets', 'format_mnemo'),
+        get_string('setting_buildingassets_desc', 'format_mnemo'),
+        'buildingassets',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+    ));
+
     // Neon sign webfont. Left blank, sign and label text is drawn in the
     // bundled "Courier New"/monospace stack. Point this at a hosted webfont file
     // (.woff2/.woff/.ttf/.otf) to give every neon sign a custom typeface. The

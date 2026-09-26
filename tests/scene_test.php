@@ -841,6 +841,57 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * Vehicles and buildings resolve from their own upload areas: with nothing
+     * uploaded the bases are the bundled dir; an uploaded vehicle/building pack
+     * points the base at it, drives buildingmodels, and lets a car type
+     * reference an uploaded vehicle model.
+     */
+    public function test_scene_config_split_asset_areas(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // Nothing uploaded: both bases are the bundled models dir, and the
+        // vehicle pack is null (client probes with the bundled fallback).
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertStringEndsWith('/course/format/mnemo/models/', $config['vehiclesbaseurl']);
+        $this->assertStringEndsWith('/course/format/mnemo/models/', $config['buildingsbaseurl']);
+        $this->assertNull($config['vehiclepack']);
+        // Bundled building models are offered (building-quiz.glb ships with the plugin).
+        $this->assertContains('quiz', $config['buildingmodels']);
+
+        // Upload a vehicle and a building into their own areas.
+        $fs = get_file_storage();
+        $base = [
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'itemid' => 0,
+            'filepath' => '/',
+        ];
+        $fs->create_file_from_string(
+            ['filearea' => 'vehicleassets', 'filename' => 'hovercar.glb'] + $base, 'x');
+        $fs->create_file_from_string(
+            ['filearea' => 'buildingassets', 'filename' => 'building-forum.glb'] + $base, 'x');
+
+        // A car type may now reference the uploaded vehicle by base name.
+        set_config('cartypes', 'hovercar | avenue | 10 | 20 | none', 'format_mnemo');
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        $this->assertStringContainsString('/format_mnemo/vehicleassets/', $config['vehiclesbaseurl']);
+        $this->assertStringContainsString('/format_mnemo/buildingassets/', $config['buildingsbaseurl']);
+        $this->assertSame(['hovercar'], $config['vehiclepack']);
+        // The uploaded building pack drives the offered building models.
+        $this->assertSame(['forum'], $config['buildingmodels']);
+        // The car type naming the uploaded vehicle is accepted.
+        $this->assertCount(1, $config['cartypes']);
+        $this->assertSame('hovercar', $config['cartypes'][0]['model']);
+    }
+
+    /**
      * With no comfort preference the scene exposes the defaults; a stored
      * preference is parsed through, and invalid fields fall back to defaults.
      */

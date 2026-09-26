@@ -200,55 +200,31 @@ class asset_gallery {
      * @return array[] The model entries.
      */
     public static function models(): array {
-        global $CFG;
-        $names = [];
-        foreach (glob($CFG->dirroot . '/course/format/mnemo/models/*.glb') ?: [] as $path) {
-            $names[basename($path, '.glb')] = true;
-        }
-        $uploaded = self::uploaded_pack_names();
-        foreach (array_keys($uploaded) as $filename) {
-            if (substr($filename, -4) === '.glb') {
-                $names[basename($filename, '.glb')] = true;
-            }
-        }
-        $names = array_keys($names);
-        sort($names);
-
-        $packbase = get_config('format_mnemo', 'assetbaseurl');
-        $bundled = self::bundled_model_names();
-
-        $out = [];
-        foreach ($names as $name) {
-            $filename = $name . '.glb';
-            // Match models_base_url(): the external URL pack wins, then an
-            // uploaded file, then the bundled model.
-            if (!empty($packbase)) {
-                $url = rtrim($packbase, '/') . '/' . $filename;
-                $source = 'url';
-            } else if (isset($uploaded[$filename])) {
-                $url = self::file_url('assetpack', $uploaded[$filename]);
-                $source = 'uploaded';
-            } else if (isset($bundled[$name])) {
-                $url = (new moodle_url('/course/format/mnemo/models/' . $filename))->out(false);
-                $source = 'bundled';
+        // Categorise the bundled models by naming convention: building-* are
+        // buildings, "av" is the flying-car vehicle, the rest are props.
+        $bundledprops = [];
+        $bundledvehicles = [];
+        $bundledbuildings = [];
+        foreach (array_keys(self::bundled_model_names()) as $name) {
+            if (strpos($name, 'building-') === 0) {
+                $bundledbuildings[$name] = true;
+            } else if ($name === 'av') {
+                $bundledvehicles[$name] = true;
             } else {
-                continue;
+                $bundledprops[$name] = true;
             }
-            $meta = self::model_metadata(
-                $source,
-                $url,
-                $source === 'bundled' ? $CFG->dirroot . '/course/format/mnemo/models/' . $filename : null,
-                $source === 'uploaded' ? ($uploaded[$filename] ?? null) : null
-            );
-            $out[] = [
-                'key' => $name,
-                'label' => $name,
-                'url' => $url,
-                'source' => $source,
-                'copyright' => $meta['copyright'],
-                'generator' => $meta['generator'],
-            ];
         }
+
+        // Props resolve like the scene: external URL pack, then the uploaded
+        // prop pack, then bundled. Vehicles and buildings each have their own
+        // upload area (no external URL), then bundled.
+        $out = array_merge(
+            self::area_model_cards('prop', 'assetpack', $bundledprops,
+                (string)get_config('format_mnemo', 'assetbaseurl')),
+            self::area_model_cards('vehicle', 'vehicleassets', $bundledvehicles, ''),
+            self::area_model_cards('building', 'buildingassets', $bundledbuildings, '')
+        );
+
         // Sun and moon assets that are 3D models (a plain image is a texture,
         // shown under textures() instead). They get a live 3D preview here.
         foreach (['sun', 'moon'] as $body) {
@@ -259,10 +235,68 @@ class asset_gallery {
                     'label' => get_string('preview_tex_' . $body, 'format_mnemo'),
                     'url' => $cel['url'],
                     'source' => $cel['source'],
+                    'category' => 'celestial',
                     'copyright' => null,
                     'generator' => null,
                 ];
             }
+        }
+        return $out;
+    }
+
+    /**
+     * The model cards for one category (prop/vehicle/building), assembled from
+     * the bundled models of that category plus the .glb files uploaded into its
+     * file area. Each resolves to its effective URL with the category's
+     * precedence: an external URL pack (props only), then the uploaded file,
+     * then the bundled model.
+     *
+     * @param string $category The category tag (prop, vehicle, building).
+     * @param string $filearea The upload file area for this category.
+     * @param array<string, bool> $bundledset The bundled model names in this category.
+     * @param string $externalbase An external asset-pack base URL, or '' if none.
+     * @return array[] The model entries.
+     */
+    protected static function area_model_cards(string $category, string $filearea,
+            array $bundledset, string $externalbase): array {
+        global $CFG;
+        $uploaded = self::stored_glb_files($filearea);
+        $names = $bundledset;
+        foreach (array_keys($uploaded) as $filename) {
+            $names[basename($filename, '.glb')] = true;
+        }
+        $names = array_keys($names);
+        sort($names);
+
+        $out = [];
+        foreach ($names as $name) {
+            $filename = $name . '.glb';
+            $path = null;
+            $file = null;
+            if ($externalbase !== '') {
+                $url = rtrim($externalbase, '/') . '/' . $filename;
+                $source = 'url';
+            } else if (isset($uploaded[$filename])) {
+                $url = self::file_url($filearea, $uploaded[$filename]);
+                $source = 'uploaded';
+                $file = $uploaded[$filename];
+            } else if (isset($bundledset[$name])) {
+                $url = (new moodle_url('/course/format/mnemo/models/' . $filename))->out(false);
+                $source = 'bundled';
+                $path = $CFG->dirroot . '/course/format/mnemo/models/' . $filename;
+            } else {
+                continue;
+            }
+            $meta = self::model_metadata($source, $url, $path, $file);
+            $out[] = [
+                'key' => $name,
+                'label' => $name,
+                'url' => $url,
+                'source' => $source,
+                'category' => $category,
+                'copyright' => $meta['copyright'],
+                'generator' => $meta['generator'],
+            ];
         }
         return $out;
     }
@@ -516,14 +550,26 @@ class asset_gallery {
     }
 
     /**
-     * Uploaded asset-pack model files, keyed by filename.
+     * Uploaded asset-pack (prop) model files, keyed by filename.
      *
      * @return array<string, \stored_file> Map of filename => file.
      */
     protected static function uploaded_pack_names(): array {
+        return self::stored_glb_files('assetpack');
+    }
+
+    /**
+     * The .glb files uploaded into a system-context file area, keyed by filename.
+     *
+     * @param string $filearea The file area.
+     * @return array<string, \stored_file> Map of filename => file.
+     */
+    protected static function stored_glb_files(string $filearea): array {
         $map = [];
-        foreach (self::stored_files('assetpack') as $file) {
-            $map[$file->get_filename()] = $file;
+        foreach (self::stored_files($filearea) as $file) {
+            if (substr($file->get_filename(), -4) === '.glb') {
+                $map[$file->get_filename()] = $file;
+            }
         }
         return $map;
     }
