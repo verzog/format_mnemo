@@ -111,12 +111,13 @@ class model_config {
      * environments, facing and scale (the behaviour map is left server-side
      * until it drives anything). Only models with a stored entry appear.
      *
-     * @return array<string, array{envs: string[], yaw: ?float, scale: ?float}>
+     * @return array<string, array{envs: string[], yaw: ?float, pitch: ?float, roll: ?float, scale: ?float}>
      */
     public static function for_client(): array {
         $out = [];
         foreach (self::all() as $name => $cfg) {
             $out[$name] = ['envs' => $cfg['envs'], 'yaw' => $cfg['yaw'],
+                'pitch' => $cfg['pitch'], 'roll' => $cfg['roll'],
                 'scale' => $cfg['scale'], 'behaviour' => $cfg['behaviour']];
         }
         return $out;
@@ -154,14 +155,13 @@ class model_config {
                 }
             }
         }
-        // Facing in degrees, kept finite and wrapped to [0, 360); null = auto.
-        $yaw = null;
-        if (isset($cfg['yaw']) && is_numeric($cfg['yaw']) && is_finite((float)$cfg['yaw'])) {
-            $yaw = fmod((float)$cfg['yaw'], 360.0);
-            if ($yaw < 0) {
-                $yaw += 360.0;
-            }
-        }
+        // Facing (yaw, Y axis) in degrees, kept finite and wrapped to [0, 360);
+        // null = auto. Pitch (X) and roll (Z) are orientation corrections in the
+        // same units, for a model authored lying down or upside down; null when
+        // unset (no correction).
+        $yaw = self::normalise_angle($cfg['yaw'] ?? null);
+        $pitch = self::normalise_angle($cfg['pitch'] ?? null);
+        $roll = self::normalise_angle($cfg['roll'] ?? null);
         // Scale multiplier, clamped to a sane range; null = model default.
         $scale = null;
         if (isset($cfg['scale']) && is_numeric($cfg['scale']) && is_finite((float)$cfg['scale'])) {
@@ -184,7 +184,26 @@ class model_config {
                 }
             }
         }
-        return ['envs' => $envs, 'yaw' => $yaw, 'scale' => $scale, 'behaviour' => $behaviour];
+        return ['envs' => $envs, 'yaw' => $yaw, 'pitch' => $pitch, 'roll' => $roll,
+            'scale' => $scale, 'behaviour' => $behaviour];
+    }
+
+    /**
+     * Normalise one rotation angle: a finite numeric value wrapped to [0, 360)
+     * degrees, or null when unset or invalid.
+     *
+     * @param mixed $value The raw angle.
+     * @return float|null The wrapped angle in degrees, or null.
+     */
+    protected static function normalise_angle($value): ?float {
+        if (!is_numeric($value) || !is_finite((float)$value)) {
+            return null;
+        }
+        $angle = fmod((float)$value, 360.0);
+        if ($angle < 0) {
+            $angle += 360.0;
+        }
+        return $angle;
     }
 
     /**
@@ -195,7 +214,7 @@ class model_config {
      * @return bool True when it is entirely default.
      */
     protected static function is_default(array $cfg): bool {
-        return empty($cfg['envs']) && $cfg['yaw'] === null &&
-            $cfg['scale'] === null && empty($cfg['behaviour']);
+        return empty($cfg['envs']) && $cfg['yaw'] === null && $cfg['pitch'] === null &&
+            $cfg['roll'] === null && $cfg['scale'] === null && empty($cfg['behaviour']);
     }
 }

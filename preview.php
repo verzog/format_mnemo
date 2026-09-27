@@ -50,7 +50,12 @@ if ($savemodel !== '' && confirm_sesskey()) {
             }
         }
         $yawraw = optional_param('yaw', '', PARAM_RAW_TRIMMED);
+        $pitchraw = optional_param('pitch', '', PARAM_RAW_TRIMMED);
+        $rollraw = optional_param('roll', '', PARAM_RAW_TRIMMED);
         $scaleraw = optional_param('scale', '', PARAM_RAW_TRIMMED);
+        $numornull = function (string $raw): ?float {
+            return ($raw === '' || !is_numeric($raw)) ? null : (float)$raw;
+        };
         // Behaviour checkboxes: read every known flag (an unchecked box does not
         // post), so the saved state matches the form. The store drops any flag
         // left at its engine default.
@@ -60,8 +65,10 @@ if ($savemodel !== '' && confirm_sesskey()) {
         }
         model_config::set($savemodel, [
             'envs' => $envs,
-            'yaw' => ($yawraw === '' || !is_numeric($yawraw)) ? null : (float)$yawraw,
-            'scale' => ($scaleraw === '' || !is_numeric($scaleraw)) ? null : (float)$scaleraw,
+            'yaw' => $numornull($yawraw),
+            'pitch' => $numornull($pitchraw),
+            'roll' => $numornull($rollraw),
+            'scale' => $numornull($scaleraw),
             'behaviour' => $behaviour,
         ]);
         redirect(
@@ -148,6 +155,28 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
         'format-mnemo-preview__field'
     );
 
+    // Pitch (X) and roll (Z) orientation corrections in degrees, for a model
+    // authored lying down or upside down (yaw/facing is the field above). Blank
+    // = no correction.
+    $anglefield = function (string $key, string $label) use ($name, $cfg): string {
+        $value = $cfg[$key] === null ? '' : rtrim(rtrim(sprintf('%.1f', $cfg[$key]), '0'), '.');
+        return html_writer::div(
+            html_writer::tag(
+                'label',
+                get_string($label, 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__field-label', 'for' => $key . '_' . $name]
+            ) .
+            html_writer::empty_tag('input', [
+                'type' => 'number', 'name' => $key, 'id' => $key . '_' . $name,
+                'min' => '0', 'max' => '360', 'step' => 'any',
+                'class' => 'format-mnemo-preview__scale', 'value' => $value,
+            ]),
+            'format-mnemo-preview__field'
+        );
+    };
+    $rows .= $anglefield('pitch', 'preview_pitch');
+    $rows .= $anglefield('roll', 'preview_roll');
+
     // Scale (blank = model default).
     $rows .= html_writer::div(
         html_writer::tag(
@@ -221,7 +250,15 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
 // keyed by their card's canvas id, plus the Three.js bootstrap URLs.
 $modelconfig = [];
 foreach ($models as $i => $model) {
-    $modelconfig[] = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url']];
+    $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url']];
+    // Reflect a configurable model's orientation correction in its preview, so
+    // an admin sees the effect of the pitch/yaw/roll they set (celestials have
+    // no model-config entry).
+    if (in_array($model['key'], $configurable, true)) {
+        $cfg = model_config::get($model['key']);
+        $entry['orient'] = ['pitch' => $cfg['pitch'], 'yaw' => $cfg['yaw'], 'roll' => $cfg['roll']];
+    }
+    $modelconfig[] = $entry;
 }
 $config = asset_gallery::client_config();
 $config['models'] = $modelconfig;

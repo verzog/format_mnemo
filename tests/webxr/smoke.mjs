@@ -695,6 +695,8 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
@@ -719,6 +721,8 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
                     calls.push(url);
@@ -740,6 +744,8 @@ const scenarios = [
                 buildingModelUrl: () => 'x.glb',
                 modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
                 animateClone: CS.prototype.animateClone,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
             };
@@ -764,6 +770,8 @@ const scenarios = [
                 buildingModelUrl: () => 'x.glb',
                 modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
                 animateClone: CS.prototype.animateClone,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(tpl)
             };
@@ -1681,6 +1689,8 @@ const scenarios = [
                     modelconfig: {gridonly: {envs: ['grid']}}},
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 joinBase: () => 'x',
                 loadModel: () => Promise.resolve({}),
                 loadProp: CS.prototype.loadProp,
@@ -1726,6 +1736,8 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
+                orientTemplate: CS.prototype.orientTemplate,
+                modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: () => Promise.resolve(new THREE.Group())
             };
@@ -1796,6 +1808,49 @@ const scenarios = [
             return {pass: started && gatedOff && skippedSkinned && flaggedNoCast && stillLive && pruned,
                 detail: `started=${started} off=${gatedOff} skin=${skippedSkinned} ` +
                     `nocast=${flaggedNoCast} live=${stillLive} pruned=${pruned}`};
+        }
+    },
+    {
+        name: 'orient: orientTemplate bakes pitch/roll always and yaw only when asked',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const mkSelf = () => ({
+                THREE, config: {modelconfig: {tilt: {pitch: 90, yaw: 45, roll: 0}}},
+                modelCfg: CS.prototype.modelCfg,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientTemplate: CS.prototype.orientTemplate
+            });
+            const withMesh = () => {
+                const g = new THREE.Group();
+                g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+                return g;
+            };
+            // Prop-style: pitch and yaw both baked into a single inner group.
+            const s1 = mkSelf();
+            const tpl = withMesh();
+            s1.orientTemplate(tpl, 'tilt', true);
+            const inner = tpl.children[0];
+            const bakedProp = tpl.children.length === 1 && inner.isGroup &&
+                inner.rotation.x > 1.5 && inner.rotation.y > 0.7;
+            // A second call is a no-op (baked once).
+            s1.orientTemplate(tpl, 'tilt', true);
+            const once = tpl.children.length === 1;
+            // Vehicle-style: yaw is left to travel-facing, so only pitch is baked.
+            const s2 = mkSelf();
+            const tpl2 = withMesh();
+            s2.orientTemplate(tpl2, 'tilt', false);
+            const vehYawZero = Math.abs(tpl2.children[0].rotation.y) < 1e-6 &&
+                tpl2.children[0].rotation.x > 1.5;
+            // An unconfigured model is left untouched (no inner wrap).
+            const s3 = mkSelf();
+            const tpl3 = new THREE.Group();
+            const mesh3 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+            tpl3.add(mesh3);
+            s3.orientTemplate(tpl3, 'unconfigured', true);
+            const noWrap = tpl3.children[0] === mesh3;
+            return {pass: bakedProp && once && vehYawZero && noWrap,
+                detail: `prop=${bakedProp} once=${once} veh=${vehYawZero} nowrap=${noWrap}`};
         }
     },
     {

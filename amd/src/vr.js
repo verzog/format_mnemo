@@ -3081,8 +3081,68 @@ define('format_mnemo/vr', [], function() {
         }
     };
 
+    /**
+     * The per-model orientation correction (pitch X, yaw Y, roll Z) in radians,
+     * or null when the model has no correction set. For a model authored lying
+     * down, upside down or facing the wrong way (a common problem with assets
+     * exported from other tools).
+     *
+     * @param {String} name The model name.
+     * @return {Object|null} {pitch, yaw, roll} in radians, or null.
+     */
+    Cyberspace.prototype.modelOrientation = function(name) {
+        var mc = this.modelCfg(name);
+        if (!mc) {
+            return null;
+        }
+        var rad = function(v) {
+            return (typeof v === 'number' && isFinite(v)) ? v * Math.PI / 180 : 0;
+        };
+        var pitch = rad(mc.pitch);
+        var yaw = rad(mc.yaw);
+        var roll = rad(mc.roll);
+        if (!pitch && !yaw && !roll) {
+            return null;
+        }
+        return {pitch: pitch, yaw: yaw, roll: roll};
+    };
+
+    /**
+     * Bake a model's orientation correction into its template, once, by moving
+     * its content into an inner group rotated by the correction. Placement code
+     * then positions and rotates the outer (template) clone as before, so the
+     * correction composes with a lamp's road-facing turn or a car's travel
+     * heading rather than being overwritten.
+     *
+     * The yaw (Y) part is baked only when bakeyaw is true: props and buildings
+     * take their facing this way, but a vehicle keeps yaw for travel-facing
+     * (trafficModelYaw), so baking it there would double the turn. Pitch and roll
+     * are always baked (they never clash with placement).
+     *
+     * @param {Object} tpl The cached template (mutated once; guarded by a flag).
+     * @param {String} name The model name (its orientation config is read).
+     * @param {Boolean} bakeyaw Whether to bake the yaw (Y) component too.
+     */
+    Cyberspace.prototype.orientTemplate = function(tpl, name, bakeyaw) {
+        if (!tpl || !tpl.userData || tpl.userData.mnemoOriented) {
+            return;
+        }
+        tpl.userData.mnemoOriented = true;
+        var o = this.modelOrientation(name);
+        if (!o) {
+            return;
+        }
+        var inner = new this.THREE.Group();
+        while (tpl.children.length) {
+            inner.add(tpl.children[0]);
+        }
+        inner.rotation.set(o.pitch, bakeyaw ? o.yaw : 0, o.roll);
+        tpl.add(inner);
+    };
+
     Cyberspace.prototype.loadProp = function(name) {
-        return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
+        // Props take their full orientation (including yaw/facing) baked in.
+        return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels, true);
     };
 
     /**
@@ -3094,7 +3154,9 @@ define('format_mnemo/vr', [], function() {
      * @return {Promise} Resolves with a Three.Group template.
      */
     Cyberspace.prototype.loadVehicle = function(name) {
-        return this.loadNamedModel(name, this.config.vehiclesbaseurl, this.config.vehiclepack);
+        // A vehicle keeps yaw for travel-facing (trafficModelYaw), so only its
+        // pitch/roll are baked here; baking yaw too would double the turn.
+        return this.loadNamedModel(name, this.config.vehiclesbaseurl, this.config.vehiclepack, false);
     };
 
     /**
@@ -3105,9 +3167,12 @@ define('format_mnemo/vr', [], function() {
      * @param {String} base The category's base URL.
      * @param {Array|null} pack The .glb base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
+     * @param {Boolean} [bakeyaw] Whether to bake the model's yaw (facing) into
+     *     the template (props/buildings); false for vehicles, which keep yaw for
+     *     travel-facing. Pitch/roll are always baked. Defaults to true.
      * @return {Promise} Resolves with a Three.Group template.
      */
-    Cyberspace.prototype.loadNamedModel = function(name, base, pack) {
+    Cyberspace.prototype.loadNamedModel = function(name, base, pack, bakeyaw) {
         var self = this;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
@@ -3140,9 +3205,11 @@ define('format_mnemo/vr', [], function() {
                 });
             }
         }
+        var orientyaw = bakeyaw !== false;
         return p.then(function(tpl) {
             if (tpl) {
                 tpl.mnemoAnimate = animate;
+                self.orientTemplate(tpl, name, orientyaw);
             }
             return tpl;
         });
@@ -4743,6 +4810,8 @@ define('format_mnemo/vr', [], function() {
             // matching how the asset viewer keys a building card.
             var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.glb$/i, '');
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
+            // Buildings take their full orientation (facing included) baked in.
+            self.orientTemplate(tpl, name, true);
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
             // Box3 (infinite bounds -> NaN placement); keep the procedural
@@ -13037,6 +13106,13 @@ define('format_mnemo/vr', [], function() {
                 if (new THREE.Box3().setFromObject(object).isEmpty()) {
                     drawPreviewMessage(entry.ctx, size, strings.nogeometry || 'No visible geometry');
                     return null;
+                }
+                // Reflect the model's orientation correction so an admin sees the
+                // effect of the pitch/yaw/roll they set. Degrees -> radians.
+                if (m.orient) {
+                    var d2r = Math.PI / 180;
+                    object.rotation.set((m.orient.pitch || 0) * d2r,
+                        (m.orient.yaw || 0) * d2r, (m.orient.roll || 0) * d2r);
                 }
                 framePreviewModel(THREE, object, cam);
                 // Spin a centred pivot, not the translated model: rotating the
