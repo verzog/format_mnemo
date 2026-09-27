@@ -225,6 +225,13 @@ foreach ($models as $i => $model) {
 }
 $config = asset_gallery::client_config();
 $config['models'] = $modelconfig;
+// Short labels the client draws onto a card when a model cannot be shown, so a
+// blank preview reports why (a load failure vs. a model with no geometry)
+// rather than staying silently empty.
+$config['strings'] = [
+    'loadfailed' => get_string('preview_model_failed', 'format_mnemo'),
+    'nogeometry' => get_string('preview_model_empty', 'format_mnemo'),
+];
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading(get_string('preview_title', 'format_mnemo'));
