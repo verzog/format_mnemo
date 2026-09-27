@@ -2949,6 +2949,7 @@ define('format_mnemo/vr', [], function() {
                 continue;
             }
             var m = tpl.clone();
+            this.orientClone(m, type);
             this.animateClone(tpl, m);
             m.position.set(p.x, y, p.z);
             if (type === 'lamp') {
@@ -3081,6 +3082,65 @@ define('format_mnemo/vr', [], function() {
         }
     };
 
+    /**
+     * The per-model orientation correction (pitch X, yaw Y, roll Z) in radians,
+     * or null when the model has no correction set. For a model authored lying
+     * down, upside down or facing the wrong way (a common problem with assets
+     * exported from other tools).
+     *
+     * @param {String} name The model name.
+     * @return {Object|null} {pitch, yaw, roll} in radians, or null.
+     */
+    Cyberspace.prototype.modelOrientation = function(name) {
+        var mc = this.modelCfg(name);
+        if (!mc) {
+            return null;
+        }
+        var rad = function(v) {
+            return (typeof v === 'number' && isFinite(v)) ? v * Math.PI / 180 : 0;
+        };
+        var pitch = rad(mc.pitch);
+        var yaw = rad(mc.yaw);
+        var roll = rad(mc.roll);
+        if (!pitch && !yaw && !roll) {
+            return null;
+        }
+        return {pitch: pitch, yaw: yaw, roll: roll};
+    };
+
+    /**
+     * Apply a model's orientation correction to a freshly placed clone, by moving
+     * its content into an inner group rotated by the correction. The clone stays
+     * the placed object, so placement code positions and rotates it (a lamp's
+     * road-facing turn, a car's travel heading) on the outside and the correction
+     * composes rather than being overwritten. Applied per clone, not to the
+     * shared cached template, so a model used as both a prop and a vehicle (the
+     * bundled "av") is oriented correctly for each without the two modes fighting
+     * over one template.
+     *
+     * The yaw (Y) part is applied only when bakeyaw is not false: props and
+     * buildings take their facing this way, but a vehicle keeps yaw for
+     * travel-facing (trafficModelYaw), so applying it here would double the turn.
+     * Pitch and roll are always applied (they never clash with placement). A
+     * no-op for an unconfigured model, so it is safe to call at every clone site.
+     *
+     * @param {Object} clone The placed clone to orient.
+     * @param {String} name The model name (its orientation config is read).
+     * @param {Boolean} [bakeyaw] false to skip the yaw (Y) part (vehicles).
+     */
+    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw) {
+        var o = this.modelOrientation(name);
+        if (!clone || !o) {
+            return;
+        }
+        var inner = new this.THREE.Group();
+        while (clone.children.length) {
+            inner.add(clone.children[0]);
+        }
+        inner.rotation.set(o.pitch, bakeyaw === false ? 0 : o.yaw, o.roll);
+        clone.add(inner);
+    };
+
     Cyberspace.prototype.loadProp = function(name) {
         return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
     };
@@ -3211,6 +3271,7 @@ define('format_mnemo/vr', [], function() {
                     continue;
                 }
                 var m = tpl.clone();
+                this.orientClone(m, kind);
                 this.animateClone(tpl, m);
                 m.position.set(px, 0, pz);
                 if (s < 0 && kind === 'lamp') {
@@ -3336,6 +3397,7 @@ define('format_mnemo/vr', [], function() {
             // raised sidewalk stands on the slab rather than sinking into it.
             var py = this.surfaceHeightAt(px, pz);
             var m = tpl.clone();
+            this.orientClone(m, 'lamp');
             this.animateClone(tpl, m);
             m.position.set(px, py, pz);
             m.rotation.y = slot.rotY;
@@ -3381,6 +3443,7 @@ define('format_mnemo/vr', [], function() {
             kx = this.snapBase(kx, kioskstored);
             kz = this.snapBase(kz, kioskstored);
             var m = tpl.clone();
+            this.orientClone(m, 'kiosk');
             this.animateClone(tpl, m);
             m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
@@ -3522,6 +3585,9 @@ define('format_mnemo/vr', [], function() {
                 break;
             }
             var car = tpl.clone();
+            // A vehicle's yaw is its travel-facing (trafficModelYaw), so orient
+            // pitch/roll only here.
+            this.orientClone(car, ct.model, false);
             this.animateClone(tpl, car);
             // The random size jitter times the model's asset-viewer scale.
             car.scale.setScalar((0.9 + Math.random() * 0.5) * this.modelScale(ct.model));
@@ -4750,8 +4816,9 @@ define('format_mnemo/vr', [], function() {
             if (new self.THREE.Box3().setFromObject(model).isEmpty()) {
                 return null;
             }
-            // Animate only the clone we are keeping (a discarded empty clone must
-            // not leave a live mixer behind).
+            // Orient (facing included) and animate only the clone we keep, before
+            // fitting so the fit measures the corrected model.
+            self.orientClone(model, name, true);
             self.animateClone(tpl, model);
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close
@@ -7466,6 +7533,7 @@ define('format_mnemo/vr', [], function() {
         }
         var y = this.placedBaseY(type);
         var m = tpl.clone();
+        this.orientClone(m, type);
         this.animateClone(tpl, m);
         m.position.set(x, y, z);
         if (type === 'lamp') {
@@ -13037,6 +13105,13 @@ define('format_mnemo/vr', [], function() {
                 if (new THREE.Box3().setFromObject(object).isEmpty()) {
                     drawPreviewMessage(entry.ctx, size, strings.nogeometry || 'No visible geometry');
                     return null;
+                }
+                // Reflect the model's orientation correction so an admin sees the
+                // effect of the pitch/yaw/roll they set. Degrees -> radians.
+                if (m.orient) {
+                    var d2r = Math.PI / 180;
+                    object.rotation.set((m.orient.pitch || 0) * d2r,
+                        (m.orient.yaw || 0) * d2r, (m.orient.roll || 0) * d2r);
                 }
                 framePreviewModel(THREE, object, cam);
                 // Spin a centred pivot, not the translated model: rotating the

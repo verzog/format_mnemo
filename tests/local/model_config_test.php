@@ -79,6 +79,29 @@ final class model_config_test extends \advanced_testcase {
     }
 
     /**
+     * Pitch (X) and roll (Z) orientation corrections are stored, wrapped to
+     * [0, 360) like yaw, reach the client, and a pitch/roll-only config is not
+     * discarded as an all-default entry.
+     */
+    public function test_pitch_and_roll(): void {
+        $this->resetAfterTest();
+        model_config::set('tilt', ['pitch' => 90, 'roll' => -90]);
+        $cfg = model_config::get('tilt');
+        $this->assertEqualsWithDelta(90.0, $cfg['pitch'], 0.001);
+        $this->assertEqualsWithDelta(270.0, $cfg['roll'], 0.001);
+        $this->assertNull($cfg['yaw']);
+        // A pitch/roll-only config is a genuine deviation, so it is stored.
+        $this->assertArrayHasKey('tilt', model_config::all());
+        // Both reach the scene client.
+        $client = model_config::for_client();
+        $this->assertEqualsWithDelta(90.0, $client['tilt']['pitch'], 0.001);
+        $this->assertEqualsWithDelta(270.0, $client['tilt']['roll'], 0.001);
+        // A non-numeric angle is dropped to null rather than stored.
+        model_config::set('bad', ['pitch' => 'sideways']);
+        $this->assertArrayNotHasKey('bad', model_config::all());
+    }
+
+    /**
      * A model with no tags is in every environment; a tagged model only in its
      * own.
      */
