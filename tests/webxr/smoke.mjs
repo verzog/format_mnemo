@@ -4062,6 +4062,27 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: drawPreviewMessage writes the status text onto the card',
+        fn: () => {
+            const M = window.__mnemoModule;
+            const calls = [];
+            const ctx = {
+                clearRect: () => calls.push('clear'),
+                fillRect: () => calls.push('rect'),
+                fillText: (t) => calls.push('text:' + t),
+                set fillStyle(v) { calls.push('style'); },
+                set font(v) {},
+                set textAlign(v) {},
+                set textBaseline(v) {}
+            };
+            M._drawPreviewMessage(ctx, 240, 'Could not load');
+            // A null context is tolerated (no throw) for a missing canvas.
+            M._drawPreviewMessage(null, 240, 'x');
+            return {pass: calls.indexOf('text:Could not load') !== -1 && calls.indexOf('clear') === 0,
+                detail: calls.join(',')};
+        }
+    },
+    {
         name: 'preview: model loader uses the addon loader when present',
         fn: async () => {
             const THREE = window.__mnemoTest.THREE;

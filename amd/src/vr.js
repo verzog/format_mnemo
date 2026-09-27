@@ -12968,6 +12968,30 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Draw a short status line across the middle of a preview card's 2D canvas,
+     * so a card that cannot show a spinning model reports why instead of staying
+     * blank (an admin then knows it is a load failure or an empty model, not a
+     * broken page).
+     *
+     * @param {Object} ctx The card's 2D canvas context.
+     * @param {Number} size The canvas edge length in pixels.
+     * @param {String} text The message to draw.
+     */
+    function drawPreviewMessage(ctx, size, text) {
+        if (!ctx) {
+            return;
+        }
+        ctx.clearRect(0, 0, size, size);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fillRect(0, size / 2 - 16, size, 32);
+        ctx.fillStyle = '#ffd0d0';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, size / 2, size / 2);
+    }
+
+    /**
      * Render the admin asset viewer's model previews: load each model, frame it,
      * and spin them all in one animation loop through a single shared WebGL
      * renderer whose output is copied into each card's 2D canvas (so the gallery
@@ -12982,6 +13006,7 @@ define('format_mnemo/vr', [], function() {
         if (!models.length || typeof THREE.WebGLRenderer !== 'function') {
             return;
         }
+        var strings = config.strings || {};
         var size = 240;
         // Keep the drawing buffer so the WebGL frame is still readable when it
         // is copied into each card's 2D canvas with drawImage() below; without
@@ -13006,6 +13031,13 @@ define('format_mnemo/vr', [], function() {
             var entry = {ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null};
             entries.push(entry);
             load(m.url).then(function(object) {
+                // A model that loads but has no renderable geometry (an empty
+                // Box3) can never be framed or drawn; say so rather than spin an
+                // invisible object on a blank card.
+                if (new THREE.Box3().setFromObject(object).isEmpty()) {
+                    drawPreviewMessage(entry.ctx, size, strings.nogeometry || 'No visible geometry');
+                    return null;
+                }
                 framePreviewModel(THREE, object, cam);
                 // Spin a centred pivot, not the translated model: rotating the
                 // model directly would orbit its original local origin (off the
@@ -13016,7 +13048,10 @@ define('format_mnemo/vr', [], function() {
                 entry.model = pivot;
                 return null;
             }).catch(function(e) {
-                // Leave this card's canvas blank if the model cannot be loaded.
+                // Report the failure on the card (and log details) rather than
+                // leaving it silently blank, so an admin can tell a model that
+                // failed to load from one that renders nothing.
+                drawPreviewMessage(entry.ctx, size, strings.loadfailed || 'Could not load');
                 if (window.console) {
                     window.console.warn('format_mnemo: preview model failed: ' + m.url, e);
                 }
@@ -13054,6 +13089,7 @@ define('format_mnemo/vr', [], function() {
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,
+        _drawPreviewMessage: drawPreviewMessage,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
