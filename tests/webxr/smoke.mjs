@@ -695,7 +695,7 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
@@ -721,7 +721,7 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: (url) => {
@@ -744,7 +744,7 @@ const scenarios = [
                 buildingModelUrl: () => 'x.glb',
                 modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
                 animateClone: CS.prototype.animateClone,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
@@ -770,7 +770,7 @@ const scenarios = [
                 buildingModelUrl: () => 'x.glb',
                 modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
                 animateClone: CS.prototype.animateClone,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
                 loadModel: () => Promise.resolve(tpl)
@@ -1390,6 +1390,8 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
                 placeProp: CS.prototype.placeProp
             };
@@ -1426,6 +1428,8 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
                 buildPlacedObjectsOfType: CS.prototype.buildPlacedObjectsOfType
             };
@@ -1689,7 +1693,7 @@ const scenarios = [
                     modelconfig: {gridonly: {envs: ['grid']}}},
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 joinBase: () => 'x',
                 loadModel: () => Promise.resolve({}),
@@ -1736,7 +1740,7 @@ const scenarios = [
                 joinBase: CS.prototype.joinBase,
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
-                orientTemplate: CS.prototype.orientTemplate,
+                orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
                 loadModel: () => Promise.resolve(new THREE.Group())
@@ -1811,7 +1815,7 @@ const scenarios = [
         }
     },
     {
-        name: 'orient: orientTemplate bakes pitch/roll always and yaw only when asked',
+        name: 'orient: orientClone applies pitch/roll always and yaw only for non-vehicles',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const THREE = window.__mnemoTest.THREE;
@@ -1819,38 +1823,43 @@ const scenarios = [
                 THREE, config: {modelconfig: {tilt: {pitch: 90, yaw: 45, roll: 0}}},
                 modelCfg: CS.prototype.modelCfg,
                 modelOrientation: CS.prototype.modelOrientation,
-                orientTemplate: CS.prototype.orientTemplate
+                orientClone: CS.prototype.orientClone
             });
             const withMesh = () => {
                 const g = new THREE.Group();
                 g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
                 return g;
             };
-            // Prop-style: pitch and yaw both baked into a single inner group.
+            // Prop-style (bakeyaw default): pitch and yaw both applied to the
+            // clone's inner group.
             const s1 = mkSelf();
-            const tpl = withMesh();
-            s1.orientTemplate(tpl, 'tilt', true);
-            const inner = tpl.children[0];
-            const bakedProp = tpl.children.length === 1 && inner.isGroup &&
+            const clone = withMesh();
+            s1.orientClone(clone, 'tilt');
+            const inner = clone.children[0];
+            const prop = clone.children.length === 1 && inner.isGroup &&
                 inner.rotation.x > 1.5 && inner.rotation.y > 0.7;
-            // A second call is a no-op (baked once).
-            s1.orientTemplate(tpl, 'tilt', true);
-            const once = tpl.children.length === 1;
-            // Vehicle-style: yaw is left to travel-facing, so only pitch is baked.
+            // Vehicle-style (bakeyaw false): yaw left to travel-facing, pitch kept.
             const s2 = mkSelf();
-            const tpl2 = withMesh();
-            s2.orientTemplate(tpl2, 'tilt', false);
-            const vehYawZero = Math.abs(tpl2.children[0].rotation.y) < 1e-6 &&
-                tpl2.children[0].rotation.x > 1.5;
-            // An unconfigured model is left untouched (no inner wrap).
+            const clone2 = withMesh();
+            s2.orientClone(clone2, 'tilt', false);
+            const vehYawZero = Math.abs(clone2.children[0].rotation.y) < 1e-6 &&
+                clone2.children[0].rotation.x > 1.5;
+            // Two independent clones from one model config do not share state
+            // (per-clone, not a shared template): both are oriented.
             const s3 = mkSelf();
-            const tpl3 = new THREE.Group();
-            const mesh3 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
-            tpl3.add(mesh3);
-            s3.orientTemplate(tpl3, 'unconfigured', true);
-            const noWrap = tpl3.children[0] === mesh3;
-            return {pass: bakedProp && once && vehYawZero && noWrap,
-                detail: `prop=${bakedProp} once=${once} veh=${vehYawZero} nowrap=${noWrap}`};
+            const a = withMesh();
+            const b = withMesh();
+            s3.orientClone(a, 'tilt');
+            s3.orientClone(b, 'tilt');
+            const independent = a.children[0].isGroup && b.children[0].isGroup;
+            // An unconfigured model is left untouched (no inner wrap).
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+            const clone4 = new THREE.Group();
+            clone4.add(mesh);
+            mkSelf().orientClone(clone4, 'unconfigured');
+            const noWrap = clone4.children[0] === mesh;
+            return {pass: prop && vehYawZero && independent && noWrap,
+                detail: `prop=${prop} veh=${vehYawZero} indep=${independent} nowrap=${noWrap}`};
         }
     },
     {
@@ -2051,6 +2060,8 @@ const scenarios = [
                 pickTrafficDest: CS.prototype.pickTrafficDest,
                 trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });
@@ -3196,6 +3207,8 @@ const scenarios = [
                 applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
                 placeLampSlots: CS.prototype.placeLampSlots
             };
@@ -3721,6 +3734,8 @@ const scenarios = [
                 applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
+                modelOrientation: CS.prototype.modelOrientation,
+                orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
                 placeLampSlots: CS.prototype.placeLampSlots
             };

@@ -253,10 +253,17 @@ foreach ($models as $i => $model) {
     $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url']];
     // Reflect a configurable model's orientation correction in its preview, so
     // an admin sees the effect of the pitch/yaw/roll they set (celestials have
-    // no model-config entry).
+    // no model-config entry). A vehicle's yaw is its travel-facing in the scene,
+    // not a fixed pose (and the preview spins on Y anyway), so its yaw is zeroed
+    // here to match how the scene orients it (pitch/roll only).
     if (in_array($model['key'], $configurable, true)) {
         $cfg = model_config::get($model['key']);
-        $entry['orient'] = ['pitch' => $cfg['pitch'], 'yaw' => $cfg['yaw'], 'roll' => $cfg['roll']];
+        $isvehicle = ($model['category'] ?? 'prop') === 'vehicle';
+        $entry['orient'] = [
+            'pitch' => $cfg['pitch'],
+            'yaw' => $isvehicle ? null : $cfg['yaw'],
+            'roll' => $cfg['roll'],
+        ];
     }
     $modelconfig[] = $entry;
 }

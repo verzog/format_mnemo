@@ -2949,6 +2949,7 @@ define('format_mnemo/vr', [], function() {
                 continue;
             }
             var m = tpl.clone();
+            this.orientClone(m, type);
             this.animateClone(tpl, m);
             m.position.set(p.x, y, p.z);
             if (type === 'lamp') {
@@ -3108,41 +3109,40 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Bake a model's orientation correction into its template, once, by moving
-     * its content into an inner group rotated by the correction. Placement code
-     * then positions and rotates the outer (template) clone as before, so the
-     * correction composes with a lamp's road-facing turn or a car's travel
-     * heading rather than being overwritten.
+     * Apply a model's orientation correction to a freshly placed clone, by moving
+     * its content into an inner group rotated by the correction. The clone stays
+     * the placed object, so placement code positions and rotates it (a lamp's
+     * road-facing turn, a car's travel heading) on the outside and the correction
+     * composes rather than being overwritten. Applied per clone, not to the
+     * shared cached template, so a model used as both a prop and a vehicle (the
+     * bundled "av") is oriented correctly for each without the two modes fighting
+     * over one template.
      *
-     * The yaw (Y) part is baked only when bakeyaw is true: props and buildings
-     * take their facing this way, but a vehicle keeps yaw for travel-facing
-     * (trafficModelYaw), so baking it there would double the turn. Pitch and roll
-     * are always baked (they never clash with placement).
+     * The yaw (Y) part is applied only when bakeyaw is not false: props and
+     * buildings take their facing this way, but a vehicle keeps yaw for
+     * travel-facing (trafficModelYaw), so applying it here would double the turn.
+     * Pitch and roll are always applied (they never clash with placement). A
+     * no-op for an unconfigured model, so it is safe to call at every clone site.
      *
-     * @param {Object} tpl The cached template (mutated once; guarded by a flag).
+     * @param {Object} clone The placed clone to orient.
      * @param {String} name The model name (its orientation config is read).
-     * @param {Boolean} bakeyaw Whether to bake the yaw (Y) component too.
+     * @param {Boolean} [bakeyaw] false to skip the yaw (Y) part (vehicles).
      */
-    Cyberspace.prototype.orientTemplate = function(tpl, name, bakeyaw) {
-        if (!tpl || !tpl.userData || tpl.userData.mnemoOriented) {
-            return;
-        }
-        tpl.userData.mnemoOriented = true;
+    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw) {
         var o = this.modelOrientation(name);
-        if (!o) {
+        if (!clone || !o) {
             return;
         }
         var inner = new this.THREE.Group();
-        while (tpl.children.length) {
-            inner.add(tpl.children[0]);
+        while (clone.children.length) {
+            inner.add(clone.children[0]);
         }
-        inner.rotation.set(o.pitch, bakeyaw ? o.yaw : 0, o.roll);
-        tpl.add(inner);
+        inner.rotation.set(o.pitch, bakeyaw === false ? 0 : o.yaw, o.roll);
+        clone.add(inner);
     };
 
     Cyberspace.prototype.loadProp = function(name) {
-        // Props take their full orientation (including yaw/facing) baked in.
-        return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels, true);
+        return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
     };
 
     /**
@@ -3154,9 +3154,7 @@ define('format_mnemo/vr', [], function() {
      * @return {Promise} Resolves with a Three.Group template.
      */
     Cyberspace.prototype.loadVehicle = function(name) {
-        // A vehicle keeps yaw for travel-facing (trafficModelYaw), so only its
-        // pitch/roll are baked here; baking yaw too would double the turn.
-        return this.loadNamedModel(name, this.config.vehiclesbaseurl, this.config.vehiclepack, false);
+        return this.loadNamedModel(name, this.config.vehiclesbaseurl, this.config.vehiclepack);
     };
 
     /**
@@ -3167,12 +3165,9 @@ define('format_mnemo/vr', [], function() {
      * @param {String} base The category's base URL.
      * @param {Array|null} pack The .glb base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
-     * @param {Boolean} [bakeyaw] Whether to bake the model's yaw (facing) into
-     *     the template (props/buildings); false for vehicles, which keep yaw for
-     *     travel-facing. Pitch/roll are always baked. Defaults to true.
      * @return {Promise} Resolves with a Three.Group template.
      */
-    Cyberspace.prototype.loadNamedModel = function(name, base, pack, bakeyaw) {
+    Cyberspace.prototype.loadNamedModel = function(name, base, pack) {
         var self = this;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
@@ -3205,11 +3200,9 @@ define('format_mnemo/vr', [], function() {
                 });
             }
         }
-        var orientyaw = bakeyaw !== false;
         return p.then(function(tpl) {
             if (tpl) {
                 tpl.mnemoAnimate = animate;
-                self.orientTemplate(tpl, name, orientyaw);
             }
             return tpl;
         });
@@ -3278,6 +3271,7 @@ define('format_mnemo/vr', [], function() {
                     continue;
                 }
                 var m = tpl.clone();
+                this.orientClone(m, kind);
                 this.animateClone(tpl, m);
                 m.position.set(px, 0, pz);
                 if (s < 0 && kind === 'lamp') {
@@ -3403,6 +3397,7 @@ define('format_mnemo/vr', [], function() {
             // raised sidewalk stands on the slab rather than sinking into it.
             var py = this.surfaceHeightAt(px, pz);
             var m = tpl.clone();
+            this.orientClone(m, 'lamp');
             this.animateClone(tpl, m);
             m.position.set(px, py, pz);
             m.rotation.y = slot.rotY;
@@ -3448,6 +3443,7 @@ define('format_mnemo/vr', [], function() {
             kx = this.snapBase(kx, kioskstored);
             kz = this.snapBase(kz, kioskstored);
             var m = tpl.clone();
+            this.orientClone(m, 'kiosk');
             this.animateClone(tpl, m);
             m.position.set(kx, 0, kz);
             m.rotation.y = r.xMin < 0 ? -Math.PI / 2 : Math.PI / 2;
@@ -3589,6 +3585,9 @@ define('format_mnemo/vr', [], function() {
                 break;
             }
             var car = tpl.clone();
+            // A vehicle's yaw is its travel-facing (trafficModelYaw), so orient
+            // pitch/roll only here.
+            this.orientClone(car, ct.model, false);
             this.animateClone(tpl, car);
             // The random size jitter times the model's asset-viewer scale.
             car.scale.setScalar((0.9 + Math.random() * 0.5) * this.modelScale(ct.model));
@@ -4810,8 +4809,6 @@ define('format_mnemo/vr', [], function() {
             // matching how the asset viewer keys a building card.
             var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.glb$/i, '');
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
-            // Buildings take their full orientation (facing included) baked in.
-            self.orientTemplate(tpl, name, true);
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
             // Box3 (infinite bounds -> NaN placement); keep the procedural
@@ -4819,8 +4816,9 @@ define('format_mnemo/vr', [], function() {
             if (new self.THREE.Box3().setFromObject(model).isEmpty()) {
                 return null;
             }
-            // Animate only the clone we are keeping (a discarded empty clone must
-            // not leave a live mixer behind).
+            // Orient (facing included) and animate only the clone we keep, before
+            // fitting so the fit measures the corrected model.
+            self.orientClone(model, name, true);
             self.animateClone(tpl, model);
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close
@@ -7535,6 +7533,7 @@ define('format_mnemo/vr', [], function() {
         }
         var y = this.placedBaseY(type);
         var m = tpl.clone();
+        this.orientClone(m, type);
         this.animateClone(tpl, m);
         m.position.set(x, y, z);
         if (type === 'lamp') {
