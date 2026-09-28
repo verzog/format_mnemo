@@ -11286,7 +11286,11 @@ define('format_mnemo/vr', [], function() {
         if (frameDt > this.maxFrameGap) {
             return current;
         }
-        var tau = target > current ? this.attackTau : this.releaseTau;
+        // Attack vs release by magnitude, not sign: the move signal is now
+        // bidirectional (head-lean reverses below zero), so growing deflection in
+        // either direction is an "attack" (fast) and easing back toward zero is a
+        // "release" (slow). Comparing raw values would make reverse crawl in.
+        var tau = Math.abs(target) > Math.abs(current) ? this.attackTau : this.releaseTau;
         var alpha = 1 - Math.exp(-Math.max(0, frameDt) / tau);
         return current + (target - current) * alpha;
     };
@@ -11707,9 +11711,12 @@ define('format_mnemo/vr', [], function() {
         // its per-stroke state so a restart begins clean.
         this.prevHand = null;
         this.poseMove = 0;
-        // Re-calibrate the head-pitch neutral on the next start, and stop
-        // driving the look pitch until a face is seen again.
+        // Re-calibrate the head-pitch and lean neutral on the next start (a
+        // restart may be from a different sitting distance, so a stale neutral
+        // width would read as an immediate lean), and stop driving the look pitch
+        // until a face is seen again.
         this.headPitchNeutral = null;
+        this.headSizeNeutral = null;
         this.havePitch = false;
         this.gunArmed = false;
         this.handLostTime = 0;
@@ -11963,12 +11970,18 @@ define('format_mnemo/vr', [], function() {
         var halfW = Math.abs(le.x - re.x) / 2;
         var eyeMidY = (lm[HeadPose.RIGHT_EYE].y + lm[HeadPose.LEFT_EYE].y) / 2;
         var faceH = Math.abs(lm[HeadPose.CHIN].y - lm[HeadPose.BROW].y);
+        var yaw = halfW > 0 ? (nose.x - midX) / halfW : 0;
+        // Apparent face width, a proxy for distance to the camera (bigger =
+        // leaning in), frame-normalised so it is resolution-agnostic. Turning the
+        // head also foreshortens the cheek-to-cheek span (~cos of the turn), which
+        // would otherwise read as leaning back while steering; compensate it out
+        // using the yaw signal (width is already largely invariant to pitch).
+        var yawComp = Math.sqrt(1 - Math.min(0.81, yaw * yaw));
+        var width = Math.abs(le.x - re.x);
         return {
-            yaw: halfW > 0 ? (nose.x - midX) / halfW : 0,
+            yaw: yaw,
             pitch: faceH > 0 ? (nose.y - eyeMidY) / faceH : 0,
-            // Apparent face width, a proxy for distance to the camera (bigger =
-            // leaning in). Normalised to the frame, so it is resolution-agnostic.
-            size: Math.abs(le.x - re.x)
+            size: yawComp > 0 ? width / yawComp : width
         };
     };
 
@@ -12099,7 +12112,11 @@ define('format_mnemo/vr', [], function() {
         // its motion zone guides hide in pose mode (where steering is by hand
         // position, not the zones, and there is no reverse gesture).
         var showHint = function() {
-            var pose = !!self.cameraNav.pose;
+            // Pose mode covers either detector: the hand landmarker or the face
+            // landmarker (a partial load may bring up only one). The pose hint
+            // names both movement gestures (head-lean and the fist-haul) so it is
+            // correct whichever loaded.
+            var pose = !!(self.cameraNav.pose || self.cameraNav.head);
             status.textContent = (pose ? s.cameranav_hint_pose : s.cameranav_hint) || '';
             preview.classList.toggle('format-mnemo__cam-preview--pose', pose);
         };
