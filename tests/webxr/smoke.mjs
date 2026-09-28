@@ -2470,6 +2470,48 @@ const scenarios = [
         }
     },
     {
+        name: 'headpose: leaning toward the camera (a wider face) glides forward',
+        fn: () => {
+            const HeP = window.__mnemoModule._HeadPose;
+            const hp = new HeP(null);
+            // A face of the given normalised width, centred and straight-ahead.
+            const faceW = (w) => {
+                const lm = [];
+                for (let i = 0; i < 468; i++) {
+                    lm.push({x: 0.5, y: 0.5, z: 0});
+                }
+                lm[234] = {x: 0.5 - w / 2, y: 0.5, z: 0}; // Right edge.
+                lm[454] = {x: 0.5 + w / 2, y: 0.5, z: 0}; // Left edge.
+                lm[33] = {x: 0.45, y: 0.45, z: 0};
+                lm[263] = {x: 0.55, y: 0.45, z: 0};
+                lm[10] = {x: 0.5, y: 0.25, z: 0};
+                lm[152] = {x: 0.5, y: 0.85, z: 0};
+                lm[1] = {x: 0.5, y: 0.5, z: 0};
+                return lm;
+            };
+            // A turned head: the cheek span foreshortens (narrower measured
+            // width) AND the nose shifts off-centre. The yaw compensation should
+            // keep the reported size ~neutral, so steering does not read as a
+            // lean. Edges 0.32/0.68 (width 0.36, a ~10% turn shrink), nose at
+            // 0.572 (yaw ~0.4).
+            const turned = () => {
+                const lm = faceW(0.36);
+                lm[1] = {x: 0.572, y: 0.5, z: 0}; // Nose off-centre (head turned).
+                return lm;
+            };
+            const neutral = hp.classify(faceW(0.40)).size; // Resting width.
+            const leanIn = hp.intent(hp.classify(faceW(0.52)), 0.5, neutral); // Closer.
+            const leanBack = hp.intent(hp.classify(faceW(0.30)), 0.5, neutral); // Further.
+            const still = hp.intent(hp.classify(faceW(0.41)), 0.5, neutral); // Within deadzone.
+            const noCal = hp.intent(hp.classify(faceW(0.52)), 0.5); // No neutral size yet.
+            const steer = hp.intent(hp.classify(turned()), 0.5, neutral); // Turning, not leaning.
+            const pass = Math.abs(neutral - 0.40) < 1e-9 && leanIn.move > 0 && leanBack.move < 0 &&
+                still.move === 0 && noCal.move === 0 && steer.move === 0 && Math.abs(steer.turn) > 0;
+            return {pass, detail: `in=${leanIn.move.toFixed(2)} back=${leanBack.move.toFixed(2)} ` +
+                `still=${still.move} none=${noCal.move} steerMove=${steer.move} steerTurn=${steer.turn.toFixed(2)}`};
+        }
+    },
+    {
         name: 'cameranav: head tilt eases the look pitch, mouse pitch untouched',
         fn: () => {
             const CN = window.__mnemoModule._CameraNav;

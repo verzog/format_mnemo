@@ -11135,6 +11135,7 @@ define('format_mnemo/vr', [], function() {
         this.gunArmed = false; // A cocked finger gun (thumb up) is held, ready to fire.
         this.handLostTime = 0; // Seconds since a hand was last tracked (latch expiry).
         this.headPitchNeutral = null; // Calibrated straight-ahead head pitch.
+        this.headSizeNeutral = null; // Calibrated neutral face width (lean-to-move).
         this.havePitch = false; // A face is driving the look pitch this frame.
         this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
         this.maxPitch = Math.PI / 2 - 0.05; // Clamp, matching the drag-look limit.
@@ -11285,7 +11286,11 @@ define('format_mnemo/vr', [], function() {
         if (frameDt > this.maxFrameGap) {
             return current;
         }
-        var tau = target > current ? this.attackTau : this.releaseTau;
+        // Attack vs release by magnitude, not sign: the move signal is now
+        // bidirectional (head-lean reverses below zero), so growing deflection in
+        // either direction is an "attack" (fast) and easing back toward zero is a
+        // "release" (slow). Comparing raw values would make reverse crawl in.
+        var tau = Math.abs(target) > Math.abs(current) ? this.attackTau : this.releaseTau;
         var alpha = 1 - Math.exp(-Math.max(0, frameDt) / tau);
         return current + (target - current) * alpha;
     };
@@ -11350,21 +11355,27 @@ define('format_mnemo/vr', [], function() {
      */
     CameraNav.prototype.samplePose = function(v, frameDt) {
         var ts = window.performance ? window.performance.now() : Date.now();
-        // Head steering (preferred when a face is seen).
+        // Head steering (preferred when a face is seen), plus lean-to-move.
         var headTurn = 0;
+        var headMove = 0;
         var haveHead = false;
         this.havePitch = false;
         if (this.head) {
             var hlm = this.head.detect(v, ts);
             if (hlm) {
                 var hc = this.head.classify(hlm);
-                // Calibrate the straight-ahead pitch on the first face seen, so
-                // the absolute look mapping is relative to this learner's neutral.
+                // Calibrate the straight-ahead pitch and neutral face width on the
+                // first face seen, so the look mapping and the lean-to-move are
+                // both relative to this learner's resting pose.
                 if (this.headPitchNeutral === null) {
                     this.headPitchNeutral = hc.pitch;
                 }
-                var hi = this.head.intent(hc, this.headPitchNeutral);
+                if (this.headSizeNeutral === null) {
+                    this.headSizeNeutral = hc.size;
+                }
+                var hi = this.head.intent(hc, this.headPitchNeutral, this.headSizeNeutral);
                 headTurn = hi.turn;
+                headMove = hi.move;
                 haveHead = true;
                 this.pitchTarget = hi.pitch * this.maxPitch;
                 this.havePitch = true;
@@ -11425,7 +11436,11 @@ define('format_mnemo/vr', [], function() {
             this.poseMove = 0;
             return;
         }
-        this.poseMove = this.blend(this.poseMove, moveTarget, frameDt);
+        // Forward/back: lean-to-move from the head when a face is tracked
+        // (hands-free), else the hand's fist-haul. Steering likewise prefers the
+        // head.
+        var chosenMove = haveHead ? headMove : moveTarget;
+        this.poseMove = this.blend(this.poseMove, chosenMove, frameDt);
         this.intent = {turn: haveHead ? headTurn : handTurn, move: this.poseMove};
     };
 
@@ -11696,9 +11711,12 @@ define('format_mnemo/vr', [], function() {
         // its per-stroke state so a restart begins clean.
         this.prevHand = null;
         this.poseMove = 0;
-        // Re-calibrate the head-pitch neutral on the next start, and stop
-        // driving the look pitch until a face is seen again.
+        // Re-calibrate the head-pitch and lean neutral on the next start (a
+        // restart may be from a different sitting distance, so a stale neutral
+        // width would read as an immediate lean), and stop driving the look pitch
+        // until a face is seen again.
         this.headPitchNeutral = null;
+        this.headSizeNeutral = null;
         this.havePitch = false;
         this.gunArmed = false;
         this.handLostTime = 0;
@@ -11909,6 +11927,13 @@ define('format_mnemo/vr', [], function() {
         // a small wobble around neutral.
         this.pitchGain = 0.12;
         this.pitchDeadzone = 0.015;
+        // Lean-to-move: the face's apparent width grows as the learner leans
+        // toward the camera. The move signal is the fractional change from the
+        // calibrated neutral width, so leaning in glides forward and leaning
+        // back reverses. The gain is the fractional growth that reaches full
+        // speed; the deadzone ignores breathing / small sway around neutral.
+        this.leanGain = 0.22;
+        this.leanDeadzone = 0.06;
     }
 
     /** @const {Number} Nose-tip landmark index in the MediaPipe face mesh. */
@@ -11945,9 +11970,18 @@ define('format_mnemo/vr', [], function() {
         var halfW = Math.abs(le.x - re.x) / 2;
         var eyeMidY = (lm[HeadPose.RIGHT_EYE].y + lm[HeadPose.LEFT_EYE].y) / 2;
         var faceH = Math.abs(lm[HeadPose.CHIN].y - lm[HeadPose.BROW].y);
+        var yaw = halfW > 0 ? (nose.x - midX) / halfW : 0;
+        // Apparent face width, a proxy for distance to the camera (bigger =
+        // leaning in), frame-normalised so it is resolution-agnostic. Turning the
+        // head also foreshortens the cheek-to-cheek span (~cos of the turn), which
+        // would otherwise read as leaning back while steering; compensate it out
+        // using the yaw signal (width is already largely invariant to pitch).
+        var yawComp = Math.sqrt(1 - Math.min(0.81, yaw * yaw));
+        var width = Math.abs(le.x - re.x);
         return {
-            yaw: halfW > 0 ? (nose.x - midX) / halfW : 0,
-            pitch: faceH > 0 ? (nose.y - eyeMidY) / faceH : 0
+            yaw: yaw,
+            pitch: faceH > 0 ? (nose.y - eyeMidY) / faceH : 0,
+            size: yawComp > 0 ? width / yawComp : width
         };
     };
 
@@ -11957,13 +11991,16 @@ define('format_mnemo/vr', [], function() {
      * positive turn, matching HandPose and the apply() convention). Pitch maps
      * absolutely to a look angle relative to a calibrated neutral: tilting the
      * head up (a smaller pitch signal than neutral) looks up. Pitch is skipped
-     * when no neutral has been calibrated yet.
+     * when no neutral has been calibrated yet. Move is the lean-to-glide signal:
+     * the fractional change of the face width from a calibrated neutral (leaning
+     * in glides forward), skipped until a neutral size is calibrated.
      *
-     * @param {Object} cur The current head features {yaw, pitch}.
+     * @param {Object} cur The current head features {yaw, pitch, size}.
      * @param {Number} [neutralPitch] The calibrated straight-ahead pitch signal.
-     * @return {Object} {turn, pitch} each in -1..1.
+     * @param {Number} [neutralSize] The calibrated neutral face width.
+     * @return {Object} {turn, pitch, move} each in -1..1.
      */
-    HeadPose.prototype.intent = function(cur, neutralPitch) {
+    HeadPose.prototype.intent = function(cur, neutralPitch, neutralSize) {
         var mag = Math.abs(cur.yaw) - this.yawDeadzone;
         var turn = 0;
         if (mag > 0) {
@@ -11978,7 +12015,18 @@ define('format_mnemo/vr', [], function() {
                 pitch = Math.max(-1, Math.min(1, (dev < 0 ? -1 : 1) * pmag / this.pitchGain));
             }
         }
-        return {turn: turn, pitch: pitch};
+        // Forward/back from leaning: the fractional change of the face width from
+        // the calibrated neutral. Leaning in (a wider face) glides forward.
+        var move = 0;
+        if (typeof neutralSize === 'number' && neutralSize > 0 &&
+                typeof cur.size === 'number') {
+            var rel = (cur.size - neutralSize) / neutralSize;
+            var mmag = Math.abs(rel) - this.leanDeadzone;
+            if (mmag > 0) {
+                move = Math.max(-1, Math.min(1, (rel < 0 ? -1 : 1) * mmag / this.leanGain));
+            }
+        }
+        return {turn: turn, pitch: pitch, move: move};
     };
 
     /**
@@ -12064,7 +12112,11 @@ define('format_mnemo/vr', [], function() {
         // its motion zone guides hide in pose mode (where steering is by hand
         // position, not the zones, and there is no reverse gesture).
         var showHint = function() {
-            var pose = !!self.cameraNav.pose;
+            // Pose mode covers either detector: the hand landmarker or the face
+            // landmarker (a partial load may bring up only one). The pose hint
+            // names both movement gestures (head-lean and the fist-haul) so it is
+            // correct whichever loaded.
+            var pose = !!(self.cameraNav.pose || self.cameraNav.head);
             status.textContent = (pose ? s.cameranav_hint_pose : s.cameranav_hint) || '';
             preview.classList.toggle('format-mnemo__cam-preview--pose', pose);
         };
