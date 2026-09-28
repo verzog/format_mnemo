@@ -2641,6 +2641,76 @@ const scenarios = [
         }
     },
     {
+        name: 'gesture: a fist reads as grab even with one fingertip lost, a relaxed hand does not brake',
+        fn: () => {
+            const GM = window.__mnemoModule._GestureManager;
+            const THREE = window.__mnemoTest.THREE;
+            // A joint whose getWorldPosition reports a fingertip d metres from the
+            // wrist (all placed along +X; the wrist sits at the origin).
+            const jointAt = (d) => ({visible: true, getWorldPosition: (out) => out.set(d, 0, 0)});
+            const hand = (dists) => {
+                const joints = {wrist: jointAt(0)};
+                const tips = ['index-finger-tip', 'middle-finger-tip',
+                    'ring-finger-tip', 'pinky-finger-tip'];
+                dists.forEach((d, i) => {
+                    if (d !== null) {
+                        joints[tips[i]] = jointAt(d);
+                    }
+                });
+                return {visible: true, joints};
+            };
+            const self = () => ({
+                jointPos: GM.prototype.jointPos, handGesture: GM.prototype.handGesture,
+                vTip: new THREE.Vector3(), handWrist: [new THREE.Vector3(), new THREE.Vector3()],
+                fistDist: 0.075, palmDist: 0.13
+            });
+            const g = (dists) => self().handGesture(hand(dists), 0);
+            // A clean fist: every visible tip curled in near the wrist.
+            const fist = g([0.05, 0.05, 0.05, 0.05]);
+            // A fist that lost one tip to occlusion (three near, one stray in the
+            // mid range) still reads as a grab thanks to the one-tip tolerance.
+            const fistStray = g([0.05, 0.05, 0.05, 0.10]);
+            // A relaxed hand (tips in the mid range) is neither grab nor brake.
+            const relaxed = g([0.10, 0.10, 0.10, 0.10]);
+            // A deliberately splayed open palm brakes.
+            const palm = g([0.16, 0.16, 0.16, 0.16]);
+            const pass = fist.fist && !fist.palm && fistStray.fist &&
+                !relaxed.fist && !relaxed.palm && palm.palm && !palm.fist;
+            return {pass, detail: `fist=${fist.fist} stray=${fistStray.fist} ` +
+                `relaxedFist=${relaxed.fist} relaxedPalm=${relaxed.palm} palm=${palm.palm}`};
+        }
+    },
+    {
+        name: 'gesture: an active grab overrides an open second hand (no false brake)',
+        fn: () => {
+            const GM = window.__mnemoModule._GestureManager;
+            const THREE = window.__mnemoTest.THREE;
+            const jointAt = (d) => ({visible: true, getWorldPosition: (out) => out.set(d, 0, 0)});
+            const hand = (dists) => {
+                const joints = {wrist: jointAt(0)};
+                const tips = ['index-finger-tip', 'middle-finger-tip',
+                    'ring-finger-tip', 'pinky-finger-tip'];
+                dists.forEach((d, i) => (joints[tips[i]] = jointAt(d)));
+                return {visible: true, joints};
+            };
+            const self = {
+                jointPos: GM.prototype.jointPos, handGesture: GM.prototype.handGesture,
+                readHandGestures: GM.prototype.readHandGestures,
+                vTip: new THREE.Vector3(), handWrist: [new THREE.Vector3(), new THREE.Vector3()],
+                vSum: new THREE.Vector3(), fistDist: 0.075, palmDist: 0.13,
+                // One fist (grab) and one open hand (would brake).
+                hands: [hand([0.05, 0.05, 0.05, 0.05]), hand([0.16, 0.16, 0.16, 0.16])]
+            };
+            const res = self.readHandGestures();
+            // The open hand reports a palm, but a hand is also grabbing; the update
+            // loop brakes only when grabCount === 0, so the grab wins.
+            const grabCount = res.grabCount; // From controllers too in the loop; 0 here.
+            const brakes = res.palm && grabCount === 0;
+            return {pass: res.palm && res.grabCount === 1 && !brakes,
+                detail: `palm=${res.palm} grab=${res.grabCount} brakes=${brakes}`};
+        }
+    },
+    {
         name: 'comfort: panel renders options and marks the active one for a11y',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
