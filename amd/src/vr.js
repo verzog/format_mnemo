@@ -10958,10 +10958,12 @@ define('format_mnemo/vr', [], function() {
         }
         // A settled fist often drops a fingertip from tracking (curled tips
         // occlude one another on the headset cameras), so allow one visible tip
-        // to fall outside the fist range. The palm (brake) stays strict — every
-        // visible tip must be extended — so a relaxed hand never brakes by
-        // accident.
-        return {fist: near >= Math.max(2, count - 1), palm: far >= count};
+        // to be absent or in the mid range — but never a clearly extended
+        // (far) one: an index-out point/pinch (near = 3, far = 1) must NOT read
+        // as a fist, or pointing to fly would drag the world. The palm (brake)
+        // stays strict — every visible tip must be extended — so a relaxed hand
+        // never brakes by accident.
+        return {fist: near >= Math.max(2, count - 1) && far === 0, palm: far >= count};
     };
 
     /**

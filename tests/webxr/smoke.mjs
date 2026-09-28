@@ -2674,10 +2674,15 @@ const scenarios = [
             const relaxed = g([0.10, 0.10, 0.10, 0.10]);
             // A deliberately splayed open palm brakes.
             const palm = g([0.16, 0.16, 0.16, 0.16]);
+            // A pointing/pinching hand (index extended, others curled) must NOT
+            // read as a fist, or pointing to fly would drag the world.
+            const pointing = g([0.16, 0.05, 0.05, 0.05]);
             const pass = fist.fist && !fist.palm && fistStray.fist &&
-                !relaxed.fist && !relaxed.palm && palm.palm && !palm.fist;
+                !relaxed.fist && !relaxed.palm && palm.palm && !palm.fist &&
+                !pointing.fist;
             return {pass, detail: `fist=${fist.fist} stray=${fistStray.fist} ` +
-                `relaxedFist=${relaxed.fist} relaxedPalm=${relaxed.palm} palm=${palm.palm}`};
+                `relaxedFist=${relaxed.fist} relaxedPalm=${relaxed.palm} palm=${palm.palm} ` +
+                `pointing=${pointing.fist}`};
         }
     },
     {
