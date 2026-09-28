@@ -330,6 +330,63 @@ HTTPS/`localhost`; the browser is not being presented an immersive-VR device by 
 headset/runtime; or (tethered) the OpenXR runtime is not set to Meta Quest Link.
 (If no button shows at all, editing is probably still on.)
 
+## Preparing 3D models
+
+Models load through Three.js, so the scene reads **glTF** — a single-file
+**`.glb`** is strongly preferred (self-contained: geometry, PBR materials and
+textures in one file). Other formats (`.unity`/`.prefab`, `.fbx`, `.obj`) are
+not loaded directly; export them to `.glb` first — this is the standard,
+smallest, best-supported path for the web and WebXR.
+
+**Getting a good `.glb`:**
+
+- **From Unity** — install the free **glTFast** or **UnityGLTF** package and
+  Export → glTF Binary (`.glb`). (Unity's own `.unity`/`.prefab`/`.asset` files
+  can never load in a browser; they must be exported.)
+- **From Blender** — File → Export → glTF 2.0 (`.glb`), and tick **Draco mesh
+  compression**.
+- **From Sketchfab / Poly Haven / Quaternius / Kenney** — download the glTF/GLB
+  variant directly.
+
+**Optimise before uploading.** Detail comes from PBR material maps (especially a
+**normal map**) far more than from polygon count, and the loader already decodes
+compressed geometry (Draco/meshopt) and textures (KTX2/Basis). The one-shot
+recipe with the free [`gltf-transform`](https://gltf-transform.dev) CLI:
+
+```sh
+# Prune unused data, dedupe, Draco-compress geometry and KTX2-compress textures.
+npx @gltf-transform/cli optimize in.glb out.glb --texture-compress ktx2
+
+# Or step by step for more control:
+npx @gltf-transform/cli prune     in.glb  step1.glb   # drop unused nodes/materials
+npx @gltf-transform/cli dedup     step1.glb step2.glb # merge duplicate meshes/textures
+npx @gltf-transform/cli draco     step2.glb step3.glb # compress geometry
+npx @gltf-transform/cli uastc     step3.glb out.glb   # KTX2 textures (or `etc1s` for smaller)
+```
+
+A 20 MB raw model routinely drops to well under 1 MB this way, so you can afford
+high-resolution textures. If a strict Content-Security-Policy blocks the addon
+decoders, the plugin falls back to a built-in **uncompressed**-glTF parser, so
+keep an uncompressed copy handy for locked-down sites.
+
+**Per-model settings (asset viewer).** Open **Preview site assets** from the
+plugin settings to see every model rendered, and set per model:
+
+- **Facing / Pitch / Roll** — degree corrections for a model authored lying
+  down, upside down or pointing the wrong way (e.g. Pitch 90 to stand up a flat
+  model). Applied wherever the model is placed.
+- **Scale** — a size multiplier for placement.
+- **Environments** — restrict a model to specific worlds.
+- **Play built-in animation (loop)** — autoplay the model's own glTF animation
+  on a loop (a rotating searchlight, a moving vehicle part). Author motion as
+  node transforms; a flashing light is most reliable as a small mesh that
+  scales/moves rather than an animated material colour.
+
+**If a preview card is blank**, it now says why: **"Could not load"** (the file
+failed to load — a corrupt/unsupported feature, a 404, or a decoder the site
+can't reach) or **"No visible geometry"** (it loaded but has an empty bounding
+box — usually an export/units problem).
+
 ## Admin settings
 
 Under **Plugins → Course formats → Mnemo (VR cyberspace)**, the settings are
