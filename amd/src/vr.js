@@ -10452,9 +10452,13 @@ define('format_mnemo/vr', [], function() {
         // controllers. An open palm on either hand brakes the whole frame.
         this.vSum.set(0, 0, 0);
         var hands = this.readHandGestures();
-        this.cs.brake = hands.palm;
         var ctrl = this.readControllers();
         var grabCount = hands.grabCount + ctrl.grabCount;
+        // An open palm brakes only when nothing is actively grabbing. Otherwise a
+        // relaxed or open second hand (natural while the other makes a fist to
+        // pull) reads as an open palm and cancels the grab, freezing every
+        // hand-tracked locomotion path (grab and point-to-fly both bail on brake).
+        this.cs.brake = hands.palm && grabCount === 0;
 
         // Arcade mode owns the controllers: B/Y starts or exits the game, and
         // while it runs every locomotion path is suspended so the trigger only
@@ -10952,7 +10956,14 @@ define('format_mnemo/vr', [], function() {
         if (count < 3) {
             return null;
         }
-        return {fist: near >= count, palm: far >= count};
+        // A settled fist often drops a fingertip from tracking (curled tips
+        // occlude one another on the headset cameras), so allow one visible tip
+        // to be absent or in the mid range — but never a clearly extended
+        // (far) one: an index-out point/pinch (near = 3, far = 1) must NOT read
+        // as a fist, or pointing to fly would drag the world. The palm (brake)
+        // stays strict — every visible tip must be extended — so a relaxed hand
+        // never brakes by accident.
+        return {fist: near >= Math.max(2, count - 1) && far === 0, palm: far >= count};
     };
 
     /**
