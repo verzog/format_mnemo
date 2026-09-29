@@ -193,6 +193,39 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * An uploaded .fbx model produces a card whose URL keeps the .fbx extension
+     * (so the viewer and scene request the real file), and it is configurable
+     * and placeable exactly as an uploaded .glb prop is.
+     */
+    public function test_fbx_upload_model_card(): void {
+        $this->resetAfterTest();
+
+        // An .fbx prop and an .fbx building model, each in its own area.
+        $this->make_file('assetpack', 'spaceship.fbx');
+        $this->make_file('buildingassets', 'building-forum.fbx');
+
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        // The prop card keys on the base name and keeps the .fbx URL.
+        $this->assertArrayHasKey('spaceship', $bykey);
+        $this->assertSame('uploaded', $bykey['spaceship']['source']);
+        $this->assertSame('prop', $bykey['spaceship']['category']);
+        $this->assertStringContainsString('spaceship.fbx', $bykey['spaceship']['url']);
+        // The building card likewise.
+        $this->assertArrayHasKey('building-forum', $bykey);
+        $this->assertSame('building', $bykey['building-forum']['category']);
+        $this->assertStringContainsString('building-forum.fbx', $bykey['building-forum']['url']);
+
+        // An .fbx prop is offered to the in-view placer and to the per-model
+        // settings form, just like a .glb prop.
+        $this->assertContains('spaceship', asset_gallery::placer_prop_names());
+        $this->assertContains('spaceship', asset_gallery::configurable_model_names());
+        $this->assertContains('building-forum', asset_gallery::configurable_model_names());
+    }
+
+    /**
      * Build a minimal GLB byte string with the given glTF asset block.
      *
      * @param array $asset The asset object (e.g. copyright/generator/version).

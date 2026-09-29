@@ -81,7 +81,7 @@ if ($ADMIN->fulltree) {
         get_string('setting_assetpack_desc', 'format_mnemo'),
         'assetpack',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
     ));
 
     // Upload flying-car (vehicle) models straight into Moodle, kept separate
@@ -95,12 +95,12 @@ if ($ADMIN->fulltree) {
         get_string('setting_vehicleassets_desc', 'format_mnemo'),
         'vehicleassets',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
     ));
 
     // Upload per-activity building models straight into Moodle, kept separate
     // from the props above. Files land in the 'buildingassets' file area, named
-    // building-<modname>.glb (e.g. building-quiz.glb, building-forum.glb);
+    // building-<modname>.glb or .fbx (e.g. building-quiz.glb, building-forum.fbx);
     // matching activities render that building instead of the procedural one.
     // Any activity type without an uploaded (or bundled) building keeps the
     // procedural building.
@@ -110,7 +110,7 @@ if ($ADMIN->fulltree) {
         get_string('setting_buildingassets_desc', 'format_mnemo'),
         'buildingassets',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
     ));
 
     // Neon sign webfont. Left blank, sign and label text is drawn in the

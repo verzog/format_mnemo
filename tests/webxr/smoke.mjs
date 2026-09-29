@@ -548,7 +548,7 @@ const scenarios = [
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz']},
-                joinBase: CS.prototype.joinBase};
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt};
             const url = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
             return {pass: url === 'm/building-quiz.glb', detail: `url=${url}`};
         }
@@ -583,6 +583,100 @@ const scenarios = [
             const url = CS.prototype.buildingModelUrl.call(self,
                 {modname: 'quiz', building: 'https://cdn/x.glb'});
             return {pass: url === 'https://cdn/x.glb', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'fbx: modelExt defaults to glb and honours the modelexts map',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelexts: {spaceship: 'fbx'}}};
+            const a = CS.prototype.modelExt.call(self, 'spaceship');
+            const b = CS.prototype.modelExt.call(self, 'lamp');
+            const c = CS.prototype.modelExt.call({config: {}}, 'lamp');
+            return {pass: a === 'fbx' && b === 'glb' && c === 'glb',
+                detail: `spaceship=${a} lamp=${b} noconfig=${c}`};
+        }
+    },
+    {
+        name: 'fbx: loadNamedModel requests the flagged extension, falls back to bundled glb',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/',
+                    modelexts: {ship: 'fbx'}},
+                joinBase: CS.prototype.joinBase,
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                orientClone: CS.prototype.orientClone,
+                modelOrientation: CS.prototype.modelOrientation,
+                loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt,
+                loadModel: (url) => {
+                    calls.push(url);
+                    // The uploaded .fbx is missing, so the bundled .glb is used.
+                    return url.indexOf('pack/') === 0
+                        ? Promise.reject(new Error('404'))
+                        : Promise.resolve({tpl: true});
+                }
+            };
+            const r = await CS.prototype.loadProp.call(self, 'ship');
+            const pass = calls[0] === 'pack/ship.fbx' &&
+                calls[1] === 'bundled/ship.glb' && !!r && r.tpl === true;
+            return {pass, detail: calls.join(',')};
+        }
+    },
+    {
+        name: 'fbx: buildingModelUrl uses the flagged extension for a type-based building',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['quiz'],
+                modelexts: {'building-quiz': 'fbx'}},
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
+            return {pass: url === 'm/building-quiz.fbx', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'fbx: loadModel routes an .fbx URL through the addon FBXLoader',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            let asked = null;
+            const group = new THREE.Group();
+            group.animations = [];
+            const self = {
+                modelCache: {},
+                loaders: {FBXLoader: function() {
+                    return {loadAsync: (u) => {
+                        asked = u;
+                        return Promise.resolve(group);
+                    }};
+                }},
+                fbxLoader: null,
+                fbx: CS.prototype.fbx,
+                dressLoadedModel: () => {}
+            };
+            const r = await CS.prototype.loadModel.call(self, 'a/ship.fbx');
+            const pass = asked === 'a/ship.fbx' && r === group &&
+                Array.isArray(r.mnemoClips);
+            return {pass, detail: `asked=${asked} clips=${r && r.mnemoClips}`};
+        }
+    },
+    {
+        name: 'fbx: loadModel rejects an .fbx URL when no FBX loader is vendored',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            // No FBXLoader and no GLTFLoader: the .fbx branch rejects so the
+            // caller falls back exactly as for any unavailable model.
+            const self = {modelCache: {}, loaders: {}};
+            let rejected = false;
+            try {
+                await CS.prototype.loadModel.call(self, 'a/ship.fbx');
+            } catch (e) {
+                rejected = true;
+            }
+            return {pass: rejected, detail: `rejected=${rejected}`};
         }
     },
     {
@@ -698,6 +792,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt,
                 loadModel: (url) => {
                     calls.push(url);
                     return url.indexOf('pack/') === 0
@@ -724,6 +819,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt,
                 loadModel: (url) => {
                     calls.push(url);
                     return Promise.resolve({});
@@ -1698,7 +1794,8 @@ const scenarios = [
                 joinBase: () => 'x',
                 loadModel: () => Promise.resolve({}),
                 loadProp: CS.prototype.loadProp,
-                loadNamedModel: CS.prototype.loadNamedModel
+                loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt
             };
             let rejected = false;
             try {
@@ -1743,6 +1840,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt,
                 loadModel: () => Promise.resolve(new THREE.Group())
             };
             const on = await CS.prototype.loadProp.call(self, 'beacon');

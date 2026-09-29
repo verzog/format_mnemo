@@ -418,8 +418,8 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
-     * The building field validates: blank, a .glb file name, or an http(s) URL
-     * are accepted; anything else is rejected.
+     * The building field validates: blank, a model file name (.glb or .fbx), or
+     * an http(s) URL are accepted; anything else is rejected.
      */
     public function test_coursemodule_building_validation(): void {
         $this->resetAfterTest();
@@ -451,6 +451,8 @@ final class scene_test extends \advanced_testcase {
 
         $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => '']));
         $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'library.glb']));
+        // An .fbx file name is accepted alongside .glb.
+        $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'library.fbx']));
         $this->assertSame(
             [],
             format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'https://cdn.example/x.glb'])
@@ -665,14 +667,19 @@ final class scene_test extends \advanced_testcase {
             'itemid' => 0,
             'filepath' => '/',
         ];
-        foreach (['lamp.glb', 'tower.glb', 'shrine.gltf', 'readme.txt'] as $name) {
+        foreach (['lamp.glb', 'tower.glb', 'ship.fbx', 'shrine.gltf', 'readme.txt'] as $name) {
             $fs->create_file_from_string(['filename' => $name] + $base, 'x');
         }
         $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
         $names = $config['packmodels'];
         sort($names);
-        // Only the two .glb base names, no extension, no .gltf or .txt entries.
-        $this->assertSame(['lamp', 'tower'], $names);
+        // The .glb and .fbx base names, no extension, no .gltf or .txt entries.
+        $this->assertSame(['lamp', 'ship', 'tower'], $names);
+        // The modelexts map flags only the non-glb (.fbx) upload; a .glb name is
+        // absent (the client defaults it to glb).
+        $this->assertSame('fbx', $config['modelexts']['ship']);
+        $this->assertArrayNotHasKey('lamp', $config['modelexts']);
+        $this->assertArrayNotHasKey('tower', $config['modelexts']);
         // The models base now points at the uploaded pack.
         $this->assertStringContainsString('/format_mnemo/assetpack/', $config['modelsbaseurl']);
 

@@ -147,14 +147,14 @@ class asset_gallery {
     }
 
     /**
-     * Classify a celestial asset by extension: a glTF binary (.glb/.gltf) is a
-     * 3D 'model', anything else is a flat 'image'.
+     * Classify a celestial asset by extension: a 3D model (.glb/.gltf/.fbx) is a
+     * 'model', anything else is a flat 'image'.
      *
      * @param string $nameorurl A file name or URL.
      * @return string 'model' or 'image'.
      */
     protected static function asset_kind(string $nameorurl): string {
-        return preg_match('/\.(glb|gltf)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
+        return preg_match('/\.(glb|gltf|fbx)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
     }
 
     /**
@@ -265,29 +265,37 @@ class asset_gallery {
     ): array {
         global $CFG;
         $uploaded = self::stored_glb_files($filearea);
+        // Base name => the uploaded file's real extension (glb unless it is an
+        // .fbx upload), so a card reconstructs the right filename below.
+        $uploadedext = [];
         $names = $bundledset;
         foreach (array_keys($uploaded) as $filename) {
-            $names[basename($filename, '.glb')] = true;
+            $base = self::model_basename($filename);
+            $names[$base] = true;
+            $uploadedext[$base] = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         }
         $names = array_keys($names);
         sort($names);
 
         $out = [];
         foreach ($names as $name) {
-            $filename = $name . '.glb';
+            // Uploaded models keep their real extension; an external pack and the
+            // bundled models are always .glb.
+            $ext = isset($uploadedext[$name]) ? $uploadedext[$name] : 'glb';
+            $filename = $name . '.' . $ext;
             $path = null;
             $file = null;
             if ($externalbase !== '') {
-                $url = rtrim($externalbase, '/') . '/' . $filename;
+                $url = rtrim($externalbase, '/') . '/' . $name . '.glb';
                 $source = 'url';
             } else if (isset($uploaded[$filename])) {
                 $url = self::file_url($filearea, $uploaded[$filename]);
                 $source = 'uploaded';
                 $file = $uploaded[$filename];
             } else if (isset($bundledset[$name])) {
-                $url = (new moodle_url('/course/format/mnemo/models/' . $filename))->out(false);
+                $url = (new moodle_url('/course/format/mnemo/models/' . $name . '.glb'))->out(false);
                 $source = 'bundled';
-                $path = $CFG->dirroot . '/course/format/mnemo/models/' . $filename;
+                $path = $CFG->dirroot . '/course/format/mnemo/models/' . $name . '.glb';
             } else {
                 continue;
             }
@@ -471,8 +479,8 @@ class asset_gallery {
         if (empty(get_config('format_mnemo', 'assetbaseurl'))) {
             foreach (array_keys(self::uploaded_pack_names()) as $filename) {
                 $filename = (string)$filename;
-                if (substr($filename, -4) === '.glb') {
-                    $names[basename($filename, '.glb')] = true;
+                if (preg_match('/\.(glb|fbx)$/i', $filename)) {
+                    $names[self::model_basename($filename)] = true;
                 }
             }
         }
@@ -584,7 +592,8 @@ class asset_gallery {
     }
 
     /**
-     * The .glb files uploaded into a system-context file area, keyed by filename.
+     * The uploaded model files (.glb and .fbx) in a system-context file area,
+     * keyed by filename.
      *
      * @param string $filearea The file area.
      * @return array<string, \stored_file> Map of filename => file.
@@ -592,11 +601,22 @@ class asset_gallery {
     protected static function stored_glb_files(string $filearea): array {
         $map = [];
         foreach (self::stored_files($filearea) as $file) {
-            if (substr($file->get_filename(), -4) === '.glb') {
+            if (preg_match('/\.(glb|fbx)$/i', $file->get_filename())) {
                 $map[$file->get_filename()] = $file;
             }
         }
         return $map;
+    }
+
+    /**
+     * Strip a model file's extension (.glb or .fbx) to its base name. A name
+     * with no known model extension is returned unchanged.
+     *
+     * @param string $filename The model file name.
+     * @return string The base name without the model extension.
+     */
+    protected static function model_basename(string $filename): string {
+        return preg_replace('/\.(glb|fbx)$/i', '', $filename);
     }
 
     /**

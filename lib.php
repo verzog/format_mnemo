@@ -537,8 +537,8 @@ function format_mnemo_coursemodule_standard_elements($formwrapper, $mform) {
 }
 
 /**
- * Validate the "Cyberspace building model" field: it must be blank, a bare .glb
- * file name, or a full http(s) URL to a .glb model.
+ * Validate the "Cyberspace building model" field: it must be blank, a bare
+ * model file name (.glb or .fbx), or a full http(s) URL to a model.
  *
  * @param \moodleform_mod $formwrapper the activity settings form
  * @param array $data the submitted form data
@@ -555,7 +555,7 @@ function format_mnemo_coursemodule_validation($formwrapper, $data) {
         return $errors;
     }
     $isurl = (bool)preg_match('#^https?://#i', $model);
-    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.glb$/i', $model);
+    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.(glb|fbx)$/i', $model);
     if (!$isurl && !$isfile) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
     }

@@ -787,9 +787,14 @@ class scene implements renderable, templatable {
             'vehiclepack' => $this->uploaded_glb_names('vehicleassets'),
             // Base URL for per-activity building models, separate from props.
             'buildingsbaseurl' => $this->buildings_base_url(),
-            // Module types that have a building-<modname>.glb model available, so
+            // Module types that have a building-<modname> model available, so
             // the client only attempts to load buildings it can expect to find.
             'buildingmodels' => $this->building_models(),
+            // Map of uploaded model base name => file extension, for the few
+            // uploads whose extension is not the default "glb" (the .fbx
+            // uploads). The client appends this extension when requesting the
+            // model; names absent from the map load as .glb.
+            'modelexts' => $this->model_exts(),
             // Optional site-wide assets, each resolving to an admin-set URL, then
             // an uploaded file, then null (the client keeps its bundled look).
             // See resolve_asset_url().
@@ -1031,9 +1036,11 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * The .glb base names uploaded into a model file area, or null when the area
+     * The model base names uploaded into a model file area, or null when the area
      * is empty (nothing to enumerate). Used so the client can skip probing an
      * area for a model it does not hold and load the bundled fallback directly.
+     * Both .glb and .fbx are listed; the client learns each name's real extension
+     * from model_exts() (glb is the default).
      *
      * @param string $filearea The system-context file area.
      * @return array|null
@@ -1047,11 +1054,36 @@ class scene implements renderable, templatable {
         }
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^(.*)\.glb$/i', $file->get_filename(), $m)) {
+            if (preg_match('/^(.*)\.(glb|fbx)$/i', $file->get_filename(), $m)) {
                 $names[] = $m[1];
             }
         }
         return array_values(array_unique($names));
+    }
+
+    /**
+     * Map of uploaded model base name => file extension for every model whose
+     * extension is not the default "glb" (i.e. the .fbx uploads), across the
+     * prop, vehicle and building areas. The client appends this extension when
+     * requesting the model, so an uploaded "spaceship.fbx" is fetched as
+     * spaceship.fbx rather than the default spaceship.glb. Empty when there are
+     * no non-glb uploads.
+     *
+     * @return array<string, string>
+     */
+    protected function model_exts(): array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $out = [];
+        foreach (['assetpack', 'vehicleassets', 'buildingassets'] as $filearea) {
+            $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+            foreach ($files as $file) {
+                if (preg_match('/^(.*)\.(fbx)$/i', $file->get_filename(), $m)) {
+                    $out[$m[1]] = strtolower($m[2]);
+                }
+            }
+        }
+        return $out;
     }
 
     /**
@@ -1258,14 +1290,14 @@ class scene implements renderable, templatable {
     }
 
     /**
-     * Classify a celestial asset by extension: a glTF binary (.glb/.gltf) is a
-     * 3D 'model', anything else is treated as a flat 'image'.
+     * Classify a celestial asset by extension: a 3D model (.glb/.gltf/.fbx) is a
+     * 'model', anything else is treated as a flat 'image'.
      *
      * @param string $nameorurl A file name or URL.
      * @return string 'model' or 'image'.
      */
     protected function asset_kind(string $nameorurl): string {
-        return preg_match('/\.(glb|gltf)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
+        return preg_match('/\.(glb|gltf|fbx)(\?|#|$)/i', $nameorurl) ? 'model' : 'image';
     }
 
     /**
@@ -1297,11 +1329,11 @@ class scene implements renderable, templatable {
         $files = $fs->get_area_files($context->id, 'format_mnemo', 'buildingassets', 0, 'filename', false);
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^building-(.+)\.glb$/', $file->get_filename(), $m)) {
+            if (preg_match('/^building-(.+)\.(glb|fbx)$/i', $file->get_filename(), $m)) {
                 $names[] = $m[1];
             }
         }
-        return $names;
+        return array_values(array_unique($names));
     }
 
     /**

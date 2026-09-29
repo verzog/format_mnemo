@@ -55,6 +55,7 @@ async function loadAddons() {
     if (!addonsBase) {
         return {};
     }
+    let out = {};
     try {
         const [gltf, draco, ktx2, meshopt] = await Promise.all([
             import(addonsBase + 'loaders/GLTFLoader.js'),
@@ -62,15 +63,24 @@ async function loadAddons() {
             import(addonsBase + 'loaders/KTX2Loader.js'),
             import(addonsBase + 'libs/meshopt_decoder.module.js'),
         ]);
-        return {
+        out = {
             GLTFLoader: gltf.GLTFLoader,
             DRACOLoader: draco.DRACOLoader,
             KTX2Loader: ktx2.KTX2Loader,
             MeshoptDecoder: meshopt.MeshoptDecoder,
         };
     } catch (e) {
-        return {};
+        out = {};
     }
+    // FBX is optional and loaded independently, so a failure here (or the file
+    // simply not being vendored) never drops the glTF stack above.
+    try {
+        const fbx = await import(addonsBase + 'loaders/FBXLoader.js');
+        out.FBXLoader = fbx.FBXLoader;
+    } catch (e) {
+        // No FBX support on this page; glTF still works.
+    }
+    return out;
 }
 
 import(src).then(async(three) => {
