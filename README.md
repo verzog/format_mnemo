@@ -121,8 +121,8 @@ off).
   plus the emissive-strength and texture-transform extensions.
 - **Activity buildings from models** — beyond the procedural styling, an asset
   pack can supply a real building model per activity **type** by including
-  `building-<modname>.glb` (e.g. `building-quiz.glb`, `building-forum.glb`,
-  `building-page.glb`). Matching activities render that model — fitted to the
+  `building-<modname>.glb` (or `.fbx`) — e.g. `building-quiz.glb`,
+  `building-forum.glb`, `building-page.fbx`. Matching activities render that model — fitted to the
   building footprint, keeping their clickable sign — instead of the procedural
   block, so the cityscape reflects what each activity actually is. Any type
   without a model keeps its procedural building.
@@ -334,15 +334,22 @@ headset/runtime; or (tethered) the OpenXR runtime is not set to Meta Quest Link.
 
 Models load through Three.js, so the scene reads **glTF** — a single-file
 **`.glb`** is strongly preferred (self-contained: geometry, PBR materials and
-textures in one file). Other formats (`.unity`/`.prefab`, `.fbx`, `.obj`) are
-not loaded directly; export them to `.glb` first — this is the standard,
-smallest, best-supported path for the web and WebXR.
+textures in one file), and it is the standard, smallest, best-supported path for
+the web and WebXR. Autodesk **`.fbx`** models are **also accepted** (converted in
+the browser on load) — handy when a `.glb` export is not to hand — but glTF still
+wins: it loads faster, embeds its textures, and alone supports the
+Draco/meshopt/KTX2 compression below. FBX also has no single unit convention, so
+an imported model may come in too large or small, or facing the wrong way; fix
+that once with the per-model **scale** and **pitch/yaw/roll** settings in the
+asset viewer. Other formats (`.unity`/`.prefab`, `.obj`) are not loaded directly;
+export them to `.glb` (or `.fbx`) first.
 
 **Getting a good `.glb`:**
 
 - **From Unity** — install the free **glTFast** or **UnityGLTF** package and
-  Export → glTF Binary (`.glb`). (Unity's own `.unity`/`.prefab`/`.asset` files
-  can never load in a browser; they must be exported.)
+  Export → glTF Binary (`.glb`), or export **FBX** with the FBX Exporter package.
+  (Unity's own `.unity`/`.prefab`/`.asset` files can never load in a browser; they
+  must be exported.)
 - **From Blender** — File → Export → glTF 2.0 (`.glb`), and tick **Draco mesh
   compression**.
 - **From Sketchfab / Poly Haven / Quaternius / Kenney** — download the glTF/GLB

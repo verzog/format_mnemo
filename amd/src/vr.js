@@ -211,6 +211,7 @@ define('format_mnemo/vr', [], function() {
         // (kept out of the constructor to keep its complexity in check).
         this.initSurfaces(config, assets);
         this.gltfLoader = null; // Lazily built addon GLTFLoader, when available.
+        this.fbxLoader = null; // Lazily built addon FBXLoader, when available.
         this.palette = PALETTES[config.palette] || PALETTES.cyan;
         STATE_COLOURS.available = this.palette.primary;
         // Hour of day (0-24) from the site clock; drives the day/night cycle.
@@ -2118,7 +2119,19 @@ define('format_mnemo/vr', [], function() {
         }
         var self = this;
         var promise;
-        if (this.loaders.GLTFLoader) {
+        // An .fbx model loads through the addon FBXLoader when it is available.
+        // FBXLoader returns the model group directly (its clips on .animations),
+        // and there is no built-in FBX fallback parser, so a missing loader
+        // rejects and the caller falls back exactly as for any unavailable model.
+        if (/\.fbx(\?|#|$)/i.test(url) && this.loaders.FBXLoader) {
+            promise = this.fbx().loadAsync(url).then(function(obj) {
+                self.dressLoadedModel(obj);
+                obj.mnemoClips = obj.animations || [];
+                return obj;
+            });
+        } else if (/\.fbx(\?|#|$)/i.test(url)) {
+            promise = Promise.reject(new Error('format_mnemo: no FBX loader for ' + url));
+        } else if (this.loaders.GLTFLoader) {
             promise = this.gltf().loadAsync(url).then(function(gltf) {
                 self.dressLoadedModel(gltf.scene);
                 // Keep the authored animation clips with the template so a placed
@@ -2176,6 +2189,19 @@ define('format_mnemo/vr', [], function() {
         }
         this.gltfLoader = loader;
         return loader;
+    };
+
+    /**
+     * Lazily build the addon FBXLoader (no decoders needed). Only called when
+     * the FBXLoader addon is present and an .fbx URL is loaded.
+     *
+     * @return {Object} The FBXLoader.
+     */
+    Cyberspace.prototype.fbx = function() {
+        if (!this.fbxLoader) {
+            this.fbxLoader = new this.loaders.FBXLoader();
+        }
+        return this.fbxLoader;
     };
 
     /**
@@ -3141,6 +3167,23 @@ define('format_mnemo/vr', [], function() {
         clone.add(inner);
     };
 
+    /**
+     * The file extension to request for an uploaded model name. Defaults to
+     * "glb"; the server flags a name in config.modelexts only when its upload
+     * is a different format (currently ".fbx"). Bundled fallbacks are always
+     * .glb, so this only affects the primary (upload-area) request.
+     *
+     * @param {String} name The model base name.
+     * @return {String} The lower-case extension without a leading dot.
+     */
+    Cyberspace.prototype.modelExt = function(name) {
+        var m = this.config.modelexts;
+        if (m && Object.prototype.hasOwnProperty.call(m, name) && m[name]) {
+            return String(m[name]).toLowerCase();
+        }
+        return 'glb';
+    };
+
     Cyberspace.prototype.loadProp = function(name) {
         return this.loadNamedModel(name, this.config.modelsbaseurl, this.config.packmodels);
     };
@@ -3161,14 +3204,18 @@ define('format_mnemo/vr', [], function() {
      * Load a model by base name from a category's base URL, falling back to the
      * bundled models. Shared by loadProp (props) and loadVehicle (vehicles).
      *
-     * @param {String} name The model base name (a "<name>.glb" is requested).
+     * @param {String} name The model base name (a "<name>.<ext>" is requested,
+     *     ext coming from config.modelexts or defaulting to "glb").
      * @param {String} base The category's base URL.
-     * @param {Array|null} pack The .glb base names the server enumerated in that
+     * @param {Array|null} pack The model base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
      * @return {Promise} Resolves with a Three.Group template.
      */
     Cyberspace.prototype.loadNamedModel = function(name, base, pack) {
         var self = this;
+        // The uploaded model's real extension (glb unless the server flagged this
+        // name as an .fbx upload). The bundled fallback is always .glb.
+        var ext = this.modelExt(name);
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
         // rejects, so every caller falls back exactly as for a missing model.
@@ -3193,7 +3240,7 @@ define('format_mnemo/vr', [], function() {
         if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
             p = this.loadModel(this.joinBase(fallback, name + '.glb'));
         } else {
-            p = this.loadModel(this.joinBase(base, name + '.glb'));
+            p = this.loadModel(this.joinBase(base, name + '.' + ext));
             if (fallback && fallback !== base) {
                 p = p.catch(function() {
                     return self.loadModel(self.joinBase(fallback, name + '.glb'));
@@ -4772,7 +4819,8 @@ define('format_mnemo/vr', [], function() {
         }
         var list = this.config.buildingmodels || [];
         if (base && act.modname && list.indexOf(act.modname) !== -1) {
-            return this.joinBase(base, 'building-' + act.modname + '.glb');
+            var name = 'building-' + act.modname;
+            return this.joinBase(base, name + '.' + this.modelExt(name));
         }
         return null;
     };
@@ -4805,9 +4853,9 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         return this.loadModel(url).then(function(tpl) {
             // Buildings bypass loadNamedModel, so stamp the animate toggle here
-            // from the model's name (its .glb basename, e.g. "building-forum"),
+            // from the model's name (its basename, e.g. "building-forum"),
             // matching how the asset viewer keys a building card.
-            var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.glb$/i, '');
+            var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx)$/i, '');
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
@@ -13072,11 +13120,22 @@ define('format_mnemo/vr', [], function() {
     function previewModelLoader(loaded, config, renderer) {
         var THREE = loaded.THREE;
         var addon = buildPreviewLoader(loaded, config, renderer);
-        if (addon) {
+        // An FBX preview loads through the addon FBXLoader (when vendored); it
+        // resolves the model group directly. glTF still goes through the addon
+        // GLTFLoader. A .fbx with no FBXLoader falls through to the glTF/bundled
+        // path below, which rejects it and draws the "load failed" card.
+        var fbx = loaded.FBXLoader ? new loaded.FBXLoader() : null;
+        if (addon || fbx) {
             return function(url) {
-                return addon.loadAsync(url).then(function(gltf) {
-                    return gltf.scene;
-                });
+                if (fbx && /\.fbx(\?|#|$)/i.test(url)) {
+                    return fbx.loadAsync(url);
+                }
+                if (addon) {
+                    return addon.loadAsync(url).then(function(gltf) {
+                        return gltf.scene;
+                    });
+                }
+                return Promise.reject(new Error('format_mnemo: no loader for ' + url));
             };
         }
         // Bundled fallback: the client's own parser, backed by a bare object
