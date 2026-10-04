@@ -4368,6 +4368,29 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: drawPreviewMessage stacks a newline-separated hint into two lines',
+        fn: () => {
+            const M = window.__mnemoModule;
+            const texts = [];
+            const ctx = {
+                clearRect: () => {},
+                fillRect: () => {},
+                fillText: (t) => texts.push(t),
+                set fillStyle(v) {},
+                set font(v) {},
+                set textAlign(v) {},
+                set textBaseline(v) {}
+            };
+            M._drawPreviewMessage(ctx, 240, 'Could not read FBX\nRe-export as glTF (.glb)');
+            // Each line is drawn with its own fillText so the hint sits below the
+            // headline rather than overrunning one clipped line.
+            return {pass: texts.length === 2 &&
+                    texts[0] === 'Could not read FBX' &&
+                    texts[1] === 'Re-export as glTF (.glb)',
+                detail: texts.join(' | ')};
+        }
+    },
+    {
         name: 'preview: model loader uses the addon loader when present',
         fn: async () => {
             const THREE = window.__mnemoTest.THREE;

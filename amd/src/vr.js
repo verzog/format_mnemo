@@ -13158,27 +13158,34 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
-     * Draw a short status line across the middle of a preview card's 2D canvas,
-     * so a card that cannot show a spinning model reports why instead of staying
-     * blank (an admin then knows it is a load failure or an empty model, not a
-     * broken page).
+     * Draw a short status message across the middle of a preview card's 2D
+     * canvas, so a card that cannot show a spinning model reports why instead of
+     * staying blank (an admin then knows it is a load failure or an empty model,
+     * not a broken page). A newline in the text splits it into stacked lines, so
+     * a short headline can carry a one-line hint beneath it.
      *
      * @param {Object} ctx The card's 2D canvas context.
      * @param {Number} size The canvas edge length in pixels.
-     * @param {String} text The message to draw.
+     * @param {String} text The message to draw (lines separated by "\n").
      */
     function drawPreviewMessage(ctx, size, text) {
         if (!ctx) {
             return;
         }
+        var lines = String(text).split('\n');
+        var lineh = 18;
+        var band = lineh * lines.length + 14;
         ctx.clearRect(0, 0, size, size);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.fillRect(0, size / 2 - 16, size, 32);
+        ctx.fillRect(0, size / 2 - band / 2, size, band);
         ctx.fillStyle = '#ffd0d0';
         ctx.font = '13px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(text, size / 2, size / 2);
+        var top = size / 2 - (lines.length - 1) * lineh / 2;
+        for (var i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], size / 2, top + i * lineh);
+        }
     }
 
     /**
@@ -13247,8 +13254,14 @@ define('format_mnemo/vr', [], function() {
             }).catch(function(e) {
                 // Report the failure on the card (and log details) rather than
                 // leaving it silently blank, so an admin can tell a model that
-                // failed to load from one that renders nothing.
-                drawPreviewMessage(entry.ctx, size, strings.loadfailed || 'Could not load');
+                // failed to load from one that renders nothing. An .fbx that the
+                // loader cannot parse gets a format-specific hint (export glTF or
+                // binary FBX instead), since an ASCII or non-standard FBX is the
+                // most common cause and the fix is a re-export.
+                var isfbx = /\.fbx(\?|#|$)/i.test(m.url);
+                var msg = (isfbx && strings.loadfailedfbx) ||
+                    strings.loadfailed || 'Could not load';
+                drawPreviewMessage(entry.ctx, size, msg);
                 if (window.console) {
                     window.console.warn('format_mnemo: preview model failed: ' + m.url, e);
                 }

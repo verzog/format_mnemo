@@ -174,6 +174,7 @@ $string['preview_generator'] = 'Generator: {$a}';
 $string['preview_intro'] = 'A preview of the site-wide textures and prop models this format uses. Each card shows where the asset comes from: an uploaded file, a configured URL, the bundled default, or none (the procedural look is used).';
 $string['preview_model_empty'] = 'No visible geometry';
 $string['preview_model_failed'] = 'Could not load';
+$string['preview_model_failed_fbx'] = "Could not read FBX\nRe-export as glTF (.glb)";
 $string['preview_models'] = 'Prop models';
 $string['preview_modelsettings'] = 'Model settings';
 $string['preview_openmodel'] = 'Open model file';
