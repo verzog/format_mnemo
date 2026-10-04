@@ -13128,7 +13128,29 @@ define('format_mnemo/vr', [], function() {
         if (addon || fbx) {
             return function(url) {
                 if (fbx && /\.fbx(\?|#|$)/i.test(url)) {
-                    return fbx.loadAsync(url);
+                    // Fetch then parse as two steps, so a failure can be told
+                    // apart: a fetch/availability error is tagged mnemoNetwork
+                    // (re-export cannot fix it), while a parse error is left
+                    // untagged so the card can advise a glTF re-export. The
+                    // bundled fallback is always .glb, so FBX only ever loads
+                    // from the (fetchable) upload URL here.
+                    var fbase = url.replace(/[^/]*$/, '');
+                    return fetch(url).then(function(res) {
+                        if (!res.ok) {
+                            var he = new Error('format_mnemo: fetch failed ' + res.status + ' for ' + url);
+                            he.mnemoNetwork = true;
+                            throw he;
+                        }
+                        return res.arrayBuffer();
+                    }, function(neterr) {
+                        // A network/CORS failure rejects fetch itself; tag it too.
+                        if (neterr) {
+                            neterr.mnemoNetwork = true;
+                        }
+                        throw neterr || new Error('format_mnemo: fetch failed for ' + url);
+                    }).then(function(buffer) {
+                        return fbx.parse(buffer, fbase);
+                    });
                 }
                 if (addon) {
                     return addon.loadAsync(url).then(function(gltf) {
@@ -13155,6 +13177,27 @@ define('format_mnemo/vr', [], function() {
                 return parser.parseGlb(buffer, base);
             });
         };
+    }
+
+    /**
+     * Choose the failure message for a preview card. Only an .fbx that was
+     * fetched but could not be parsed gets the format-specific "re-export as
+     * glTF" hint: a network or availability failure (tagged mnemoNetwork on the
+     * rejection) is not a format problem, so it keeps the generic message and
+     * does not send the admin off re-exporting a model that was never read.
+     *
+     * @param {String} url The model URL that failed.
+     * @param {Object} err The rejection the loader threw.
+     * @param {Object} strings The preview label set (loadfailed, loadfailedfbx).
+     * @return {String} The message to draw on the card.
+     */
+    function previewFailMessage(url, err, strings) {
+        strings = strings || {};
+        var isfbx = /\.fbx(\?|#|$)/i.test(url || '');
+        if (isfbx && strings.loadfailedfbx && !(err && err.mnemoNetwork)) {
+            return strings.loadfailedfbx;
+        }
+        return strings.loadfailed || 'Could not load';
     }
 
     /**
@@ -13254,14 +13297,12 @@ define('format_mnemo/vr', [], function() {
             }).catch(function(e) {
                 // Report the failure on the card (and log details) rather than
                 // leaving it silently blank, so an admin can tell a model that
-                // failed to load from one that renders nothing. An .fbx that the
-                // loader cannot parse gets a format-specific hint (export glTF or
-                // binary FBX instead), since an ASCII or non-standard FBX is the
-                // most common cause and the fix is a re-export.
-                var isfbx = /\.fbx(\?|#|$)/i.test(m.url);
-                var msg = (isfbx && strings.loadfailedfbx) ||
-                    strings.loadfailed || 'Could not load';
-                drawPreviewMessage(entry.ctx, size, msg);
+                // failed to load from one that renders nothing. An .fbx that was
+                // fetched but could not be parsed gets a format-specific hint
+                // (re-export as glTF), since an ASCII or non-standard FBX is the
+                // common cause; a network/availability failure keeps the generic
+                // message (see previewFailMessage).
+                drawPreviewMessage(entry.ctx, size, previewFailMessage(m.url, e, strings));
                 if (window.console) {
                     window.console.warn('format_mnemo: preview model failed: ' + m.url, e);
                 }
@@ -13299,6 +13340,7 @@ define('format_mnemo/vr', [], function() {
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,
+        _previewFailMessage: previewFailMessage,
         _drawPreviewMessage: drawPreviewMessage,
 
         /**

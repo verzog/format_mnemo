@@ -4391,6 +4391,25 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: an unparseable FBX advises a glTF re-export, a network failure does not',
+        fn: () => {
+            const M = window.__mnemoModule;
+            const s = {loadfailed: 'Could not load', loadfailedfbx: 'read FBX\nuse glTF'};
+            // Fetched-but-unparseable FBX (untagged error) -> format hint.
+            const parse = M._previewFailMessage('ship.fbx', new Error('Unknown format'), s);
+            // 404/CORS/availability (tagged mnemoNetwork) -> generic, no re-export advice.
+            const net = (function() { const e = new Error('404'); e.mnemoNetwork = true;
+                return M._previewFailMessage('ship.fbx', e, s); })();
+            // A glTF failure never gets the FBX hint.
+            const gltf = M._previewFailMessage('ship.glb', new Error('boom'), s);
+            // With no FBX string configured, even a parse error falls back.
+            const nostr = M._previewFailMessage('ship.fbx', new Error('x'), {loadfailed: 'Could not load'});
+            return {pass: parse === 'read FBX\nuse glTF' && net === 'Could not load' &&
+                    gltf === 'Could not load' && nostr === 'Could not load',
+                detail: `parse=${parse.replace('\n', '/')} net=${net} gltf=${gltf} nostr=${nostr}`};
+        }
+    },
+    {
         name: 'preview: model loader uses the addon loader when present',
         fn: async () => {
             const THREE = window.__mnemoTest.THREE;
