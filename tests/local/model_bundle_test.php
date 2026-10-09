@@ -92,7 +92,7 @@ final class model_bundle_test extends \advanced_testcase {
      */
     public function test_entry_url(): void {
         $this->resetAfterTest();
-        $zip = $this->make_zip('car/nested.zip', ['body/car.gltf' => '{"asset":{"version":"2.0"}}', 'body/car.bin' => 'x']);
+        $zip = $this->make_zip('nested.zip', ['body/car.gltf' => '{"asset":{"version":"2.0"}}', 'body/car.bin' => 'x']);
         $hash = $zip->get_contenthash();
         $url = model_bundle::entry_url($zip);
         $this->assertNotNull($url);
