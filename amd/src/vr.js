@@ -3204,8 +3204,9 @@ define('format_mnemo/vr', [], function() {
      * Load a model by base name from a category's base URL, falling back to the
      * bundled models. Shared by loadProp (props) and loadVehicle (vehicles).
      *
-     * @param {String} name The model base name (a "<name>.<ext>" is requested,
-     *     ext coming from config.modelexts or defaulting to "glb").
+     * @param {String} name The model base name. The URL is config.modelurls[name]
+     *     when the model was uploaded as a .zip bundle, else "<name>.<ext>" with
+     *     ext from config.modelexts (default "glb").
      * @param {String} base The category's base URL.
      * @param {Array|null} pack The model base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
@@ -3216,6 +3217,10 @@ define('format_mnemo/vr', [], function() {
         // The uploaded model's real extension (glb unless the server flagged this
         // name as an .fbx upload). The bundled fallback is always .glb.
         var ext = this.modelExt(name);
+        // A multi-file .zip bundle resolves to an explicit entry URL (its parts
+        // are served together from the extracted modelcache area), bypassing the
+        // "<name>.<ext>" convention since the entry file name is fixed by the zip.
+        var explicit = (this.config.modelurls && this.config.modelurls[name]) || null;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
         // rejects, so every caller falls back exactly as for a missing model.
@@ -3236,11 +3241,12 @@ define('format_mnemo/vr', [], function() {
         // model is not in it, skip the probe and load the bundled model directly,
         // so the console is not littered with a 404 for every omitted model. When
         // pack is null (an external, unenumerable pack) every name is still probed
-        // against the base and falls back to bundled, as before.
-        if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
+        // against the base and falls back to bundled, as before. A bundle always
+        // has an explicit URL, so it skips the probe branch.
+        if (!explicit && fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
             p = this.loadModel(this.joinBase(fallback, name + '.glb'));
         } else {
-            p = this.loadModel(this.joinBase(base, name + '.' + ext));
+            p = this.loadModel(explicit || this.joinBase(base, name + '.' + ext));
             if (fallback && fallback !== base) {
                 p = p.catch(function() {
                     return self.loadModel(self.joinBase(fallback, name + '.glb'));
@@ -4810,16 +4816,28 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildingModelUrl = function(act) {
         var base = this.config.buildingsbaseurl || this.config.modelsbaseurl;
+        var mu = this.config.modelurls || {};
         if (act.building) {
             if (/^https?:/.test(act.building) || act.building.charAt(0) === '/' ||
                 act.building.indexOf('data:') === 0) {
                 return act.building;
+            }
+            // A per-activity override naming an uploaded .zip bundle resolves to
+            // the bundle's entry URL; a plain .glb/.fbx override resolves against
+            // the buildings base as before.
+            var ob = act.building.replace(/\.(glb|fbx|zip)$/i, '');
+            if (mu[ob]) {
+                return mu[ob];
             }
             return base ? this.joinBase(base, act.building) : act.building;
         }
         var list = this.config.buildingmodels || [];
         if (base && act.modname && list.indexOf(act.modname) !== -1) {
             var name = 'building-' + act.modname;
+            // A building uploaded as a .zip bundle has an explicit entry URL.
+            if (mu[name]) {
+                return mu[name];
+            }
             return this.joinBase(base, name + '.' + this.modelExt(name));
         }
         return null;
@@ -4853,9 +4871,14 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         return this.loadModel(url).then(function(tpl) {
             // Buildings bypass loadNamedModel, so stamp the animate toggle here
-            // from the model's name (its basename, e.g. "building-forum"),
-            // matching how the asset viewer keys a building card.
-            var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx)$/i, '');
+            // from the model's logical name (the per-activity override's base
+            // name, else "building-<modname>"), matching how the asset viewer
+            // keys a building card. Derived from the activity, not the URL, so a
+            // .zip bundle (whose entry URL is an arbitrary extracted file name)
+            // still keys its config correctly.
+            var name = act.building
+                ? act.building.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx|zip)$/i, '')
+                : ('building-' + act.modname);
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty

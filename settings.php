@@ -74,14 +74,16 @@ if ($ADMIN->fulltree) {
     // URL. Files land in the 'assetpack' file area at system context and are
     // served via pluginfile; the loader reads them by the same
     // av/lamp/kiosk/barrier naming convention. Draco/meshopt-compressed .glb
-    // models are supported. The URL setting above, if set, takes precedence.
+    // models are supported, as are .fbx models and multi-file .zip bundles (a
+    // .gltf/.bin/textures, or a model with external textures, named for the
+    // prop). The URL setting above, if set, takes precedence.
     $settings->add(new admin_setting_configstoredfile(
         'format_mnemo/assetpack',
         get_string('setting_assetpack', 'format_mnemo'),
         get_string('setting_assetpack_desc', 'format_mnemo'),
         'assetpack',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx', '.zip']]
     ));
 
     // Upload flying-car (vehicle) models straight into Moodle, kept separate
@@ -95,7 +97,7 @@ if ($ADMIN->fulltree) {
         get_string('setting_vehicleassets_desc', 'format_mnemo'),
         'vehicleassets',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx', '.zip']]
     ));
 
     // Upload per-activity building models straight into Moodle, kept separate
@@ -110,7 +112,7 @@ if ($ADMIN->fulltree) {
         get_string('setting_buildingassets_desc', 'format_mnemo'),
         'buildingassets',
         0,
-        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx']]
+        ['subdirs' => 0, 'maxfiles' => 50, 'accepted_types' => ['.glb', '.fbx', '.zip']]
     ));
 
     // Neon sign webfont. Left blank, sign and label text is drawn in the

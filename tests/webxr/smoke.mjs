@@ -638,6 +638,86 @@ const scenarios = [
         }
     },
     {
+        name: 'bundle: loadNamedModel loads the explicit modelurls entry URL, falls back to bundled',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const calls = [];
+            const self = {
+                config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/',
+                    modelurls: {ship: 'mc/HASH/scene.gltf'}},
+                joinBase: CS.prototype.joinBase,
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                orientClone: CS.prototype.orientClone,
+                modelOrientation: CS.prototype.modelOrientation,
+                loadNamedModel: CS.prototype.loadNamedModel,
+                modelExt: CS.prototype.modelExt,
+                loadModel: (url) => {
+                    calls.push(url);
+                    // The bundle entry fails, so the bundled .glb is used.
+                    return url.indexOf('mc/') === 0
+                        ? Promise.reject(new Error('boom'))
+                        : Promise.resolve({tpl: true});
+                }
+            };
+            const r = await CS.prototype.loadProp.call(self, 'ship');
+            // The explicit entry URL is tried first (not "pack/ship.glb"), then
+            // the bundled fallback.
+            const pass = calls[0] === 'mc/HASH/scene.gltf' &&
+                calls[1] === 'bundled/ship.glb' && !!r && r.tpl === true;
+            return {pass, detail: calls.join(',')};
+        }
+    },
+    {
+        name: 'bundle: buildingModelUrl returns the entry URL for a type-based building bundle',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {modelsbaseurl: 'm/', buildingmodels: ['forum'],
+                modelurls: {'building-forum': 'mc/HASH/b.gltf'}},
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt};
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'forum'});
+            return {pass: url === 'mc/HASH/b.gltf', detail: `url=${url}`};
+        }
+    },
+    {
+        name: 'bundle: a per-activity .zip override resolves to its entry URL, a .glb override does not',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {buildingsbaseurl: 'm/', buildingmodels: [],
+                modelurls: {library: 'mc/HASH/lib.gltf'}},
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt};
+            const zip = CS.prototype.buildingModelUrl.call(self, {modname: 'page', building: 'library.zip'});
+            const glb = CS.prototype.buildingModelUrl.call(self, {modname: 'page', building: 'tower.glb'});
+            return {pass: zip === 'mc/HASH/lib.gltf' && glb === 'm/tower.glb',
+                detail: `zip=${zip} glb=${glb}`};
+        }
+    },
+    {
+        name: 'bundle: building animate toggle keys on building-<modname>, not the entry file name',
+        fn: async () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)));
+            const built = {w: 4, d: 4, h: 8, body: {visible: true}, group: new THREE.Group()};
+            const self = {
+                THREE: THREE, renderer: {shadowMap: {}},
+                config: {modelconfig: {'building-forum': {behaviour: {animate: true}}}},
+                // Entry URL's base name is "scene"; the old URL-derived keying
+                // would miss the config, the act-derived keying finds it.
+                buildingModelUrl: () => 'mc/HASH/scene.gltf',
+                modelCfg: CS.prototype.modelCfg, modelBehaviour: CS.prototype.modelBehaviour,
+                animateClone: () => {},
+                orientClone: CS.prototype.orientClone,
+                modelOrientation: CS.prototype.modelOrientation,
+                fitModel: CS.prototype.fitModel, setShadow: () => {},
+                loadModel: () => Promise.resolve(tpl)
+            };
+            await CS.prototype.applyBuildingModel.call(self, {modname: 'forum'}, built);
+            return {pass: tpl.mnemoAnimate === true, detail: `animate=${tpl.mnemoAnimate}`};
+        }
+    },
+    {
         name: 'fbx: loadModel routes an .fbx URL through the addon FBXLoader',
         fn: async () => {
             const CS = window.__mnemoModule._Cyberspace;

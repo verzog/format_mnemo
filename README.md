@@ -376,6 +376,17 @@ high-resolution textures. If a strict Content-Security-Policy blocks the addon
 decoders, the plugin falls back to a built-in **uncompressed**-glTF parser, so
 keep an uncompressed copy handy for locked-down sites.
 
+**Multi-file models (ZIP bundles).** A single-file `.glb` is simplest, but many
+models come as **multiple files** — a `.gltf` with a separate `.bin` and a
+`textures/` folder, or an `.fbx` with external texture images. Upload the whole
+thing as one **`.zip`** named for the model (e.g. `spaceship.zip`,
+`building-forum.zip`, `hovercar.zip`). The plugin extracts the archive and loads
+the model file inside (it picks the `.gltf`, else `.glb`, else `.fbx`), resolving
+its `.bin` and textures from the extracted siblings — so relative references just
+work, with no CORS or content-security-policy hurdles (everything is served from
+your Moodle). Keep the archive tidy (the model plus only the files it references);
+there is no need to include `.blend`, `.max` or other source files.
+
 **Per-model settings (asset viewer).** Open **Preview site assets** from the
 plugin settings to see every model rendered, and set per model:
 
@@ -431,7 +442,9 @@ Void, whose streets float in space.
   - `barrier.glb` — road barrier (lines the avenue kerbs)
 
   Any prop you don't upload keeps its bundled model; textures may be embedded in
-  the `.glb`. Used only when the URL above is blank.
+  the `.glb`. An `.fbx` model, or a multi-file model packed as a `.zip` bundle
+  (named for the prop, e.g. `av.zip`), is also accepted. Used only when the URL
+  above is blank.
 - **Neon sign font URL** / **Upload neon sign font** — give every neon sign and
   label in the scene a custom typeface. Point the URL at a hosted webfont
   (`.woff2`, `.woff`, `.ttf` or `.otf`), or upload one directly into Moodle. The
