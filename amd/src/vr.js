@@ -3204,8 +3204,9 @@ define('format_mnemo/vr', [], function() {
      * Load a model by base name from a category's base URL, falling back to the
      * bundled models. Shared by loadProp (props) and loadVehicle (vehicles).
      *
-     * @param {String} name The model base name (a "<name>.<ext>" is requested,
-     *     ext coming from config.modelexts or defaulting to "glb").
+     * @param {String} name The model base name. The URL is config.modelurls[name]
+     *     when the model was uploaded as a .zip bundle, else "<name>.<ext>" with
+     *     ext from config.modelexts (default "glb").
      * @param {String} base The category's base URL.
      * @param {Array|null} pack The model base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
@@ -3216,6 +3217,10 @@ define('format_mnemo/vr', [], function() {
         // The uploaded model's real extension (glb unless the server flagged this
         // name as an .fbx upload). The bundled fallback is always .glb.
         var ext = this.modelExt(name);
+        // A multi-file .zip bundle resolves to an explicit entry URL (its parts
+        // are served together from the extracted modelcache area), bypassing the
+        // "<name>.<ext>" convention since the entry file name is fixed by the zip.
+        var explicit = (this.config.modelurls && this.config.modelurls[name]) || null;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
         // rejects, so every caller falls back exactly as for a missing model.
@@ -3236,11 +3241,12 @@ define('format_mnemo/vr', [], function() {
         // model is not in it, skip the probe and load the bundled model directly,
         // so the console is not littered with a 404 for every omitted model. When
         // pack is null (an external, unenumerable pack) every name is still probed
-        // against the base and falls back to bundled, as before.
-        if (fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
+        // against the base and falls back to bundled, as before. A bundle always
+        // has an explicit URL, so it skips the probe branch.
+        if (!explicit && fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
             p = this.loadModel(this.joinBase(fallback, name + '.glb'));
         } else {
-            p = this.loadModel(this.joinBase(base, name + '.' + ext));
+            p = this.loadModel(explicit || this.joinBase(base, name + '.' + ext));
             if (fallback && fallback !== base) {
                 p = p.catch(function() {
                     return self.loadModel(self.joinBase(fallback, name + '.glb'));
@@ -4810,16 +4816,28 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildingModelUrl = function(act) {
         var base = this.config.buildingsbaseurl || this.config.modelsbaseurl;
+        var mu = this.config.modelurls || {};
         if (act.building) {
             if (/^https?:/.test(act.building) || act.building.charAt(0) === '/' ||
                 act.building.indexOf('data:') === 0) {
                 return act.building;
+            }
+            // A per-activity override naming an uploaded .zip bundle resolves to
+            // the bundle's entry URL; a plain .glb/.fbx override resolves against
+            // the buildings base as before.
+            var ob = act.building.replace(/\.(glb|fbx|zip)$/i, '');
+            if (mu[ob]) {
+                return mu[ob];
             }
             return base ? this.joinBase(base, act.building) : act.building;
         }
         var list = this.config.buildingmodels || [];
         if (base && act.modname && list.indexOf(act.modname) !== -1) {
             var name = 'building-' + act.modname;
+            // A building uploaded as a .zip bundle has an explicit entry URL.
+            if (mu[name]) {
+                return mu[name];
+            }
             return this.joinBase(base, name + '.' + this.modelExt(name));
         }
         return null;
@@ -4853,9 +4871,14 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         return this.loadModel(url).then(function(tpl) {
             // Buildings bypass loadNamedModel, so stamp the animate toggle here
-            // from the model's name (its basename, e.g. "building-forum"),
-            // matching how the asset viewer keys a building card.
-            var name = url.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx)$/i, '');
+            // from the model's logical name (the per-activity override's base
+            // name, else "building-<modname>"), matching how the asset viewer
+            // keys a building card. Derived from the activity, not the URL, so a
+            // .zip bundle (whose entry URL is an arbitrary extracted file name)
+            // still keys its config correctly.
+            var name = act.building
+                ? act.building.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx|zip)$/i, '')
+                : ('building-' + act.modname);
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
@@ -13128,7 +13151,29 @@ define('format_mnemo/vr', [], function() {
         if (addon || fbx) {
             return function(url) {
                 if (fbx && /\.fbx(\?|#|$)/i.test(url)) {
-                    return fbx.loadAsync(url);
+                    // Fetch then parse as two steps, so a failure can be told
+                    // apart: a fetch/availability error is tagged mnemoNetwork
+                    // (re-export cannot fix it), while a parse error is left
+                    // untagged so the card can advise a glTF re-export. The
+                    // bundled fallback is always .glb, so FBX only ever loads
+                    // from the (fetchable) upload URL here.
+                    var fbase = url.replace(/[^/]*$/, '');
+                    return fetch(url).then(function(res) {
+                        if (!res.ok) {
+                            var he = new Error('format_mnemo: fetch failed ' + res.status + ' for ' + url);
+                            he.mnemoNetwork = true;
+                            throw he;
+                        }
+                        return res.arrayBuffer();
+                    }, function(neterr) {
+                        // A network/CORS failure rejects fetch itself; tag it too.
+                        if (neterr) {
+                            neterr.mnemoNetwork = true;
+                        }
+                        throw neterr || new Error('format_mnemo: fetch failed for ' + url);
+                    }).then(function(buffer) {
+                        return fbx.parse(buffer, fbase);
+                    });
                 }
                 if (addon) {
                     return addon.loadAsync(url).then(function(gltf) {
@@ -13158,27 +13203,55 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
-     * Draw a short status line across the middle of a preview card's 2D canvas,
-     * so a card that cannot show a spinning model reports why instead of staying
-     * blank (an admin then knows it is a load failure or an empty model, not a
-     * broken page).
+     * Choose the failure message for a preview card. Only an .fbx that was
+     * fetched but could not be parsed gets the format-specific "re-export as
+     * glTF" hint: a network or availability failure (tagged mnemoNetwork on the
+     * rejection) is not a format problem, so it keeps the generic message and
+     * does not send the admin off re-exporting a model that was never read.
+     *
+     * @param {String} url The model URL that failed.
+     * @param {Object} err The rejection the loader threw.
+     * @param {Object} strings The preview label set (loadfailed, loadfailedfbx).
+     * @return {String} The message to draw on the card.
+     */
+    function previewFailMessage(url, err, strings) {
+        strings = strings || {};
+        var isfbx = /\.fbx(\?|#|$)/i.test(url || '');
+        if (isfbx && strings.loadfailedfbx && !(err && err.mnemoNetwork)) {
+            return strings.loadfailedfbx;
+        }
+        return strings.loadfailed || 'Could not load';
+    }
+
+    /**
+     * Draw a short status message across the middle of a preview card's 2D
+     * canvas, so a card that cannot show a spinning model reports why instead of
+     * staying blank (an admin then knows it is a load failure or an empty model,
+     * not a broken page). A newline in the text splits it into stacked lines, so
+     * a short headline can carry a one-line hint beneath it.
      *
      * @param {Object} ctx The card's 2D canvas context.
      * @param {Number} size The canvas edge length in pixels.
-     * @param {String} text The message to draw.
+     * @param {String} text The message to draw (lines separated by "\n").
      */
     function drawPreviewMessage(ctx, size, text) {
         if (!ctx) {
             return;
         }
+        var lines = String(text).split('\n');
+        var lineh = 18;
+        var band = lineh * lines.length + 14;
         ctx.clearRect(0, 0, size, size);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.fillRect(0, size / 2 - 16, size, 32);
+        ctx.fillRect(0, size / 2 - band / 2, size, band);
         ctx.fillStyle = '#ffd0d0';
         ctx.font = '13px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(text, size / 2, size / 2);
+        var top = size / 2 - (lines.length - 1) * lineh / 2;
+        for (var i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], size / 2, top + i * lineh);
+        }
     }
 
     /**
@@ -13247,8 +13320,12 @@ define('format_mnemo/vr', [], function() {
             }).catch(function(e) {
                 // Report the failure on the card (and log details) rather than
                 // leaving it silently blank, so an admin can tell a model that
-                // failed to load from one that renders nothing.
-                drawPreviewMessage(entry.ctx, size, strings.loadfailed || 'Could not load');
+                // failed to load from one that renders nothing. An .fbx that was
+                // fetched but could not be parsed gets a format-specific hint
+                // (re-export as glTF), since an ASCII or non-standard FBX is the
+                // common cause; a network/availability failure keeps the generic
+                // message (see previewFailMessage).
+                drawPreviewMessage(entry.ctx, size, previewFailMessage(m.url, e, strings));
                 if (window.console) {
                     window.console.warn('format_mnemo: preview model failed: ' + m.url, e);
                 }
@@ -13286,6 +13363,7 @@ define('format_mnemo/vr', [], function() {
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _previewModelLoader: previewModelLoader,
+        _previewFailMessage: previewFailMessage,
         _drawPreviewMessage: drawPreviewMessage,
 
         /**

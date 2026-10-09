@@ -459,6 +459,39 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
         return true;
     }
 
+    // Extracted contents of an uploaded multi-file model bundle (a .zip holding
+    // a .gltf/.bin/textures, .glb or .fbx with its resources). Served from the
+    // system context, keyed by the source zip's content hash, and extracted
+    // lazily on first request. The entry model file and all its sibling
+    // resources live here so the client's loader resolves relative references.
+    if ($filearea === 'modelcache') {
+        if ($context->contextlevel != CONTEXT_SYSTEM) {
+            return false;
+        }
+        array_shift($args); // Itemid slot (always 0).
+        $hash = array_shift($args);
+        if (!is_string($hash) || !preg_match('/^[0-9a-f]{40}$/', $hash)) {
+            return false;
+        }
+        $filename = array_pop($args);
+        $filepath = '/' . $hash . '/' . ($args ? implode('/', $args) . '/' : '');
+
+        $fs = get_file_storage();
+        $file = $fs->get_file($context->id, 'format_mnemo', 'modelcache', 0, $filepath, $filename);
+        if (!$file || $file->is_directory()) {
+            // First access for this bundle: extract it, then try once more.
+            if (\format_mnemo\local\model_bundle::extract_by_hash($hash)) {
+                $file = $fs->get_file($context->id, 'format_mnemo', 'modelcache', 0, $filepath, $filename);
+            }
+        }
+        if (!$file || $file->is_directory()) {
+            return false;
+        }
+
+        send_stored_file($file, DAYSECS, 0, $forcedownload, $options);
+        return true;
+    }
+
     if ($context->contextlevel != CONTEXT_COURSE) {
         return false;
     }
@@ -538,7 +571,8 @@ function format_mnemo_coursemodule_standard_elements($formwrapper, $mform) {
 
 /**
  * Validate the "Cyberspace building model" field: it must be blank, a bare
- * model file name (.glb or .fbx), or a full http(s) URL to a model.
+ * model file name (.glb, .fbx or a .zip bundle), or a full http(s) URL to a
+ * model.
  *
  * @param \moodleform_mod $formwrapper the activity settings form
  * @param array $data the submitted form data
@@ -555,7 +589,7 @@ function format_mnemo_coursemodule_validation($formwrapper, $data) {
         return $errors;
     }
     $isurl = (bool)preg_match('#^https?://#i', $model);
-    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.(glb|fbx)$/i', $model);
+    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.(glb|fbx|zip)$/i', $model);
     if (!$isurl && !$isfile) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
     }

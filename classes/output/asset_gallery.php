@@ -289,9 +289,19 @@ class asset_gallery {
                 $url = rtrim($externalbase, '/') . '/' . $name . '.glb';
                 $source = 'url';
             } else if (isset($uploaded[$filename])) {
-                $url = self::file_url($filearea, $uploaded[$filename]);
-                $source = 'uploaded';
                 $file = $uploaded[$filename];
+                $source = 'uploaded';
+                if ($ext === 'zip') {
+                    // A multi-file bundle resolves to its extracted entry URL;
+                    // metadata is not read from the zip (left null below).
+                    $url = \format_mnemo\local\model_bundle::entry_url($file);
+                    if ($url === null) {
+                        continue;
+                    }
+                    $file = null;
+                } else {
+                    $url = self::file_url($filearea, $file);
+                }
             } else if (isset($bundledset[$name])) {
                 $url = (new moodle_url('/course/format/mnemo/models/' . $name . '.glb'))->out(false);
                 $source = 'bundled';
@@ -479,7 +489,7 @@ class asset_gallery {
         if (empty(get_config('format_mnemo', 'assetbaseurl'))) {
             foreach (array_keys(self::uploaded_pack_names()) as $filename) {
                 $filename = (string)$filename;
-                if (preg_match('/\.(glb|fbx)$/i', $filename)) {
+                if (preg_match('/\.(glb|fbx|zip)$/i', $filename)) {
                     $names[self::model_basename($filename)] = true;
                 }
             }
@@ -592,8 +602,8 @@ class asset_gallery {
     }
 
     /**
-     * The uploaded model files (.glb and .fbx) in a system-context file area,
-     * keyed by filename.
+     * The uploaded model files (.glb, .fbx and .zip bundles) in a system-context
+     * file area, keyed by filename.
      *
      * @param string $filearea The file area.
      * @return array<string, \stored_file> Map of filename => file.
@@ -601,7 +611,7 @@ class asset_gallery {
     protected static function stored_glb_files(string $filearea): array {
         $map = [];
         foreach (self::stored_files($filearea) as $file) {
-            if (preg_match('/\.(glb|fbx)$/i', $file->get_filename())) {
+            if (preg_match('/\.(glb|fbx|zip)$/i', $file->get_filename())) {
                 $map[$file->get_filename()] = $file;
             }
         }
@@ -609,14 +619,14 @@ class asset_gallery {
     }
 
     /**
-     * Strip a model file's extension (.glb or .fbx) to its base name. A name
-     * with no known model extension is returned unchanged.
+     * Strip a model file's extension (.glb, .fbx or .zip) to its base name. A
+     * name with no known model extension is returned unchanged.
      *
      * @param string $filename The model file name.
      * @return string The base name without the model extension.
      */
     protected static function model_basename(string $filename): string {
-        return preg_replace('/\.(glb|fbx)$/i', '', $filename);
+        return preg_replace('/\.(glb|fbx|zip)$/i', '', $filename);
     }
 
     /**

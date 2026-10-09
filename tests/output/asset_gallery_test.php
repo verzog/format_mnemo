@@ -226,6 +226,72 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * A model uploaded as a multi-file .zip bundle produces a card whose URL is
+     * the bundle's extracted entry file (not the zip), and it is placeable and
+     * configurable exactly as a single-file upload is.
+     */
+    public function test_zip_bundle_model_card(): void {
+        $this->resetAfterTest();
+
+        $this->make_zip(
+            'assetpack',
+            'spaceship.zip',
+            ['scene.gltf' => '{"asset":{"version":"2.0"}}', 'scene.bin' => 'x']
+        );
+        $this->make_zip(
+            'buildingassets',
+            'building-forum.zip',
+            ['b.glb' => 'x']
+        );
+
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        // The prop card keys on the zip base name, and its URL is the extracted
+        // entry file served from the modelcache area, not the .zip itself.
+        $this->assertArrayHasKey('spaceship', $bykey);
+        $this->assertSame('uploaded', $bykey['spaceship']['source']);
+        $this->assertSame('prop', $bykey['spaceship']['category']);
+        $this->assertStringContainsString('/modelcache/0/', $bykey['spaceship']['url']);
+        $this->assertStringContainsString('/scene.gltf', $bykey['spaceship']['url']);
+        $this->assertStringNotContainsString('.zip', $bykey['spaceship']['url']);
+        // The building bundle likewise, entry being the .glb inside.
+        $this->assertArrayHasKey('building-forum', $bykey);
+        $this->assertStringContainsString('/modelcache/0/', $bykey['building-forum']['url']);
+
+        // A bundle prop is placeable and configurable like any other model.
+        $this->assertContains('spaceship', asset_gallery::placer_prop_names());
+        $this->assertContains('spaceship', asset_gallery::configurable_model_names());
+        $this->assertContains('building-forum', asset_gallery::configurable_model_names());
+    }
+
+    /**
+     * Store a .zip bundle with the given entries in a system-context file area.
+     *
+     * @param string $filearea The file area.
+     * @param string $filename The zip file name.
+     * @param array $entries Map of internal path => contents.
+     */
+    protected function make_zip(string $filearea, string $filename, array $entries): void {
+        $path = make_request_directory() . '/' . $filename;
+        $zip = new \ZipArchive();
+        $zip->open($path, \ZipArchive::CREATE);
+        foreach ($entries as $name => $contents) {
+            $zip->addFromString($name, $contents);
+        }
+        $zip->close();
+        get_file_storage()->create_file_from_pathname([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => $filearea,
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => $filename,
+        ], $path);
+    }
+
+    /**
      * Build a minimal GLB byte string with the given glTF asset block.
      *
      * @param array $asset The asset object (e.g. copyright/generator/version).

@@ -692,6 +692,82 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * A model uploaded as a multi-file .zip bundle is enumerated by its base
+     * name, and modelurls maps that name to the bundle's extracted entry URL so
+     * the client loads the entry file directly.
+     */
+    public function test_scene_config_model_bundles(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $PAGE->set_context(\context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // A prop bundle, a vehicle bundle, and a building bundle.
+        $this->make_zip_file(
+            'assetpack',
+            'spaceship.zip',
+            ['scene.gltf' => '{"asset":{"version":"2.0"}}', 'scene.bin' => 'x']
+        );
+        $this->make_zip_file(
+            'vehicleassets',
+            'hovercar.zip',
+            ['car.glb' => 'x']
+        );
+        $this->make_zip_file(
+            'buildingassets',
+            'building-forum.zip',
+            ['b.gltf' => '{"asset":{"version":"2.0"}}', 'b.bin' => 'x']
+        );
+
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        // The prop bundle is enumerated and mapped to its entry URL.
+        $this->assertContains('spaceship', $config['packmodels']);
+        $this->assertArrayHasKey('spaceship', $config['modelurls']);
+        $this->assertStringContainsString('/modelcache/0/', $config['modelurls']['spaceship']);
+        $this->assertStringContainsString('/scene.gltf', $config['modelurls']['spaceship']);
+        // The vehicle bundle is enumerated and mapped (entry is the .glb inside).
+        $this->assertContains('hovercar', $config['vehiclepack']);
+        $this->assertStringContainsString('/car.glb', $config['modelurls']['hovercar']);
+        // The building bundle registers its module type and maps building-forum.
+        $this->assertContains('forum', $config['buildingmodels']);
+        $this->assertArrayHasKey('building-forum', $config['modelurls']);
+        // A bundle is not a single-file override, so it carries no modelexts entry.
+        $this->assertArrayNotHasKey('spaceship', $config['modelexts']);
+    }
+
+    /**
+     * Store a .zip bundle with the given entries in a model file area.
+     *
+     * @param string $filearea The model upload area.
+     * @param string $filename The zip file name.
+     * @param array $entries Map of internal path => contents.
+     */
+    protected function make_zip_file(string $filearea, string $filename, array $entries): void {
+        $path = make_request_directory() . '/' . $filename;
+        $zip = new \ZipArchive();
+        $zip->open($path, \ZipArchive::CREATE);
+        foreach ($entries as $name => $contents) {
+            $zip->addFromString($name, $contents);
+        }
+        $zip->close();
+        get_file_storage()->create_file_from_pathname([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => $filearea,
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => $filename,
+        ], $path);
+    }
+
+    /**
      * canedit is true for a user who can edit activities (editing teacher) and
      * false for a student, gating the in-view editor.
      */

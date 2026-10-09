@@ -795,6 +795,11 @@ class scene implements renderable, templatable {
             // uploads). The client appends this extension when requesting the
             // model; names absent from the map load as .glb.
             'modelexts' => $this->model_exts(),
+            // Map of uploaded model base name => full entry URL, for models
+            // uploaded as a multi-file .zip bundle (a .gltf/.bin/textures, or a
+            // .glb/.fbx with external resources). The client loads this URL
+            // directly; names absent from the map use the base + "<name>.<ext>".
+            'modelurls' => $this->model_urls(),
             // Optional site-wide assets, each resolving to an admin-set URL, then
             // an uploaded file, then null (the client keeps its bundled look).
             // See resolve_asset_url().
@@ -1039,8 +1044,9 @@ class scene implements renderable, templatable {
      * The model base names uploaded into a model file area, or null when the area
      * is empty (nothing to enumerate). Used so the client can skip probing an
      * area for a model it does not hold and load the bundled fallback directly.
-     * Both .glb and .fbx are listed; the client learns each name's real extension
-     * from model_exts() (glb is the default).
+     * Single-file .glb and .fbx and multi-file .zip bundles are listed; the
+     * client learns a name's real extension from model_exts() (glb by default)
+     * and a bundle's full entry URL from model_urls().
      *
      * @param string $filearea The system-context file area.
      * @return array|null
@@ -1054,7 +1060,7 @@ class scene implements renderable, templatable {
         }
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^(.*)\.(glb|fbx)$/i', $file->get_filename(), $m)) {
+            if (preg_match('/^(.*)\.(glb|fbx|zip)$/i', $file->get_filename(), $m)) {
                 $names[] = $m[1];
             }
         }
@@ -1080,6 +1086,36 @@ class scene implements renderable, templatable {
             foreach ($files as $file) {
                 if (preg_match('/^(.*)\.(fbx)$/i', $file->get_filename(), $m)) {
                     $out[$m[1]] = strtolower($m[2]);
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Map of uploaded model base name => the full entry URL for every model
+     * uploaded as a multi-file .zip bundle, across the prop, vehicle and building
+     * areas. The client loads this URL directly (instead of building
+     * "<name>.<ext>" against a base), so a bundle's entry file and its sibling
+     * resources resolve from the extracted modelcache area. A building bundle is
+     * named "building-<modname>.zip", so its key is "building-<modname>", which
+     * matches how the client requests a type-based building. Empty when there
+     * are no bundle uploads.
+     *
+     * @return array<string, string>
+     */
+    protected function model_urls(): array {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $out = [];
+        foreach (['assetpack', 'vehicleassets', 'buildingassets'] as $filearea) {
+            $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
+            foreach ($files as $file) {
+                if (preg_match('/^(.*)\.zip$/i', $file->get_filename(), $m)) {
+                    $url = \format_mnemo\local\model_bundle::entry_url($file);
+                    if ($url !== null) {
+                        $out[$m[1]] = $url;
+                    }
                 }
             }
         }
@@ -1329,7 +1365,7 @@ class scene implements renderable, templatable {
         $files = $fs->get_area_files($context->id, 'format_mnemo', 'buildingassets', 0, 'filename', false);
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^building-(.+)\.(glb|fbx)$/i', $file->get_filename(), $m)) {
+            if (preg_match('/^building-(.+)\.(glb|fbx|zip)$/i', $file->get_filename(), $m)) {
                 $names[] = $m[1];
             }
         }

@@ -274,6 +274,7 @@ $config['models'] = $modelconfig;
 // rather than staying silently empty.
 $config['strings'] = [
     'loadfailed' => get_string('preview_model_failed', 'format_mnemo'),
+    'loadfailedfbx' => get_string('preview_model_failed_fbx', 'format_mnemo'),
     'nogeometry' => get_string('preview_model_empty', 'format_mnemo'),
 ];
 
