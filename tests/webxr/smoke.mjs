@@ -1077,6 +1077,7 @@ const scenarios = [
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
+                palette: {}, makeWet: CS.prototype.makeWet,
                 paveStrip: CS.prototype.paveStrip
             };
             self.paveStrip(0, 0, 16, 32, 0);
@@ -1097,6 +1098,7 @@ const scenarios = [
                 THREE, roadTexture: null, roadScale: 8, surfaces: [],
                 tiledClone: CS.prototype.tiledClone,
                 scene: {add: (o) => added.push(o)},
+                palette: {}, makeWet: CS.prototype.makeWet,
                 paveStrip: CS.prototype.paveStrip
             };
             self.paveStrip(0, 0, 16, 32, 0);
@@ -3682,6 +3684,26 @@ const scenarios = [
             const pass = withSky.bg === tex && withSky.starfield === 0 &&
                 without.starfield === 1;
             return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
+    },
+    {
+        name: 'wet: makeWet adds puddles and queues the reflection only for wet palettes',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (wet) => {
+                const self = {THREE, texCache: {}, wetMaterials: [], palette: {wet},
+                    puddleTexture: CS.prototype.puddleTexture};
+                const mat = new THREE.MeshStandardMaterial({roughness: 0.5, metalness: 0.5});
+                CS.prototype.makeWet.call(self, mat, 20, 30);
+                return {mat, queued: self.wetMaterials.length};
+            };
+            const dry = mk(false);
+            const wet = mk(true);
+            const pass = !dry.mat.roughnessMap && dry.queued === 0 && dry.mat.roughness === 0.5 &&
+                !!wet.mat.roughnessMap && wet.queued === 1 && wet.mat.roughnessMap.repeat.y === 30 &&
+                wet.mat.metalness >= 0.6;
+            return {pass, detail: `dry=${dry.queued} wet=${wet.queued} metal=${wet.mat.metalness}`};
         }
     },
     {

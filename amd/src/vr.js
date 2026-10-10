@@ -50,7 +50,9 @@ define('format_mnemo/vr', [], function() {
     // A neonEdges of 'line' traces thin glowing lines rather than strips. A
     // third horizonGlow entry sets its colour (default: the primary). "rain"
     // adds falling rain streaks, "landmarks" raises that many giant towers and
-    // "streams" limits code rain and search beams to those colours.
+    // "streams" limits code rain and search beams to those colours. "wet" gives
+    // the roads and ground glossy puddles that reflect the city, and "mist"
+    // adds low drifting fog layers and light cones under the street lamps.
     var PALETTES = {
         cyan: {primary: 0x00e5ff, secondary: 0x0066ff, sky: 0x03060f, haze: 0x0a1830},
         amber: {primary: 0xffb300, secondary: 0xff5722, sky: 0x0a0600, haze: 0x2a1400},
@@ -64,19 +66,19 @@ define('format_mnemo/vr', [], function() {
                 0xd5b66b, 0xff3b3b],
             windows: [0xd5b66b, 0xe2c787, 0xc9a557, 0xeedca8], windowDensity: 0.55,
             neonEdges: 'line', gridGlow: true, codeRain: 90, horizonGlow: [0.3, 0.3, 0x74cdaa],
-            rain: true, landmarks: 3, streams: [0x00ff89, 0x00c7aa, 0x8bfff3]
+            rain: true, landmarks: 3, streams: [0x00ff89, 0x00c7aa, 0x8bfff3], wet: true, mist: true
         },
         neon: {
             primary: 0xff2bd6, secondary: 0x00e5ff, sky: 0x07020f, haze: 0x1c0630, glow: 1.6,
             accents: [0xff2bd6, 0x00e5ff, 0xff7a1a, 0x9d4dff],
             windows: [0xff7bd8, 0x6fe8ff, 0xffb35c, 0xb48cff, 0xfff2cf],
-            neonEdges: true
+            neonEdges: true, wet: true, mist: true
         },
         neonorange: {
             primary: 0xff6a00, secondary: 0xff2b4e, sky: 0x04050f, haze: 0x0c0a24, glow: 1.6,
             accents: [0xff6a00, 0xffa31a, 0xff2b4e, 0x2b8cff],
             windows: [0xffa040, 0xffd08a, 0xff6a3d, 0x8fc8ff],
-            neonEdges: true
+            neonEdges: true, wet: true, mist: true
         }
     };
 
@@ -318,6 +320,8 @@ define('format_mnemo/vr', [], function() {
         this.ads = []; // Holographic billboards that flicker.
         this.codeRain = []; // Scrolling code-rain columns (Matrix palette).
         this.rain = null; // Falling rain streaks (Matrix palette).
+        this.wetMaterials = []; // Road/ground materials that reflect the city.
+        this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
@@ -483,6 +487,8 @@ define('format_mnemo/vr', [], function() {
         this.buildEnvironment();
         this.buildRaycaster();
         this.buildCity();
+        // Wet palettes: reflect the finished city in the puddles.
+        this.applyWetReflections();
         // Original glTF props (lamps, kiosks, barriers, flying traffic); loads
         // asynchronously and falls back cleanly if models are unavailable.
         this.buildProps();
@@ -645,12 +651,11 @@ define('format_mnemo/vr', [], function() {
         if (this.config.environment !== 'void') {
             // Wet asphalt: a lit, slightly reflective ground that catches the
             // sun by day and the neon by night.
-            var ground = new THREE.Mesh(
-                new THREE.PlaneGeometry(1400, 1400),
-                new THREE.MeshStandardMaterial({
-                    color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
-                })
-            );
+            var groundMat = new THREE.MeshStandardMaterial({
+                color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
+            });
+            this.makeWet(groundMat, 1400 / 10, 1400 / 10);
+            var ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = -0.02;
             ground.receiveShadow = true;
@@ -669,6 +674,9 @@ define('format_mnemo/vr', [], function() {
             }
             if (this.palette.rain) {
                 this.buildRain();
+            }
+            if (this.palette.mist) {
+                this.buildMist();
             }
         }
 
@@ -2204,6 +2212,19 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Advance the weather each frame: the falling rain and the drifting mist.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateWeather = function(dt) {
+        this.updateRain(dt);
+        for (var i = 0; i < this.mists.length; i++) {
+            this.mists[i].tex.offset.x += this.mists[i].dx * dt;
+            this.mists[i].tex.offset.y += this.mists[i].dy * dt;
+        }
+    };
+
+    /**
      * Drop the rain streaks, wrap them back to the top, and keep the rain box
      * centred on the viewer.
      *
@@ -2226,6 +2247,175 @@ define('format_mnemo/vr', [], function() {
         }
         attr.needsUpdate = true;
         this.rain.position.set(this.player.position.x, 0, this.player.position.z);
+    };
+
+    /**
+     * Make a surface material wet for palettes that ask for it: a puddle
+     * roughness map (glossy standing water in patches, damp asphalt between)
+     * and a place on the list that applyWetReflections gives the city's
+     * reflection to. A no-op for other palettes.
+     *
+     * @param {Object} mat A Three.MeshStandardMaterial.
+     * @param {Number} rx Puddle-map repeat across.
+     * @param {Number} ry Puddle-map repeat along.
+     */
+    Cyberspace.prototype.makeWet = function(mat, rx, ry) {
+        if (!this.palette.wet) {
+            return;
+        }
+        var tex = this.puddleTexture().clone();
+        tex.repeat.set(Math.max(1, rx), Math.max(1, ry));
+        tex.needsUpdate = true;
+        mat.roughnessMap = tex;
+        mat.roughness = 1;
+        mat.metalness = Math.max(mat.metalness, 0.6);
+        mat.needsUpdate = true;
+        this.wetMaterials.push(mat);
+    };
+
+    /**
+     * A tileable puddle roughness map: mid-grey (damp) with soft dark blobs
+     * (near-mirror water), cached.
+     *
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.puddleTexture = function() {
+        if (this.texCache.puddle) {
+            return this.texCache.puddle;
+        }
+        var THREE = this.THREE;
+        var SIZE = 256;
+        var canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgb(195,195,195)';
+        ctx.fillRect(0, 0, SIZE, SIZE);
+        for (var i = 0; i < 16; i++) {
+            var x = Math.random() * SIZE;
+            var y = Math.random() * SIZE;
+            var r = 8 + Math.random() * 26;
+            // Draw each blob wrapped round the tile edges so the map tiles.
+            for (var ox = -SIZE; ox <= SIZE; ox += SIZE) {
+                for (var oy = -SIZE; oy <= SIZE; oy += SIZE) {
+                    var g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+                    g.addColorStop(0, 'rgba(12,12,12,1)');
+                    g.addColorStop(0.7, 'rgba(20,20,20,0.85)');
+                    g.addColorStop(1, 'rgba(20,20,20,0)');
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+                }
+            }
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        this.texCache.puddle = tex;
+        return tex;
+    };
+
+    /**
+     * Give the wet surfaces a reflection of the city: render the finished
+     * scene once into a prefiltered environment map from just above the street
+     * and set it on every wet material. One capture at load, so the per-frame
+     * cost is only the material's environment lookup (cheap enough for VR).
+     */
+    Cyberspace.prototype.applyWetReflections = function() {
+        if (!this.wetMaterials.length || !this.renderer) {
+            return;
+        }
+        var THREE = this.THREE;
+        var pmrem = new THREE.PMREMGenerator(this.renderer);
+        // PMREM captures from the origin; lift the eye 1.8 m by dropping the
+        // scene, then put it back. The low mist is hidden for the capture so it
+        // does not wash the reflection out.
+        var m;
+        for (m = 0; m < this.mists.length; m++) {
+            this.mists[m].mesh.visible = false;
+        }
+        this.scene.position.y = -1.8;
+        this.scene.updateMatrixWorld(true);
+        var target = pmrem.fromScene(this.scene, 0.02, 0.1, 900);
+        this.scene.position.y = 0;
+        this.scene.updateMatrixWorld(true);
+        for (m = 0; m < this.mists.length; m++) {
+            this.mists[m].mesh.visible = true;
+        }
+        pmrem.dispose();
+        this.wetEnv = target;
+        for (var i = 0; i < this.wetMaterials.length; i++) {
+            this.wetMaterials[i].envMap = target.texture;
+            this.wetMaterials[i].envMapIntensity = 1;
+            this.wetMaterials[i].needsUpdate = true;
+        }
+    };
+
+    /**
+     * Low, drifting fog layers hugging the streets (fog-tinted soft noise on
+     * a few stacked planes), scrolled slowly in tick.
+     */
+    Cyberspace.prototype.buildMist = function() {
+        var THREE = this.THREE;
+        var tex = this.mistTexture();
+        var tint = this.day.fog.clone().multiplyScalar(1.6);
+        var heights = [0.25, 0.6, 1.0, 5];
+        for (var i = 0; i < heights.length; i++) {
+            var layerTex = tex.clone();
+            layerTex.repeat.set(4, 4);
+            layerTex.offset.set(Math.random(), Math.random());
+            layerTex.needsUpdate = true;
+            var mist = new THREE.Mesh(
+                new THREE.PlaneGeometry(320, 320),
+                new THREE.MeshBasicMaterial({
+                    map: layerTex, color: tint, transparent: true,
+                    opacity: i === heights.length - 1 ? 0.04 : 0.05, depthWrite: false
+                })
+            );
+            mist.rotation.x = -Math.PI / 2;
+            mist.position.set(0, heights[i], -80);
+            mist.raycast = function() {
+                return; // Haze, not a solid: never picked or snapped to.
+            };
+            this.scene.add(mist);
+            this.mists.push({mesh: mist, tex: layerTex, dx: (Math.random() - 0.5) * 0.004, dy: 0.002 + Math.random() * 0.003});
+        }
+    };
+
+    /**
+     * A tileable soft-noise alpha texture for the mist layers, cached.
+     *
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.mistTexture = function() {
+        if (this.texCache.mist) {
+            return this.texCache.mist;
+        }
+        var THREE = this.THREE;
+        var SIZE = 256;
+        var canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, SIZE, SIZE);
+        for (var i = 0; i < 60; i++) {
+            var x = Math.random() * SIZE;
+            var y = Math.random() * SIZE;
+            var r = 20 + Math.random() * 60;
+            for (var ox = -SIZE; ox <= SIZE; ox += SIZE) {
+                for (var oy = -SIZE; oy <= SIZE; oy += SIZE) {
+                    var g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+                    g.addColorStop(0, 'rgba(255,255,255,0.35)');
+                    g.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+                }
+            }
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        this.texCache.mist = tex;
+        return tex;
     };
 
     /**
@@ -3795,6 +3985,47 @@ define('format_mnemo/vr', [], function() {
         light.position.set(0, 3.4, 0);
         light.castShadow = false;
         group.add(light);
+        // Misty palettes show the lamp's light as a soft cone through the haze.
+        if (this.palette.mist) {
+            group.add(this.lampCone());
+        }
+    };
+
+    /**
+     * A soft additive cone of lamp light, brightest at the lamp head and fading
+     * to the ground (geometry and material shared; the editor's brightness
+     * slider gives a lamp its own material copy when it is changed).
+     *
+     * @return {Object} A Three.Mesh, positioned in the lamp's local space.
+     */
+    Cyberspace.prototype.lampCone = function() {
+        var THREE = this.THREE;
+        if (!this.lampConeParts) {
+            var canvas = document.createElement('canvas');
+            canvas.width = 4;
+            canvas.height = 64;
+            var ctx = canvas.getContext('2d');
+            var g = ctx.createLinearGradient(0, 0, 0, 64);
+            g.addColorStop(0, 'rgba(255,255,255,0.9)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 4, 64);
+            var geo = new THREE.CylinderGeometry(0.12, 2.1, 3.3, 20, 1, true);
+            geo.translate(0, 1.65, 0);
+            this.lampConeParts = {
+                geo: geo,
+                mat: new THREE.MeshBasicMaterial({
+                    map: new THREE.CanvasTexture(canvas), color: this.palette.primary,
+                    transparent: true, opacity: 0.1 + this.day.night * 0.14, depthWrite: false,
+                    blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+                })
+            };
+        }
+        var cone = new THREE.Mesh(this.lampConeParts.geo, this.lampConeParts.mat);
+        cone.raycast = function() {
+            return; // Light, not a solid: never picked or snapped to.
+        };
+        return cone;
     };
 
     Cyberspace.prototype.scatterStreetProps = function(tpl, kind) {
@@ -4652,6 +4883,7 @@ define('format_mnemo/vr', [], function() {
             var rdiv = this.roadScale * this.roadTexMult;
             this.showSurfaceTexture(mat, this.tiledClone(this.roadTexture, w / rdiv, d / rdiv));
         }
+        this.makeWet(mat, w / 10, d / 10);
         var road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
@@ -10175,8 +10407,8 @@ define('format_mnemo/vr', [], function() {
         // Glide the flying-car traffic.
         this.updateTraffic(dt);
 
-        // Let the rain fall.
-        this.updateRain(dt);
+        // Let the rain fall and the mist drift.
+        this.updateWeather(dt);
 
         // Slowly revolve the Void's planet field (one turn per hour).
         this.spinPlanets(dt);
