@@ -1235,7 +1235,7 @@ const scenarios = [
             a.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
             const b = new THREE.Group();
             b.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
-            CS.prototype.applyBrightness.call({}, {group: a, transform: {brightness: 3}});
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}}, {group: a, transform: {brightness: 3}});
             // b must be untouched (its own material was not mutated).
             const bmat = b.children[0].material;
             const amat = a.children[0].material;
@@ -1254,13 +1254,13 @@ const scenarios = [
             emat.emissiveIntensity = 0.5;
             g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
             const ed = {group: g, transform: {brightness: 2}};
-            CS.prototype.applyBrightness.call({}, ed);
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}}, ed);
             // The mesh gets its own material clone; read that, not the original.
             const mat = () => g.children[0].material;
             const up = Math.abs(mat().emissiveIntensity - 1.0) < 1e-6;
             // Re-apply relative to the same captured base (0.5), not the last value.
             ed.transform.brightness = 0.5;
-            CS.prototype.applyBrightness.call({}, ed);
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}}, ed);
             const down = Math.abs(mat().emissiveIntensity - 0.25) < 1e-6;
             return {pass: up && down, detail: `emis=${mat().emissiveIntensity}`};
         }
@@ -1274,7 +1274,7 @@ const scenarios = [
             const emat = new THREE.MeshStandardMaterial({emissive: new THREE.Color(1, 1, 1)});
             emat.emissiveIntensity = 1;
             g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
-            const self = {
+            const self = {instanceClone: () => {}, releaseInstance: () => {}, 
                 THREE, editables: [], selBox: null, renderer: null,
                 config: {canedit: true},
                 sceneObjects: {'lamp:0': {scale: 2, x: 1, y: 0, z: 0, rot: 0, brightness: 3}},
@@ -1553,7 +1553,7 @@ const scenarios = [
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
             const added = [];
-            const self = {
+            const self = {instanceClone: () => {}, releaseInstance: () => {}, 
                 THREE, scene: {add: (o) => added.push(o), remove: () => {}},
                 editables: [], sceneObjects: {}, placedObjects: [],
                 config: {canedit: true, strings: {}}, propTemplates: {lamp: tpl},
@@ -1591,7 +1591,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial()));
-            const self = {
+            const self = {instanceClone: () => {}, releaseInstance: () => {}, 
                 THREE, scene: {add: () => {}, remove: () => {}},
                 editables: [], sceneObjects: {}, config: {canedit: true, strings: {}},
                 placedObjects: [
@@ -2244,6 +2244,7 @@ const scenarios = [
                 modelOrientation: CS.prototype.modelOrientation,
                 orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
+                instanceClone: () => {},
                 spawnTrafficType: CS.prototype.spawnTrafficType
             });
             // A count above the per-type limit is clamped to 16.
@@ -3484,7 +3485,7 @@ const scenarios = [
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshStandardMaterial()));
             const added = [];
-            const self = {
+            const self = {instanceClone: () => {}, releaseInstance: () => {}, 
                 THREE, config: {canedit: true, strings: {placelamp: 'Street lamp'}},
                 sceneObjects: {}, editables: [], lampLights: 0, palette: {primary: 0x00e5ff},
                 scene: {add: (o) => added.push(o)},
@@ -3739,6 +3740,89 @@ const scenarios = [
             const shift = tex.offset.y - v0;
             const pass = mesh.position.z === -320 && Math.abs(shift - 4) < 1e-9;
             return {pass, detail: `meshz=${mesh.position.z} shift=${shift}`};
+        }
+    },
+    {
+        name: 'instancing: prop copies draw through one batch that follows moves and deletes',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const scene = new THREE.Scene();
+            const self = {THREE, scene, propBatches: {}, instanceLinks: new Map()};
+            ['propBatch', 'isShown', 'ensureInstanceCapacity', 'releaseInstance', 'instanceablePart'].forEach((f) => {
+                self[f] = CS.prototype[f];
+            });
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 3, 1), new THREE.MeshStandardMaterial()));
+            tpl.add(new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial()));
+            const copies = [0, 1, 2].map((i) => {
+                const c = tpl.clone();
+                c.position.set(i * 10, 0, 0);
+                scene.add(c);
+                CS.prototype.instanceClone.call(self, tpl, c);
+                return c;
+            });
+            CS.prototype.updatePropInstances.call(self);
+            const batch = Object.values(self.propBatches)[0];
+            const counts = () => batch.subs.map((sb) => sb.mesh.count).join(',');
+            const hidden = copies.every((c) => c.children.every((m) => !m.visible));
+            const first = counts();
+            // Move one, delete one: the batch follows.
+            copies[0].position.x = 99;
+            scene.remove(copies[1]);
+            CS.prototype.updatePropInstances.call(self);
+            const pruned = batch.members.length === 2 && !self.instanceLinks.has(copies[1]);
+            const m4 = new THREE.Matrix4();
+            batch.subs[0].mesh.getMatrixAt(0, m4);
+            const movedX = new THREE.Vector3().setFromMatrixPosition(m4).x;
+            const second = counts();
+            // A brightness edit takes the copy out of the batch and shows it again.
+            self.releaseInstance(copies[2]);
+            CS.prototype.updatePropInstances.call(self);
+            const third = counts();
+            const shownAgain = copies[2].children.every((m) => m.visible);
+            const pass = hidden && pruned && first === '3,3' && Math.abs(movedX - 99) < 1e-4 && second === '2,2' &&
+                third === '1,1' && shownAgain && batch.subs.length === 2;
+            return {pass, detail: `hidden=${hidden} ${first}->${second}->${third} x=${movedX} shown=${shownAgain}`};
+        }
+    },
+    {
+        name: 'instancing: transparent, morphing, pre-instanced and hidden parts are never batched',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const ok = (o, root) => CS.prototype.instanceablePart(o, root);
+            const box = () => new THREE.BoxGeometry(1, 1, 1);
+            const root = new THREE.Group();
+            const plain = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            const glass = new THREE.Mesh(box(), new THREE.MeshStandardMaterial({transparent: true, opacity: 0.5}));
+            const morph = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            morph.geometry.morphAttributes.position = [morph.geometry.attributes.position.clone()];
+            const inst = new THREE.InstancedMesh(box(), new THREE.MeshStandardMaterial(), 3);
+            const hiddenParent = new THREE.Group();
+            hiddenParent.visible = false;
+            const underHidden = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            hiddenParent.add(underHidden);
+            root.add(plain, glass, morph, inst, hiddenParent);
+            const got = [plain, glass, morph, inst, underHidden].map((o) => ok(o, root));
+            const pass = got.join() === 'true,false,false,false,false';
+            return {pass, detail: got.join()};
+        }
+    },
+    {
+        name: 'instancing: animated copies keep drawing themselves',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, scene: new THREE.Scene(), propBatches: {}, instanceLinks: new Map(),
+                propBatch: CS.prototype.propBatch, instanceablePart: CS.prototype.instanceablePart};
+            const tpl = new THREE.Group();
+            tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()));
+            const c = tpl.clone();
+            c.children[0].userData.mnemoAnimated = true;
+            CS.prototype.instanceClone.call(self, tpl, c);
+            const pass = c.children[0].visible && !self.instanceLinks.has(c);
+            return {pass, detail: `visible=${c.children[0].visible} linked=${self.instanceLinks.has(c)}`};
         }
     },
     {
@@ -4111,7 +4195,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 4, 0.4), new THREE.MeshStandardMaterial()));
-            const self = {
+            const self = {instanceClone: () => {}, releaseInstance: () => {}, 
                 THREE, config: {canedit: true, strings: {placelamp: 'Street lamp'}},
                 sceneObjects: {'lamp:0': {hidden: true}}, editables: [], lampLights: 0,
                 palette: {primary: 0x00e5ff}, scene: {add: () => {}},
