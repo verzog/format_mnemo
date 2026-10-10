@@ -240,7 +240,8 @@ off).
 
 ## Requirements
 
-- Moodle **5.0** or later (tested on 5.0–5.2).
+- Moodle **5.1** or later (tested on 5.1–5.3), with PHP 8.2–8.4 (8.3+ on
+  Moodle 5.2 and later).
 - A **WebGL**-capable browser for the 3D view (all evergreen browsers).
 - For VR: a **WebXR**-capable browser and an `immersive-vr` headset. Hand
   tracking uses the WebXR Hand Input API where the device/browser supports it;
@@ -641,7 +642,7 @@ web-app framework — no React, Vue, Node service or bundler beyond Moodle's own
 build. (Any React you see in the browser console on an admin page is Moodle's
 admin UI, not this plugin.)
 
-**Server — PHP on the Moodle plugin APIs (Moodle 5.0–5.2)**
+**Server — PHP on the Moodle plugin APIs (Moodle 5.1–5.3)**
 
 - **Course format API** — `format_mnemo` (in `lib.php`) extends
   `core_courseformat\base`; `format.php` swaps the 2D editor for the scene.
@@ -687,7 +688,7 @@ admin UI, not this plugin.)
   headlessly — 100+ scenarios covering gestures, the reader, the object
   editor/placer, traffic and the asset-viewer previews.
 - **moodle-plugin-ci** runs the full Moodle check matrix (PHP 8.2–8.4 ×
-  Moodle 5.0/5.1/5.2 × PostgreSQL/MariaDB): phplint, phpcpd, phpmd, **phpcs**
+  Moodle 5.1/5.2/5.3 × PostgreSQL/MariaDB, plus Moodle `main`): phplint, phpcpd, phpmd, **phpcs**
   (Moodle coding standard), phpdoc, validate, savepoints, mustache, grunt
   (ESLint/Stylelint), PHPUnit and Behat — plus the WebXR smoke test.
 
