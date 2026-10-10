@@ -320,6 +320,8 @@ define('format_mnemo/vr', [], function() {
         this.ads = []; // Holographic billboards that flicker.
         this.codeRain = []; // Scrolling code-rain columns (Matrix palette).
         this.rain = null; // Falling rain streaks (Matrix palette).
+        this.propBatches = {}; // Instanced draws per prop model; see instanceClone.
+        this.instanceLinks = new Map(); // Batched prop copy -> its batch membership.
         this.wetMaterials = []; // Road/ground materials that reflect the city.
         this.wetEnv = null; // The current reflection capture (a render target).
         this.wetCaptureTimer = null; // Pending reflection re-capture.
@@ -3730,7 +3732,215 @@ define('format_mnemo/vr', [], function() {
             this.addPickProxy(m, this.modelScale(type));
             this.registerSceneEditable('placed:' + p.id, this.propLabel(type),
                 m, p.x, y, p.z, type === 'lamp' || type === 'av', this.modelScale(type));
+            this.instanceClone(tpl, m);
         }
+    };
+
+    /**
+     * Draw a placed copy of a prop model through its model's shared instanced
+     * batch instead of with its own meshes (one draw per model part for every
+     * copy, not one per copy). The clone stays in the scene as the editable,
+     * pickable, deletable object - its meshes are just hidden, and each frame
+     * updatePropInstances copies their world matrices into the batch, so moves,
+     * rotations, scale edits and traffic motion all follow. Animated or skinned
+     * copies are left drawing themselves (their bones and mixers move their own
+     * nodes), as is any copy whose materials no longer match the model's.
+     *
+     * @param {Object} tpl The model template the copy was cloned from.
+     * @param {Object} clone The placed copy (already in the scene).
+     */
+    Cyberspace.prototype.instanceClone = function(tpl, clone) {
+        if (!tpl || !clone || !this.THREE.InstancedMesh) {
+            return;
+        }
+        var skip = false;
+        var cast = false;
+        clone.traverse(function(o) {
+            if (o.isSkinnedMesh || (o.userData && o.userData.mnemoAnimated)) {
+                skip = true;
+            }
+            if (o.isMesh && o.castShadow) {
+                cast = true;
+            }
+        });
+        if (skip) {
+            return;
+        }
+        var batch = this.propBatch(tpl, cast);
+        var parts = [];
+        clone.traverse(function(o) {
+            if (o.isMesh && !o.userData.mnemoProxy && o.visible) {
+                var sub = batch.byKey[batch.keyFor(o)];
+                if (sub) {
+                    parts.push({mesh: o, sub: sub});
+                }
+            }
+        });
+        if (!parts.length) {
+            return;
+        }
+        var perSub = new Map();
+        for (var i = 0; i < parts.length; i++) {
+            parts[i].mesh.visible = false;
+            perSub.set(parts[i].sub, (perSub.get(parts[i].sub) || 0) + 1);
+        }
+        // How many instances each part needs per copy (a model may reuse a part).
+        perSub.forEach(function(n, sub) {
+            sub.perMember = Math.max(sub.perMember || 0, n);
+        });
+        var member = {root: clone, parts: parts};
+        batch.members.push(member);
+        // Linked outside userData, which Three.js copies as JSON on clone().
+        this.instanceLinks.set(clone, {batch: batch, member: member});
+    };
+
+    /**
+     * The instanced batch for a prop model (one per model and shadow mode),
+     * created on first use: one Three.InstancedMesh per model part, sharing
+     * the part's geometry and material.
+     *
+     * @param {Object} tpl The model template.
+     * @param {Boolean} cast Whether the copies cast shadows.
+     * @return {Object} {byKey, subs, members, keyFor}.
+     */
+    Cyberspace.prototype.propBatch = function(tpl, cast) {
+        var id = tpl.uuid + (cast ? '|cast' : '');
+        if (this.propBatches[id]) {
+            return this.propBatches[id];
+        }
+        var keyFor = function(o) {
+            var mats = Array.isArray(o.material) ? o.material : [o.material];
+            return o.geometry.uuid + '|' + mats.map(function(m) {
+                return m.uuid;
+            }).join(',');
+        };
+        var batch = {byKey: {}, subs: [], members: [], keyFor: keyFor, cast: cast};
+        tpl.traverse(function(o) {
+            if (o.isMesh && !o.isSkinnedMesh) {
+                var key = keyFor(o);
+                if (!batch.byKey[key]) {
+                    var sub = {geometry: o.geometry, material: o.material, mesh: null, capacity: 0};
+                    batch.byKey[key] = sub;
+                    batch.subs.push(sub);
+                }
+            }
+        });
+        this.propBatches[id] = batch;
+        return batch;
+    };
+
+    /**
+     * Take a prop copy out of its instanced batch and show its own meshes
+     * again (it is about to get its own materials, e.g. a brightness edit).
+     * A no-op for a copy that is not batched.
+     *
+     * @param {Object} root The prop copy.
+     */
+    Cyberspace.prototype.releaseInstance = function(root) {
+        var link = root && this.instanceLinks.get(root);
+        if (!link) {
+            return;
+        }
+        var members = link.batch.members;
+        var at = members.indexOf(link.member);
+        if (at >= 0) {
+            members.splice(at, 1);
+        }
+        for (var i = 0; i < link.member.parts.length; i++) {
+            link.member.parts[i].mesh.visible = true;
+        }
+        this.instanceLinks.delete(root);
+    };
+
+    /**
+     * Whether an object is currently shown: attached to the scene with every
+     * ancestor visible (a deleted prop is removed; a hidden one is invisible).
+     *
+     * @param {Object} o The object.
+     * @return {Boolean} True when it should be drawn.
+     */
+    Cyberspace.prototype.isShown = function(o) {
+        while (o) {
+            if (o === this.scene) {
+                return true;
+            }
+            if (!o.visible) {
+                return false;
+            }
+            o = o.parent;
+        }
+        return false;
+    };
+
+    /**
+     * Copy every batched prop copy's current part transforms into its model's
+     * instanced meshes, growing a batch's capacity as copies are added. Runs
+     * each frame; the cost is a matrix copy per visible part.
+     */
+    Cyberspace.prototype.updatePropInstances = function() {
+        for (var id in this.propBatches) {
+            var batch = this.propBatches[id];
+            var shown = [];
+            for (var m = 0; m < batch.members.length; m++) {
+                if (this.isShown(batch.members[m].root)) {
+                    batch.members[m].root.updateWorldMatrix(true, true);
+                    shown.push(batch.members[m]);
+                }
+            }
+            for (var s = 0; s < batch.subs.length; s++) {
+                batch.subs[s].count = 0;
+            }
+            for (var k = 0; k < shown.length; k++) {
+                var parts = shown[k].parts;
+                for (var p = 0; p < parts.length; p++) {
+                    var need = shown.length * (parts[p].sub.perMember || 1);
+                    var sub = this.ensureInstanceCapacity(parts[p].sub, batch, need);
+                    sub.mesh.setMatrixAt(sub.count++, parts[p].mesh.matrixWorld);
+                }
+            }
+            for (var t = 0; t < batch.subs.length; t++) {
+                var st = batch.subs[t];
+                if (st.mesh) {
+                    st.mesh.count = st.count;
+                    st.mesh.instanceMatrix.needsUpdate = true;
+                }
+            }
+        }
+    };
+
+    /**
+     * Make sure a batch part's instanced mesh can hold the frame's copies,
+     * (re)creating it with room to spare when it is missing or too small.
+     *
+     * @param {Object} sub The batch part.
+     * @param {Object} batch The batch (for its shadow mode).
+     * @param {Number} need The number of instances the frame may write.
+     * @return {Object} The same part, with a mesh of sufficient capacity.
+     */
+    Cyberspace.prototype.ensureInstanceCapacity = function(sub, batch, need) {
+        if (sub.mesh && sub.capacity >= need) {
+            return sub;
+        }
+        var THREE = this.THREE;
+        var capacity = Math.max(8, need * 2);
+        var mesh = new THREE.InstancedMesh(sub.geometry, sub.material, capacity);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        // Copies are spread along the streets; the per-instance bounds are not
+        // tracked, so never cull the batch as a whole.
+        mesh.frustumCulled = false;
+        mesh.castShadow = batch.cast;
+        mesh.receiveShadow = true;
+        mesh.raycast = function() {
+            return; // Picking hits the hidden copies (and their proxies) instead.
+        };
+        if (sub.mesh) {
+            this.scene.remove(sub.mesh);
+            sub.mesh.dispose();
+        }
+        this.scene.add(mesh);
+        sub.mesh = mesh;
+        sub.capacity = capacity;
+        return sub;
     };
 
     /**
@@ -4122,6 +4332,7 @@ define('format_mnemo/vr', [], function() {
                 this.scene.add(m);
                 this.addPickProxy(m, scale);
                 this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp', scale);
+                this.instanceClone(tpl, m);
             }
         }
     };
@@ -4244,6 +4455,7 @@ define('format_mnemo/vr', [], function() {
             this.scene.add(m);
             this.addPickProxy(m, scale);
             this.registerSceneEditable(objkey, label, m, px, py, pz, true, scale);
+            this.instanceClone(tpl, m);
         }
     };
 
@@ -4291,6 +4503,7 @@ define('format_mnemo/vr', [], function() {
             // Key by the side street's section number (course-stable across
             // viewers), not a filtered ordinal.
             this.registerSceneEditable('kiosk:' + r.section, 'Kiosk', m, kx, 0, kz, false, scale);
+            this.instanceClone(tpl, m);
         }
     };
 
@@ -4436,6 +4649,7 @@ define('format_mnemo/vr', [], function() {
             // would freeze in place and detach. (The original traffic cast no
             // shadows either.)
             this.scene.add(car);
+            this.instanceClone(tpl, car);
             this.traffic.push(rec);
         }
     };
@@ -8408,6 +8622,7 @@ define('format_mnemo/vr', [], function() {
         this.placedObjects.push({id: id, type: type, x: x, z: z});
         this.registerSceneEditable('placed:' + id, this.propLabel(type),
             m, x, y, z, type === 'lamp' || type === 'av', this.modelScale(type));
+        this.instanceClone(tpl, m);
         // With snap-to-surface on, rest the new prop on the surface beneath it
         // (e.g. a raised sidewalk) and persist that height so every learner sees
         // it there, not sunk to road level.
@@ -9266,6 +9481,9 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.applyBrightness = function(editable) {
         var b = editable.transform.brightness;
+        // The prop gets its own materials below, so it can no longer be drawn
+        // by its model's shared instanced batch: show its own meshes again.
+        this.releaseInstance(editable.group);
         editable.group.traverse(function(o) {
             if (o.isLight) {
                 if (o.userData.mnemoBaseIntensity === undefined) {
@@ -10455,6 +10673,8 @@ define('format_mnemo/vr', [], function() {
 
         // Glide the flying-car traffic.
         this.updateTraffic(dt);
+        // Draw every batched prop copy where its (hidden) object now is.
+        this.updatePropInstances();
 
         // Let the rain fall and the mist drift.
         this.updateWeather(dt);
