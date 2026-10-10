@@ -3768,8 +3768,9 @@ define('format_mnemo/vr', [], function() {
         }
         var batch = this.propBatch(tpl, cast);
         var parts = [];
+        var self = this;
         clone.traverse(function(o) {
-            if (o.isMesh && !o.userData.mnemoProxy && o.visible) {
+            if (self.instanceablePart(o, clone)) {
                 var sub = batch.byKey[batch.keyFor(o)];
                 if (sub) {
                     parts.push({mesh: o, sub: sub});
@@ -3795,6 +3796,40 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Whether a model part can be drawn by a shared instanced batch without
+     * changing how it looks: a plain, opaque, shown mesh. Left drawing itself
+     * are skinned, morphing and already-instanced meshes (a batch would drop
+     * their bones, shape keys or authored instances), alpha-blended ones (a
+     * batch cannot depth-sort its copies against each other), pick proxies,
+     * and anything hidden under the copy's root (a batch draws regardless).
+     *
+     * @param {Object} o The object under the copy (or template).
+     * @param {Object} root The copy (or template) root.
+     * @return {Boolean} True when the part can be batched.
+     */
+    Cyberspace.prototype.instanceablePart = function(o, root) {
+        if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.userData.mnemoProxy) {
+            return false;
+        }
+        var morphs = o.geometry && o.geometry.morphAttributes;
+        if ((morphs && Object.keys(morphs).length) || (o.morphTargetInfluences && o.morphTargetInfluences.length)) {
+            return false;
+        }
+        var mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (var i = 0; i < mats.length; i++) {
+            if (!mats[i] || mats[i].transparent) {
+                return false;
+            }
+        }
+        for (var n = o; n && n !== root; n = n.parent) {
+            if (!n.visible) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /**
      * The instanced batch for a prop model (one per model and shadow mode),
      * created on first use: one Three.InstancedMesh per model part, sharing
      * the part's geometry and material.
@@ -3815,8 +3850,9 @@ define('format_mnemo/vr', [], function() {
             }).join(',');
         };
         var batch = {byKey: {}, subs: [], members: [], keyFor: keyFor, cast: cast};
+        var self = this;
         tpl.traverse(function(o) {
-            if (o.isMesh && !o.isSkinnedMesh) {
+            if (self.instanceablePart(o, tpl)) {
                 var key = keyFor(o);
                 if (!batch.byKey[key]) {
                     var sub = {geometry: o.geometry, material: o.material, mesh: null, capacity: 0};
@@ -3881,6 +3917,13 @@ define('format_mnemo/vr', [], function() {
         for (var id in this.propBatches) {
             var batch = this.propBatches[id];
             var shown = [];
+            for (var d = batch.members.length - 1; d >= 0; d--) {
+                if (!batch.members[d].root.parent) {
+                    // Deleted (removed from the scene): drop it for good.
+                    this.instanceLinks.delete(batch.members[d].root);
+                    batch.members.splice(d, 1);
+                }
+            }
             for (var m = 0; m < batch.members.length; m++) {
                 if (this.isShown(batch.members[m].root)) {
                     batch.members[m].root.updateWorldMatrix(true, true);

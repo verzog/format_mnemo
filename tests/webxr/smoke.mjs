@@ -3749,7 +3749,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const scene = new THREE.Scene();
             const self = {THREE, scene, propBatches: {}, instanceLinks: new Map()};
-            ['propBatch', 'isShown', 'ensureInstanceCapacity', 'releaseInstance'].forEach((f) => {
+            ['propBatch', 'isShown', 'ensureInstanceCapacity', 'releaseInstance', 'instanceablePart'].forEach((f) => {
                 self[f] = CS.prototype[f];
             });
             const tpl = new THREE.Group();
@@ -3771,6 +3771,7 @@ const scenarios = [
             copies[0].position.x = 99;
             scene.remove(copies[1]);
             CS.prototype.updatePropInstances.call(self);
+            const pruned = batch.members.length === 2 && !self.instanceLinks.has(copies[1]);
             const m4 = new THREE.Matrix4();
             batch.subs[0].mesh.getMatrixAt(0, m4);
             const movedX = new THREE.Vector3().setFromMatrixPosition(m4).x;
@@ -3780,9 +3781,32 @@ const scenarios = [
             CS.prototype.updatePropInstances.call(self);
             const third = counts();
             const shownAgain = copies[2].children.every((m) => m.visible);
-            const pass = hidden && first === '3,3' && Math.abs(movedX - 99) < 1e-4 && second === '2,2' &&
+            const pass = hidden && pruned && first === '3,3' && Math.abs(movedX - 99) < 1e-4 && second === '2,2' &&
                 third === '1,1' && shownAgain && batch.subs.length === 2;
             return {pass, detail: `hidden=${hidden} ${first}->${second}->${third} x=${movedX} shown=${shownAgain}`};
+        }
+    },
+    {
+        name: 'instancing: transparent, morphing, pre-instanced and hidden parts are never batched',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const ok = (o, root) => CS.prototype.instanceablePart(o, root);
+            const box = () => new THREE.BoxGeometry(1, 1, 1);
+            const root = new THREE.Group();
+            const plain = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            const glass = new THREE.Mesh(box(), new THREE.MeshStandardMaterial({transparent: true, opacity: 0.5}));
+            const morph = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            morph.geometry.morphAttributes.position = [morph.geometry.attributes.position.clone()];
+            const inst = new THREE.InstancedMesh(box(), new THREE.MeshStandardMaterial(), 3);
+            const hiddenParent = new THREE.Group();
+            hiddenParent.visible = false;
+            const underHidden = new THREE.Mesh(box(), new THREE.MeshStandardMaterial());
+            hiddenParent.add(underHidden);
+            root.add(plain, glass, morph, inst, hiddenParent);
+            const got = [plain, glass, morph, inst, underHidden].map((o) => ok(o, root));
+            const pass = got.join() === 'true,false,false,false,false';
+            return {pass, detail: got.join()};
         }
     },
     {
@@ -3791,7 +3815,7 @@ const scenarios = [
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const self = {THREE, scene: new THREE.Scene(), propBatches: {}, instanceLinks: new Map(),
-                propBatch: CS.prototype.propBatch};
+                propBatch: CS.prototype.propBatch, instanceablePart: CS.prototype.instanceablePart};
             const tpl = new THREE.Group();
             tpl.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial()));
             const c = tpl.clone();
