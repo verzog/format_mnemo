@@ -1397,6 +1397,27 @@ define('format_mnemo/vr', [], function() {
     var MODULE_H = 11; // Six floors.
 
     /**
+     * The facade tile layout for a style under the current palette. Palettes
+     * with their own window colours ("windows") pack twice the window columns
+     * and rows into a higher-resolution tile (many small, crisp windows, like a
+     * dense skyline) and light more of them, scaled by "windowDensity".
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} {mix, suffix, size, cols, rows, density}.
+     */
+    Cyberspace.prototype.facadeLayout = function(style) {
+        var mix = this.palette.windows || null;
+        if (!mix) {
+            return {mix: null, suffix: '', size: 512, cols: 4, rows: 6, density: style.density};
+        }
+        var scale = this.palette.windowDensity || 1;
+        return {
+            mix: mix, suffix: '_mix', size: 1024, cols: 8, rows: 12,
+            density: Math.min(0.7, (style.density * 1.6 + 0.08) * scale)
+        };
+    };
+
+    /**
      * Build the seamless, tileable facade texture set for a style once (surface
      * colour, bump relief, roughness and emissive windows), cached per style.
      * The tile is a small block of floors and window columns; facadeMaterial
@@ -1406,17 +1427,15 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} {map, bump, rough, emissive} base Three.CanvasTextures.
      */
     Cyberspace.prototype.facadeTextures = function(style) {
-        var mix = this.palette.windows || null;
-        var key = 'facbase_' + style.body + '_' + style.lit + '_' + style.rough + (mix ? '_mix' : '');
+        var layout = this.facadeLayout(style);
+        var key = 'facbase_' + style.body + '_' + style.lit + '_' + style.rough + layout.suffix;
         if (this.texCache[key]) {
             return this.texCache[key];
         }
         var THREE = this.THREE;
-        // Mixed-window palettes pack twice the window columns and rows into a
-        // higher-resolution tile: many small, crisp windows, like a dense skyline.
-        var SIZE = mix ? 1024 : 512;
-        var cols = mix ? 8 : 4;
-        var rows = mix ? 12 : 6;
+        var SIZE = layout.size;
+        var cols = layout.cols;
+        var rows = layout.rows;
         var cw = SIZE / cols;
         var ch = SIZE / rows;
         var frame = Math.min(cw, ch) * 0.16; // Concrete gutter around a window.
@@ -1433,9 +1452,7 @@ define('format_mnemo/vr', [], function() {
         var glassBot = base.clone().multiplyScalar(0.42).lerp(new THREE.Color(0x121a24), 0.6);
         var lit = new THREE.Color(style.lit);
         // Palettes with their own window colours light far more of the windows.
-        var density = mix
-            ? Math.min(0.7, (style.density * 1.6 + 0.08) * (this.palette.windowDensity || 1))
-            : style.density;
+        var density = layout.density;
         var concreteRough = Math.round(style.rough * 255);
 
         // Bases.
@@ -1500,9 +1517,9 @@ define('format_mnemo/vr', [], function() {
                 if (Math.random() < density) {
                     var dim = style.wireframe && Math.random() < 0.5;
                     e.globalAlpha = dim ? 0.35 : 0.9;
-                    e.fillStyle = mix
-                        ? '#' + new THREE.Color(mix[Math.floor(Math.random() * mix.length)]).getHexString()
-                        : '#' + lit.getHexString();
+                    e.fillStyle = '#' + (layout.mix
+                        ? new THREE.Color(layout.mix[Math.floor(Math.random() * layout.mix.length)])
+                        : lit).getHexString();
                     e.fillRect(wx, wy, ww, wh);
                     e.globalAlpha = 1;
                 }
