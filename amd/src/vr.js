@@ -1707,15 +1707,27 @@ define('format_mnemo/vr', [], function() {
         return Math.max(1, Math.round(height / (MODULE_H / FLOORS_PER_MODULE)));
     };
 
+    /**
+     * The facade texture repeat for a face of the given size: whole window
+     * modules across, and whole storeys up. Repeating by storeys, not whole
+     * modules, keeps every building on the same floor pitch so window rows line
+     * up with the storey-quantised height (see floorHeight). The module has
+     * FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
+     * gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
+     *
+     * @param {Number} width Face width.
+     * @param {Number} height Face height.
+     * @return {Number[]} [x repeat, y repeat].
+     */
+    Cyberspace.prototype.facadeRepeat = function(width, height) {
+        return [Math.max(1, Math.round(width / MODULE_W)), this.facadeStoreys(height) / FLOORS_PER_MODULE];
+    };
+
     Cyberspace.prototype.facadeMaterial = function(style, width, height) {
         var THREE = this.THREE;
-        var rx = Math.max(1, Math.round(width / MODULE_W));
-        // Repeat the facade by whole storeys, not whole modules, so every
-        // building shares the same floor pitch and window rows line up with the
-        // storey-quantised height (see floorHeight). The module has
-        // FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
-        // gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
-        var ry = this.facadeStoreys(height) / FLOORS_PER_MODULE;
+        var rep = this.facadeRepeat(width, height);
+        var rx = rep[0];
+        var ry = rep[1];
         var mix = !!this.palette.windows;
         var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry + (mix ? '|mix' : '');
         if (this.matCache[key]) {
@@ -1908,30 +1920,236 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.addGreebles = function(group, style, w, d, h) {
         var THREE = this.THREE;
-        var vent = new THREE.Mesh(
-            new THREE.BoxGeometry(w * 0.82, 1.1, 0.35), this.trimMaterial(style, 0, 0)
-        );
-        vent.position.set(0, 0.75, d / 2 + 0.16);
-        group.add(vent);
+        // Each detail samples its own cell of the 2x2 trim sheet; the four are
+        // merged into one mesh (one draw call per building, not four).
+        var parts = [
+            {size: [w * 0.82, 1.1, 0.35], at: [0, 0.75, d / 2 + 0.16], cell: [0, 0]}, // Base vent.
+            // Access panel on the right side wall, clear of the front signboard.
+            {size: [0.2, 1.6, 1.2], at: [w / 2 + 0.06, 1.7, -d * 0.12], cell: [0, 1]},
+            {size: [0.4, h * 0.9, 0.4], at: [w / 2 - 0.3, h * 0.45, d / 2 - 0.3], cell: [1, 0]}, // Pipe.
+            {size: [1.7, 1.1, 1.7], cell: [1, 1], // Rooftop unit.
+                at: [(Math.random() - 0.5) * w * 0.4, h + 0.55, (Math.random() - 0.5) * d * 0.4]}
+        ];
+        var geos = [];
+        for (var i = 0; i < parts.length; i++) {
+            var pt = parts[i];
+            var geo = new THREE.BoxGeometry(pt.size[0], pt.size[1], pt.size[2]);
+            this.transformUvs(geo, 0.5, 0.5, pt.cell[0] * 0.5, (1 - pt.cell[1]) * 0.5);
+            geo.translate(pt.at[0], pt.at[1], pt.at[2]);
+            geos.push(geo);
+        }
+        group.add(new THREE.Mesh(this.mergeGeometries(geos), this.trimSheetMaterial(style)));
+    };
 
-        // Access panel on the right side wall, clear of the front signboard.
-        var panel = new THREE.Mesh(
-            new THREE.BoxGeometry(0.2, 1.6, 1.2), this.trimMaterial(style, 0, 1)
-        );
-        panel.position.set(w / 2 + 0.06, 1.7, -d * 0.12);
-        group.add(panel);
+    /**
+     * The whole-sheet trim material for a style (the 2x2 detail cells are picked
+     * by each detail's own UVs; see addGreebles), cached per style.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.trimSheetMaterial = function(style) {
+        var THREE = this.THREE;
+        var key = 'trimsheet_' + style.body;
+        if (this.matCache[key]) {
+            return this.matCache[key];
+        }
+        var tex = this.trimSheet(style);
+        var mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: tex.map,
+            normalMap: tex.normal,
+            roughnessMap: tex.rough,
+            roughness: 1,
+            metalness: 0.5,
+            emissive: 0xffffff,
+            emissiveMap: tex.emissive,
+            emissiveIntensity: Math.max(0.35, this.day.windowEmissive)
+        });
+        this.matCache[key] = mat;
+        return mat;
+    };
 
-        var pipe = new THREE.Mesh(
-            new THREE.BoxGeometry(0.4, h * 0.9, 0.4), this.trimMaterial(style, 1, 0)
-        );
-        pipe.position.set(w / 2 - 0.3, h * 0.45, d / 2 - 0.3);
-        group.add(pipe);
+    /**
+     * Scale and offset a geometry's UVs in place (bakes a texture repeat/offset
+     * into the mesh so differently-tiled meshes can share one material).
+     *
+     * @param {Object} geo A Three.BufferGeometry with a uv attribute.
+     * @param {Number} su U scale.
+     * @param {Number} sv V scale.
+     * @param {Number} ou U offset.
+     * @param {Number} ov V offset.
+     * @return {Object} The same geometry.
+     */
+    Cyberspace.prototype.transformUvs = function(geo, su, sv, ou, ov) {
+        var uv = geo.attributes.uv;
+        for (var i = 0; i < uv.count; i++) {
+            uv.setXY(i, uv.getX(i) * su + ou, uv.getY(i) * sv + ov);
+        }
+        uv.needsUpdate = true;
+        return geo;
+    };
 
-        var unit = new THREE.Mesh(
-            new THREE.BoxGeometry(1.7, 1.1, 1.7), this.trimMaterial(style, 1, 1)
-        );
-        unit.position.set((Math.random() - 0.5) * w * 0.4, h + 0.55, (Math.random() - 0.5) * d * 0.4);
-        group.add(unit);
+    /**
+     * Fill a geometry's vertex colour attribute with one colour.
+     *
+     * @param {Object} geo A Three.BufferGeometry.
+     * @param {Number} colour Hex int colour.
+     * @return {Object} The same geometry.
+     */
+    Cyberspace.prototype.paintGeometry = function(geo, colour) {
+        var c = new this.THREE.Color(colour);
+        var n = geo.attributes.position.count;
+        var arr = new Float32Array(n * 3);
+        for (var i = 0; i < n; i++) {
+            arr[i * 3] = c.r;
+            arr[i * 3 + 1] = c.g;
+            arr[i * 3 + 2] = c.b;
+        }
+        geo.setAttribute('color', new this.THREE.BufferAttribute(arr, 3));
+        return geo;
+    };
+
+    /**
+     * Merge geometries into one non-indexed geometry, keeping the attributes
+     * (position, normal, uv, color) that every input has. Static scenery merged
+     * this way draws in one call instead of one per piece.
+     *
+     * @param {Array} list Three.BufferGeometry objects, already transformed.
+     * @return {Object} The merged Three.BufferGeometry.
+     */
+    Cyberspace.prototype.mergeGeometries = function(list) {
+        var THREE = this.THREE;
+        var parts = [];
+        var i;
+        for (i = 0; i < list.length; i++) {
+            parts.push(list[i].index ? list[i].toNonIndexed() : list[i]);
+        }
+        var out = new THREE.BufferGeometry();
+        ['position', 'normal', 'uv', 'color'].forEach(function(name) {
+            var total = 0;
+            var size = 0;
+            for (var p = 0; p < parts.length; p++) {
+                var a = parts[p].attributes[name];
+                if (!a) {
+                    return;
+                }
+                size = a.itemSize;
+                total += a.array.length;
+            }
+            if (!parts.length) {
+                return;
+            }
+            var arr = new Float32Array(total);
+            var offset = 0;
+            for (var q = 0; q < parts.length; q++) {
+                arr.set(parts[q].attributes[name].array, offset);
+                offset += parts[q].attributes[name].array.length;
+            }
+            out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+        });
+        return out;
+    };
+
+    /**
+     * The neon edge geometry for a box: glowing strips (or, for a 'line'
+     * palette, thin circuit lines) with vertex colours, centred on the box.
+     * Mergeable, so a whole skyline's outlines can draw in one call.
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @return {Object} A Three.BufferGeometry.
+     */
+    Cyberspace.prototype.neonOutlineGeometry = function(w, h, d) {
+        var THREE = this.THREE;
+        if (this.palette.neonEdges === 'line') {
+            return this.circuitGeometry(w, h, d, this.accentColour());
+        }
+        var self = this;
+        var geos = [];
+        var t = 0.16;
+        var corner = this.accentColour();
+        var crown = this.accentColour();
+        var strip = function(sx, sy, sz, x, y, z, colour) {
+            geos.push(self.paintGeometry(new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z), colour));
+        };
+        [-1, 1].forEach(function(ix) {
+            [-1, 1].forEach(function(iz) {
+                strip(t, h, t, ix * w / 2, 0, iz * d / 2, corner);
+            });
+            strip(t, t, d, ix * w / 2, h / 2, 0, crown);
+            strip(w, t, t, 0, h / 2, ix * d / 2, crown);
+        });
+        return this.mergeGeometries(geos);
+    };
+
+    /**
+     * Thin glowing circuit lines: the box edges plus a few floor bands traced
+     * round it, like the wireframe light-traces of a data-space.
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @param {Number} colour Hex int colour.
+     * @param {Boolean} plain Edges only, no bands.
+     * @return {Object} A Three.BufferGeometry of line segments, centred on the box.
+     */
+    Cyberspace.prototype.circuitGeometry = function(w, h, d, colour, plain) {
+        var THREE = this.THREE;
+        var edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d));
+        var pts = Array.prototype.slice.call(edges.attributes.position.array);
+        var bands = plain ? 0 : 1 + Math.floor(Math.random() * 3);
+        var hw = w / 2 + 0.02;
+        var hd = d / 2 + 0.02;
+        var corners = [
+            [-hw, -hd], [hw, -hd], [hw, -hd], [hw, hd], [hw, hd], [-hw, hd], [-hw, hd], [-hw, -hd]
+        ];
+        for (var i = 0; i < bands; i++) {
+            var y = (Math.random() - 0.5) * h * 0.8;
+            for (var c = 0; c < corners.length; c++) {
+                pts.push(corners[c][0], y, corners[c][1]);
+            }
+        }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
+        return this.paintGeometry(geo, colour);
+    };
+
+    /**
+     * The shared material for neon edges: additive vertex-coloured strips, or
+     * vertex-coloured lines for a 'line' palette (a neon accent, dimmer by day).
+     *
+     * @param {Number} opacity Line opacity (lines only; strips use their own).
+     * @return {Object} A Three material.
+     */
+    Cyberspace.prototype.neonEdgeMaterial = function(opacity) {
+        var THREE = this.THREE;
+        var lines = this.palette.neonEdges !== true;
+        var key = lines ? 'edgeline_' + opacity.toFixed(3) : 'edgestrip';
+        if (!this.matCache[key]) {
+            this.matCache[key] = lines
+                ? new THREE.LineBasicMaterial({vertexColors: true, transparent: true, opacity: opacity})
+                : new THREE.MeshBasicMaterial({
+                    vertexColors: true, transparent: true, opacity: 0.45 + this.day.neon * 0.45,
+                    depthWrite: false, blending: THREE.AdditiveBlending
+                });
+        }
+        return this.matCache[key];
+    };
+
+    /**
+     * Wrap edge geometry from neonOutlineGeometry (or plain circuitGeometry
+     * lines) in the matching object: strips as a mesh, lines as line segments.
+     *
+     * @param {Object} geo The edge geometry.
+     * @param {Number} lineOpacity Opacity when drawn as lines.
+     * @return {Object} A Three.Mesh or Three.LineSegments.
+     */
+    Cyberspace.prototype.neonEdgeObject = function(geo, lineOpacity) {
+        var THREE = this.THREE;
+        var mat = this.neonEdgeMaterial(lineOpacity);
+        return mat.isLineBasicMaterial ? new THREE.LineSegments(geo, mat) : new THREE.Mesh(geo, mat);
     };
 
     /**
@@ -1949,76 +2167,16 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * Glowing neon strips up the four vertical corners of a box and round its
-     * crown, in two different accent colours (a neon accent, so dimmer by day).
+     * crown in two accent colours (or thin circuit lines for a 'line' palette),
+     * as one object centred on the box.
      *
      * @param {Number} w Box width.
      * @param {Number} h Box height.
      * @param {Number} d Box depth.
-     * @return {Object} A Three.Group centred on the box centre.
+     * @return {Object} A Three.Mesh or Three.LineSegments.
      */
     Cyberspace.prototype.neonOutline = function(w, h, d) {
-        var THREE = this.THREE;
-        var group = new THREE.Group();
-        var opacity = 0.45 + this.day.neon * 0.45;
-        var self = this;
-        if (this.palette.neonEdges === 'line') {
-            return this.circuitOutline(w, h, d);
-        }
-        var strip = function(sx, sy, sz, x, y, z, colour) {
-            var mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(sx, sy, sz),
-                new THREE.MeshBasicMaterial({
-                    color: colour, transparent: true, opacity: opacity,
-                    depthWrite: false, blending: THREE.AdditiveBlending
-                })
-            );
-            mesh.position.set(x, y, z);
-            group.add(mesh);
-        };
-        var t = 0.16;
-        var corner = self.accentColour();
-        var crown = self.accentColour();
-        [-1, 1].forEach(function(ix) {
-            [-1, 1].forEach(function(iz) {
-                strip(t, h, t, ix * w / 2, 0, iz * d / 2, corner);
-            });
-            strip(t, t, d, ix * w / 2, h / 2, 0, crown);
-            strip(w, t, t, 0, h / 2, ix * d / 2, crown);
-        });
-        return group;
-    };
-
-    /**
-     * Thin glowing circuit lines: the box edges plus a few floor bands traced
-     * round it, like the wireframe light-traces of a data-space.
-     *
-     * @param {Number} w Box width.
-     * @param {Number} h Box height.
-     * @param {Number} d Box depth.
-     * @return {Object} A Three.Group centred on the box centre.
-     */
-    Cyberspace.prototype.circuitOutline = function(w, h, d) {
-        var THREE = this.THREE;
-        var group = new THREE.Group();
-        var mat = new THREE.LineBasicMaterial({
-            color: this.accentColour(), transparent: true, opacity: 0.55 + this.day.neon * 0.4
-        });
-        group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), mat));
-        var bands = 1 + Math.floor(Math.random() * 3);
-        for (var i = 0; i < bands; i++) {
-            var y = (Math.random() - 0.5) * h * 0.8;
-            var hw = w / 2 + 0.02;
-            var hd = d / 2 + 0.02;
-            var corners = [
-                [-hw, -hd], [hw, -hd], [hw, -hd], [hw, hd], [hw, hd], [-hw, hd], [-hw, hd], [-hw, -hd]
-            ];
-            var pts = [];
-            for (var c = 0; c < corners.length; c++) {
-                pts.push(new THREE.Vector3(corners[c][0], y, corners[c][1]));
-            }
-            group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
-        }
-        return group;
+        return this.neonEdgeObject(this.neonOutlineGeometry(w, h, d), 0.55 + this.day.neon * 0.4);
     };
 
     /**
@@ -2079,22 +2237,36 @@ define('format_mnemo/vr', [], function() {
         var tex = this.codeRainTexture();
         var opacity = 0.35 + this.day.night * 0.5;
         var count = typeof this.palette.codeRain === 'number' ? this.palette.codeRain : 26;
+        // Columns are merged into three meshes, one per scroll speed, each with
+        // its own scrolling copy of the glyph texture (three draw calls, not one
+        // per column). Each column's colour and start offset are baked in.
+        var speeds = [0.1, 0.18, 0.28];
+        var groups = [[], [], []];
+        var dummy = new THREE.Object3D();
         for (var i = 0; i < count; i++) {
+            var h = 30 + Math.random() * 50;
+            var geo = new THREE.PlaneGeometry(1.2 + Math.random() * 1.4, h);
+            this.transformUvs(geo, 1, 1, 0, Math.random());
+            var side = Math.random() < 0.5 ? -1 : 1;
+            dummy.position.set(side * (30 + Math.random() * 110), h / 2, 20 - Math.random() * 300);
+            dummy.lookAt(0, dummy.position.y, dummy.position.z + 40);
+            dummy.updateMatrix();
+            geo.applyMatrix4(dummy.matrix);
+            groups[i % 3].push(this.paintGeometry(geo, this.accentColour(true)));
+        }
+        for (var g = 0; g < groups.length; g++) {
+            if (!groups[g].length) {
+                continue;
+            }
             var colTex = tex.clone();
             colTex.wrapT = THREE.RepeatWrapping;
-            colTex.offset.y = Math.random();
             colTex.needsUpdate = true;
-            var h = 30 + Math.random() * 50;
             var mat = new THREE.MeshBasicMaterial({
-                map: colTex, color: this.accentColour(true), transparent: true, opacity: opacity,
+                map: colTex, vertexColors: true, transparent: true, opacity: opacity,
                 depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false
             });
-            var col = new THREE.Mesh(new THREE.PlaneGeometry(1.2 + Math.random() * 1.4, h), mat);
-            var side = Math.random() < 0.5 ? -1 : 1;
-            col.position.set(side * (30 + Math.random() * 110), h / 2, 20 - Math.random() * 300);
-            col.lookAt(0, col.position.y, col.position.z + 40);
-            this.scene.add(col);
-            this.codeRain.push({tex: colTex, speed: 0.08 + Math.random() * 0.22});
+            this.scene.add(new THREE.Mesh(this.mergeGeometries(groups[g]), mat));
+            this.codeRain.push({tex: colTex, speed: speeds[g]});
         }
     };
 
@@ -2142,8 +2314,13 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         // Alternate the two coldest, most monumental styles.
         var styleKeys = ['neomilitarism', 'entropism'];
+        // The slabs and their edges are static, so they are merged: one mesh
+        // per style for the bodies and one for all the edge glow.
+        var bodies = {};
+        var edges = [];
         for (var i = 0; i < n; i++) {
-            var style = STYLES[styleKeys[i % styleKeys.length]];
+            var key = styleKeys[i % styleKeys.length];
+            var style = STYLES[key];
             var side = Math.random() < 0.5 ? -1 : 1;
             var x = side * (34 + Math.random() * 120);
             var z = 30 - Math.random() * 320;
@@ -2151,36 +2328,22 @@ define('format_mnemo/vr', [], function() {
             var d = 8 + Math.random() * 16;
             var h = 26 + Math.random() * 60;
 
-            // Lit slab with a wall of windows on every face.
-            var body = new THREE.Mesh(
-                new THREE.BoxGeometry(w, h, d),
-                this.facadeMaterial(style, w, h)
-            );
-            body.position.set(x, h / 2, z);
-            body.castShadow = true;
-            body.receiveShadow = true;
-            this.scene.add(body);
+            // Lit slab with a wall of windows on every face; the facade repeat
+            // is baked into its UVs so every slab of a style shares a material.
+            var rep = this.facadeRepeat(w, h);
+            var body = this.transformUvs(new THREE.BoxGeometry(w, h, d), rep[0], rep[1], 0, 0);
+            (bodies[key] = bodies[key] || []).push(body.translate(x, h / 2, z));
             // Register the slab as a solid so roaming traffic clears its roof
             // instead of flying through the skyline.
             this.recordFootprint(x, z, w, d, h);
 
             // Crown edge glow (a neon accent, so it fades by day) and an
             // occasional blinking aviation beacon. Neon palettes trace the
-            // corners and crown with glowing strips instead.
-            if (this.palette.neonEdges) {
-                var outline = this.neonOutline(w, h, d);
-                outline.position.copy(body.position);
-                this.scene.add(outline);
-            } else {
-                var edges = new THREE.LineSegments(
-                    new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
-                    new THREE.LineBasicMaterial({
-                        color: style.edge, transparent: true, opacity: 0.2 + this.day.neon * 0.4
-                    })
-                );
-                edges.position.copy(body.position);
-                this.scene.add(edges);
-            }
+            // corners and crown with glowing strips or circuit lines instead.
+            var edge = this.palette.neonEdges
+                ? this.neonOutlineGeometry(w, h, d)
+                : this.circuitGeometry(w, h, d, style.edge, true);
+            edges.push(edge.translate(x, h / 2, z));
 
             if (Math.random() < 0.5) {
                 var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -2192,6 +2355,18 @@ define('format_mnemo/vr', [], function() {
                 this.beacons.push(beacon);
                 this.scene.add(beacon);
             }
+        }
+        for (var k in bodies) {
+            var slab = new THREE.Mesh(
+                this.mergeGeometries(bodies[k]), this.facadeMaterial(STYLES[k], MODULE_W, MODULE_H)
+            );
+            slab.castShadow = true;
+            slab.receiveShadow = true;
+            this.scene.add(slab);
+        }
+        if (edges.length) {
+            var opacity = this.palette.neonEdges ? 0.55 + this.day.neon * 0.4 : 0.2 + this.day.neon * 0.4;
+            this.scene.add(this.neonEdgeObject(this.mergeGeometries(edges), opacity));
         }
         this.buildLandmarks(this.palette.landmarks || 0);
     };
@@ -2236,6 +2411,7 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         var self = this;
         var primary = this.palette.primary;
+        this.slumGeos = [];
 
         // A couple of ribbons crossing the avenue at different heights.
         var ribbons = [
@@ -2279,6 +2455,14 @@ define('format_mnemo/vr', [], function() {
                 self.buildSlumCluster(px, r.z);
             }
         });
+        // All the slum boxes under every highway, as one mesh.
+        if (this.slumGeos.length) {
+            var slums = new THREE.Mesh(
+                this.mergeGeometries(this.slumGeos), this.facadeMaterial(STYLES.entropism, MODULE_W, MODULE_H)
+            );
+            this.scene.add(slums);
+        }
+        this.slumGeos = [];
     };
 
     /**
@@ -2290,8 +2474,9 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSlumCluster = function(cx, cz) {
         var THREE = this.THREE;
-        var style = STYLES.entropism;
-        var mat = this.facadeMaterial(style, 4, 5);
+        // Boxes are batched into this.slumGeos and merged into one mesh by
+        // buildElevatedHighways; the slum facade repeat is baked into the UVs.
+        var rep = this.facadeRepeat(4, 5);
         var y = 0;
         var boxes = 3 + Math.floor(Math.random() * 4);
         for (var b = 0; b < boxes; b++) {
@@ -2300,12 +2485,11 @@ define('format_mnemo/vr', [], function() {
             var h = 2 + Math.random() * 2.4;
             var jx = (Math.random() - 0.5) * 2.2;
             var jz = (Math.random() - 0.5) * 2.2;
-            var box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-            box.position.set(cx + jx, y + h / 2, cz + jz);
-            box.rotation.y = Math.random() * 0.5;
-            this.scene.add(box);
+            var rot = Math.random() * 0.5;
+            var box = this.transformUvs(new THREE.BoxGeometry(w, h, d), rep[0], rep[1], 0, 0);
+            this.slumGeos.push(box.rotateY(rot).translate(cx + jx, y + h / 2, cz + jz));
             // Register each slum box as a solid so traffic clears the cluster.
-            this.recordFootprint(cx + jx, cz + jz, w, d, y + h, box.rotation.y);
+            this.recordFootprint(cx + jx, cz + jz, w, d, y + h, rot);
             y += h * (0.7 + Math.random() * 0.2);
         }
     };

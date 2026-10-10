@@ -3685,6 +3685,45 @@ const scenarios = [
         }
     },
     {
+        name: 'batching: mergeGeometries joins painted, UV-baked boxes into one geometry',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE};
+            const a = CS.prototype.paintGeometry.call(self, new THREE.BoxGeometry(1, 1, 1), 0xff0000);
+            const b = CS.prototype.paintGeometry.call(self, new THREE.BoxGeometry(1, 1, 1).translate(5, 0, 0), 0x00ff00);
+            CS.prototype.transformUvs.call(self, b, 0.5, 0.5, 0.5, 0);
+            const m = CS.prototype.mergeGeometries.call(self, [a, b]);
+            const n = m.attributes.position.count;
+            const maxU = Math.max(...m.attributes.uv.array.filter((v, i) => i % 2 === 0).slice(36));
+            const lastR = m.attributes.color.getX(n - 1);
+            const lastG = m.attributes.color.getY(n - 1);
+            const pass = n === 72 && !m.index && !!m.attributes.normal && maxU <= 1 && lastR === 0 && lastG > 0.9;
+            return {pass, detail: `verts=${n} maxU=${maxU} last=${lastR},${lastG.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'batching: neon outline is one object (strips or circuit lines), not one per strip',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (edges) => {
+                const self = {THREE, day: {neon: 1}, matCache: {},
+                    palette: {primary: 0xff00ff, secondary: 0x00ffff, neonEdges: edges}};
+                ['accentColour', 'paintGeometry', 'mergeGeometries', 'neonOutlineGeometry', 'circuitGeometry',
+                    'neonEdgeMaterial', 'neonEdgeObject'].forEach((f) => {
+                    self[f] = CS.prototype[f];
+                });
+                return CS.prototype.neonOutline.call(self, 4, 10, 4);
+            };
+            const strips = mk(true);
+            const lines = mk('line');
+            const pass = strips.isMesh && strips.children.length === 0 && strips.geometry.attributes.color &&
+                lines.isLineSegments && lines.geometry.attributes.position.count >= 24;
+            return {pass, detail: `strips=${strips.type} lines=${lines.type}`};
+        }
+    },
+    {
         name: 'sky: one celestial body follows the clock (a big sun by day, a small moon by night)',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
