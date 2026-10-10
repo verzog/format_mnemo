@@ -39,12 +39,45 @@ define('format_mnemo/vr', [], function() {
 
     // Neon palettes: [primary, secondary] hex ints. Drives wayfinding colour
     // (topic gates, interactive highlights) so the admin choice still reads
-    // through the architectural styling.
+    // through the architectural styling. Optional extras give a palette a
+    // busier look: "accents" (colours the ambient signs, ads, beams and street
+    // glow pick from, instead of just primary/secondary), "windows" (lit window
+    // colours, which also packs the facades with more lit windows), "neonEdges"
+    // (glowing strips up tower corners and round their crowns), "gridGlow" (a
+    // brighter floor grid), "codeRain" (falling glyph columns, or how many),
+    // "glow" (a bloom multiplier), "windowDensity" (scales the extra lit
+    // windows) and "horizonGlow" ([strength, mix] of the night horizon glow).
+    // A neonEdges of 'line' traces thin glowing lines rather than strips. A
+    // third horizonGlow entry sets its colour (default: the primary). "rain"
+    // adds falling rain streaks, "landmarks" raises that many giant towers and
+    // "streams" limits code rain and search beams to those colours.
     var PALETTES = {
         cyan: {primary: 0x00e5ff, secondary: 0x0066ff, sky: 0x03060f, haze: 0x0a1830},
         amber: {primary: 0xffb300, secondary: 0xff5722, sky: 0x0a0600, haze: 0x2a1400},
         magenta: {primary: 0xff2bd6, secondary: 0x7c1fff, sky: 0x0a0210, haze: 0x24072a},
-        green: {primary: 0x39ff14, secondary: 0x00b3a4, sky: 0x00080a, haze: 0x04241c}
+        // Matrix green: Matrix green #00FF89, emerald teal #00C7AA, ice cyan
+        // #8BFFF3, fog green #74CDAA, void black #07100F and muted amber #D5B66B
+        // windows, with only the odd amber or red accent among the greens.
+        green: {
+            primary: 0x00ff89, secondary: 0x00c7aa, sky: 0x07100f, haze: 0x07100f, glow: 1.5,
+            accents: [0x00ff89, 0x00ff89, 0x00c7aa, 0x00c7aa, 0x8bfff3, 0x00e5cc, 0x00ff89, 0x00c7aa,
+                0xd5b66b, 0xff3b3b],
+            windows: [0xd5b66b, 0xe2c787, 0xc9a557, 0xeedca8], windowDensity: 0.55,
+            neonEdges: 'line', gridGlow: true, codeRain: 90, horizonGlow: [0.3, 0.3, 0x74cdaa],
+            rain: true, landmarks: 3, streams: [0x00ff89, 0x00c7aa, 0x8bfff3]
+        },
+        neon: {
+            primary: 0xff2bd6, secondary: 0x00e5ff, sky: 0x07020f, haze: 0x1c0630, glow: 1.6,
+            accents: [0xff2bd6, 0x00e5ff, 0xff7a1a, 0x9d4dff],
+            windows: [0xff7bd8, 0x6fe8ff, 0xffb35c, 0xb48cff, 0xfff2cf],
+            neonEdges: true
+        },
+        neonorange: {
+            primary: 0xff6a00, secondary: 0xff2b4e, sky: 0x04050f, haze: 0x0c0a24, glow: 1.6,
+            accents: [0xff6a00, 0xffa31a, 0xff2b4e, 0x2b8cff],
+            windows: [0xffa040, 0xffd08a, 0xff6a3d, 0x8fc8ff],
+            neonEdges: true
+        }
     };
 
     // Activity state colours.
@@ -283,6 +316,8 @@ define('format_mnemo/vr', [], function() {
         // superseded reader is dropped.
         this.readerSeq = 0;
         this.ads = []; // Holographic billboards that flicker.
+        this.codeRain = []; // Scrolling code-rain columns (Matrix palette).
+        this.rain = null; // Falling rain streaks (Matrix palette).
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
@@ -515,6 +550,11 @@ define('format_mnemo/vr', [], function() {
         var haze = new THREE.Color(this.palette.haze);
         var skyNight = new THREE.Color(0x05070f).lerp(haze, 0.5);
         var horizonNight = new THREE.Color(0x0b1222).lerp(haze, 0.6);
+        // Neon palettes light the night horizon with a city glow of their colour.
+        if (this.palette.glow) {
+            var hg = this.palette.horizonGlow || [0.18, 0.3];
+            horizonNight.lerp(new THREE.Color(hg[2] || this.palette.primary).multiplyScalar(hg[0]), hg[1]);
+        }
         var skyDay = new THREE.Color(0x8fb2d4);
         var horizonDay = new THREE.Color(0xccd7dd);
         var dusk = new THREE.Color(0xff8a4d);
@@ -618,9 +658,18 @@ define('format_mnemo/vr', [], function() {
 
             // Faint kerb grid; a neon accent, so it fades out in daylight.
             var grid = new THREE.GridHelper(600, 240, primary, secondary);
-            grid.material.opacity = 0.05 + d.night * 0.14;
+            grid.material.opacity = this.palette.gridGlow ? 0.18 + d.night * 0.3 : 0.05 + d.night * 0.14;
             grid.material.transparent = true;
             this.scene.add(grid);
+
+            // Falling glyph columns (Matrix-style palettes), in Grid as well as
+            // Cyberspace.
+            if (this.palette.codeRain) {
+                this.buildCodeRain();
+            }
+            if (this.palette.rain) {
+                this.buildRain();
+            }
         }
 
         // Gradient sky dome and the sun/moon disc.
@@ -685,6 +734,11 @@ define('format_mnemo/vr', [], function() {
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, 8, 256);
         var tex = new THREE.CanvasTexture(canvas);
+        // Neon palettes read the gradient as sRGB so their dark night skies stay
+        // dark (the older palettes keep their established, lighter skies).
+        if (this.palette && this.palette.glow) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
         var dome = new THREE.Mesh(
             new THREE.SphereGeometry(600, 24, 16),
             new THREE.MeshBasicMaterial({
@@ -1343,6 +1397,27 @@ define('format_mnemo/vr', [], function() {
     var MODULE_H = 11; // Six floors.
 
     /**
+     * The facade tile layout for a style under the current palette. Palettes
+     * with their own window colours ("windows") pack twice the window columns
+     * and rows into a higher-resolution tile (many small, crisp windows, like a
+     * dense skyline) and light more of them, scaled by "windowDensity".
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} {mix, suffix, size, cols, rows, density}.
+     */
+    Cyberspace.prototype.facadeLayout = function(style) {
+        var mix = this.palette.windows || null;
+        if (!mix) {
+            return {mix: null, suffix: '', size: 512, cols: 4, rows: 6, density: style.density};
+        }
+        var scale = this.palette.windowDensity || 1;
+        return {
+            mix: mix, suffix: '_mix', size: 1024, cols: 8, rows: 12,
+            density: Math.min(0.7, (style.density * 1.6 + 0.08) * scale)
+        };
+    };
+
+    /**
      * Build the seamless, tileable facade texture set for a style once (surface
      * colour, bump relief, roughness and emissive windows), cached per style.
      * The tile is a small block of floors and window columns; facadeMaterial
@@ -1352,14 +1427,15 @@ define('format_mnemo/vr', [], function() {
      * @return {Object} {map, bump, rough, emissive} base Three.CanvasTextures.
      */
     Cyberspace.prototype.facadeTextures = function(style) {
-        var key = 'facbase_' + style.body + '_' + style.lit + '_' + style.rough;
+        var layout = this.facadeLayout(style);
+        var key = 'facbase_' + style.body + '_' + style.lit + '_' + style.rough + layout.suffix;
         if (this.texCache[key]) {
             return this.texCache[key];
         }
         var THREE = this.THREE;
-        var SIZE = 512;
-        var cols = 4;
-        var rows = 6;
+        var SIZE = layout.size;
+        var cols = layout.cols;
+        var rows = layout.rows;
         var cw = SIZE / cols;
         var ch = SIZE / rows;
         var frame = Math.min(cw, ch) * 0.16; // Concrete gutter around a window.
@@ -1375,6 +1451,8 @@ define('format_mnemo/vr', [], function() {
         var glassTop = new THREE.Color(0x0c1119);
         var glassBot = base.clone().multiplyScalar(0.42).lerp(new THREE.Color(0x121a24), 0.6);
         var lit = new THREE.Color(style.lit);
+        // Palettes with their own window colours light far more of the windows.
+        var density = layout.density;
         var concreteRough = Math.round(style.rough * 255);
 
         // Bases.
@@ -1436,10 +1514,12 @@ define('format_mnemo/vr', [], function() {
                 r.fillRect(wx, wy, ww, wh);
 
                 // Some windows are lit at night.
-                if (Math.random() < style.density) {
+                if (Math.random() < density) {
                     var dim = style.wireframe && Math.random() < 0.5;
                     e.globalAlpha = dim ? 0.35 : 0.9;
-                    e.fillStyle = '#' + lit.getHexString();
+                    e.fillStyle = '#' + (layout.mix
+                        ? new THREE.Color(layout.mix[Math.floor(Math.random() * layout.mix.length)])
+                        : lit).getHexString();
                     e.fillRect(wx, wy, ww, wh);
                     e.globalAlpha = 1;
                 }
@@ -1636,7 +1716,8 @@ define('format_mnemo/vr', [], function() {
         // FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
         // gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
         var ry = this.facadeStoreys(height) / FLOORS_PER_MODULE;
-        var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry;
+        var mix = !!this.palette.windows;
+        var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry + (mix ? '|mix' : '');
         if (this.matCache[key]) {
             return this.matCache[key];
         }
@@ -1657,7 +1738,8 @@ define('format_mnemo/vr', [], function() {
             roughnessMap: rough,
             roughness: 1,
             metalness: style.metal,
-            emissive: new THREE.Color(style.lit),
+            // Mixed window colours live in the emissive map itself.
+            emissive: new THREE.Color(mix ? 0xffffff : style.lit),
             emissiveMap: emissive,
             emissiveIntensity: this.day.windowEmissive
         });
@@ -1853,6 +1935,204 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * A random ambient neon colour from the palette: one of its accents, or
+     * its primary/secondary pair when it has none.
+     *
+     * @param {Boolean} stream Pick from the palette's data-stream colours, if any.
+     * @return {Number} Hex int colour.
+     */
+    Cyberspace.prototype.accentColour = function(stream) {
+        var pool = (stream && this.palette.streams) || this.palette.accents ||
+            [this.palette.primary, this.palette.secondary];
+        return pool[Math.floor(Math.random() * pool.length)];
+    };
+
+    /**
+     * Glowing neon strips up the four vertical corners of a box and round its
+     * crown, in two different accent colours (a neon accent, so dimmer by day).
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @return {Object} A Three.Group centred on the box centre.
+     */
+    Cyberspace.prototype.neonOutline = function(w, h, d) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var opacity = 0.45 + this.day.neon * 0.45;
+        var self = this;
+        if (this.palette.neonEdges === 'line') {
+            return this.circuitOutline(w, h, d);
+        }
+        var strip = function(sx, sy, sz, x, y, z, colour) {
+            var mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(sx, sy, sz),
+                new THREE.MeshBasicMaterial({
+                    color: colour, transparent: true, opacity: opacity,
+                    depthWrite: false, blending: THREE.AdditiveBlending
+                })
+            );
+            mesh.position.set(x, y, z);
+            group.add(mesh);
+        };
+        var t = 0.16;
+        var corner = self.accentColour();
+        var crown = self.accentColour();
+        [-1, 1].forEach(function(ix) {
+            [-1, 1].forEach(function(iz) {
+                strip(t, h, t, ix * w / 2, 0, iz * d / 2, corner);
+            });
+            strip(t, t, d, ix * w / 2, h / 2, 0, crown);
+            strip(w, t, t, 0, h / 2, ix * d / 2, crown);
+        });
+        return group;
+    };
+
+    /**
+     * Thin glowing circuit lines: the box edges plus a few floor bands traced
+     * round it, like the wireframe light-traces of a data-space.
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @return {Object} A Three.Group centred on the box centre.
+     */
+    Cyberspace.prototype.circuitOutline = function(w, h, d) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var mat = new THREE.LineBasicMaterial({
+            color: this.accentColour(), transparent: true, opacity: 0.55 + this.day.neon * 0.4
+        });
+        group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), mat));
+        var bands = 1 + Math.floor(Math.random() * 3);
+        for (var i = 0; i < bands; i++) {
+            var y = (Math.random() - 0.5) * h * 0.8;
+            var hw = w / 2 + 0.02;
+            var hd = d / 2 + 0.02;
+            var corners = [
+                [-hw, -hd], [hw, -hd], [hw, -hd], [hw, hd], [hw, hd], [-hw, hd], [-hw, hd], [-hw, -hd]
+            ];
+            var pts = [];
+            for (var c = 0; c < corners.length; c++) {
+                pts.push(new THREE.Vector3(corners[c][0], y, corners[c][1]));
+            }
+            group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        }
+        return group;
+    };
+
+    /**
+     * Light, persistent rain: short pale streaks in a box that follows the
+     * viewer, falling and wrapping each frame (see updateRain).
+     */
+    Cyberspace.prototype.buildRain = function() {
+        var THREE = this.THREE;
+        var count = 2400;
+        var pos = new Float32Array(count * 6);
+        for (var i = 0; i < count; i++) {
+            var x = (Math.random() - 0.5) * 120;
+            var y = Math.random() * 60;
+            var z = (Math.random() - 0.5) * 120;
+            pos.set([x, y, z, x + 0.05, y - 0.9, z], i * 6);
+        }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        var rain = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+            color: 0x9fe8d0, transparent: true, opacity: 0.32, depthWrite: false
+        }));
+        rain.frustumCulled = false;
+        this.scene.add(rain);
+        this.rain = rain;
+    };
+
+    /**
+     * Drop the rain streaks, wrap them back to the top, and keep the rain box
+     * centred on the viewer.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateRain = function(dt) {
+        if (!this.rain) {
+            return;
+        }
+        var attr = this.rain.geometry.attributes.position;
+        var a = attr.array;
+        var fall = 38 * dt;
+        for (var i = 0; i < a.length; i += 6) {
+            a[i + 1] -= fall;
+            a[i + 4] -= fall;
+            if (a[i + 4] < 0) {
+                a[i + 1] += 60;
+                a[i + 4] += 60;
+            }
+        }
+        attr.needsUpdate = true;
+        this.rain.position.set(this.player.position.x, 0, this.player.position.z);
+    };
+
+    /**
+     * Falling glyph columns: tall additive planes of green code that scroll
+     * downward (see tick), standing among and beyond the streets.
+     */
+    Cyberspace.prototype.buildCodeRain = function() {
+        var THREE = this.THREE;
+        var tex = this.codeRainTexture();
+        var opacity = 0.35 + this.day.night * 0.5;
+        var count = typeof this.palette.codeRain === 'number' ? this.palette.codeRain : 26;
+        for (var i = 0; i < count; i++) {
+            var colTex = tex.clone();
+            colTex.wrapT = THREE.RepeatWrapping;
+            colTex.offset.y = Math.random();
+            colTex.needsUpdate = true;
+            var h = 30 + Math.random() * 50;
+            var mat = new THREE.MeshBasicMaterial({
+                map: colTex, color: this.accentColour(true), transparent: true, opacity: opacity,
+                depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false
+            });
+            var col = new THREE.Mesh(new THREE.PlaneGeometry(1.2 + Math.random() * 1.4, h), mat);
+            var side = Math.random() < 0.5 ? -1 : 1;
+            col.position.set(side * (30 + Math.random() * 110), h / 2, 20 - Math.random() * 300);
+            col.lookAt(0, col.position.y, col.position.z + 40);
+            this.scene.add(col);
+            this.codeRain.push({tex: colTex, speed: 0.08 + Math.random() * 0.22});
+        }
+    };
+
+    /**
+     * A tall canvas texture of stacked code glyphs, brightest at the head of
+     * each run, for the code-rain columns (tinted by the material colour).
+     *
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.codeRainTexture = function() {
+        if (this.texCache.codeRain) {
+            return this.texCache.codeRain;
+        }
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 1024;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, 64, 1024);
+        var glyphs = '0123456789アカサタナハマヤラワ<>=+*';
+        ctx.font = 'bold 26px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (var c = 0; c < 2; c++) {
+            for (var row = 0; row < 36; row++) {
+                // Runs fade out behind a bright head every few glyphs.
+                var fade = 1 - ((row + c * 5) % 12) / 12;
+                ctx.fillStyle = 'rgba(255,255,255,' + (0.15 + fade * 0.85).toFixed(2) + ')';
+                ctx.fillText(glyphs.charAt(Math.floor(Math.random() * glyphs.length)), 18 + c * 28, row * 28);
+            }
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        this.texCache.codeRain = tex;
+        return tex;
+    };
+
+    /**
      * Corporate mega-buildings: massive slab apartment complexes far behind the
      * streets, their faces a wall of tiny window lights receding into smog.
      *
@@ -1885,15 +2165,22 @@ define('format_mnemo/vr', [], function() {
             this.recordFootprint(x, z, w, d, h);
 
             // Crown edge glow (a neon accent, so it fades by day) and an
-            // occasional blinking aviation beacon.
-            var edges = new THREE.LineSegments(
-                new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
-                new THREE.LineBasicMaterial({
-                    color: style.edge, transparent: true, opacity: 0.2 + this.day.neon * 0.4
-                })
-            );
-            edges.position.copy(body.position);
-            this.scene.add(edges);
+            // occasional blinking aviation beacon. Neon palettes trace the
+            // corners and crown with glowing strips instead.
+            if (this.palette.neonEdges) {
+                var outline = this.neonOutline(w, h, d);
+                outline.position.copy(body.position);
+                this.scene.add(outline);
+            } else {
+                var edges = new THREE.LineSegments(
+                    new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+                    new THREE.LineBasicMaterial({
+                        color: style.edge, transparent: true, opacity: 0.2 + this.day.neon * 0.4
+                    })
+                );
+                edges.position.copy(body.position);
+                this.scene.add(edges);
+            }
 
             if (Math.random() < 0.5) {
                 var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -1905,6 +2192,39 @@ define('format_mnemo/vr', [], function() {
                 this.beacons.push(beacon);
                 this.scene.add(beacon);
             }
+        }
+        this.buildLandmarks(this.palette.landmarks || 0);
+    };
+
+    /**
+     * A few giant landmark towers (150-250 m) far back in the skyline, fading
+     * up into the fog, for palettes that ask for them.
+     *
+     * @param {Number} n How many landmarks to raise.
+     */
+    Cyberspace.prototype.buildLandmarks = function(n) {
+        var THREE = this.THREE;
+        var style = STYLES.neomilitarism;
+        for (var i = 0; i < n; i++) {
+            var w = 18 + Math.random() * 14;
+            var h = 150 + Math.random() * 100;
+            var x = (i % 2 ? 1 : -1) * (60 + Math.random() * 120);
+            var z = -200 - Math.random() * 180;
+            var body = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), this.facadeMaterial(style, w, h));
+            body.position.set(x, h / 2, z);
+            this.scene.add(body);
+            this.recordFootprint(x, z, w, w, h);
+            var outline = this.neonOutline(w, h, w);
+            outline.position.copy(body.position);
+            this.scene.add(outline);
+            // A spire light on top.
+            var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
+                color: this.palette.secondary, transparent: true, depthWrite: false, opacity: 0.9
+            }));
+            beacon.scale.set(3, 3, 1);
+            beacon.position.set(x, h + 2, z);
+            this.beacons.push(beacon);
+            this.scene.add(beacon);
         }
     };
 
@@ -1934,7 +2254,8 @@ define('format_mnemo/vr', [], function() {
                 var line = new THREE.Mesh(
                     new THREE.BoxGeometry(r.len, 0.12, 0.12),
                     new THREE.MeshBasicMaterial({
-                        color: primary, transparent: true, opacity: 0.8
+                        color: self.palette.accents ? self.accentColour() : primary,
+                        transparent: true, opacity: 0.8
                     })
                 );
                 line.position.set(0, r.y - 0.55, r.z + zoff);
@@ -1995,9 +2316,11 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildHoloAds = function() {
         var THREE = this.THREE;
-        var adColours = [0xff2bd6, 0x00e5ff, 0xffb300, 0x39ff14, 0xff3b6b];
+        var adColours = this.palette.accents || [0xff2bd6, 0x00e5ff, 0xffb300, 0x39ff14, 0xff3b6b];
         var glyphs = 'アキサナ企正力未来電';
-        for (var i = 0; i < 8; i++) {
+        // Busier palettes crowd the skyline with more ads.
+        var count = this.palette.accents ? 14 : 8;
+        for (var i = 0; i < count; i++) {
             var colour = adColours[i % adColours.length];
             var tex = this.adTexture(colour, glyphs, i);
             var vertical = Math.random() < 0.5;
@@ -2077,7 +2400,7 @@ define('format_mnemo/vr', [], function() {
         // Search beams only cut through the dark, so they fade out by day.
         var opacity = 0.02 + this.day.night * 0.06;
         for (var i = 0; i < 8; i++) {
-            var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
+            var colour = this.accentColour(true);
             var beam = new THREE.Mesh(
                 new THREE.CylinderGeometry(0.15, 1.6, 90, 6, 1, true),
                 new THREE.MeshBasicMaterial({
@@ -4526,7 +4849,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.wetStreak = function(cx, cz, w) {
         var THREE = this.THREE;
-        var colour = Math.random() < 0.5 ? this.palette.primary : this.palette.secondary;
+        var colour = this.accentColour();
         var streak = new THREE.Mesh(
             new THREE.PlaneGeometry(w, 14 + Math.random() * 18),
             new THREE.MeshBasicMaterial({
@@ -4685,12 +5008,16 @@ define('format_mnemo/vr', [], function() {
         mass.receiveShadow = true;
         body.add(mass);
 
-        var edges = new THREE.LineSegments(
-            new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
-            new THREE.LineBasicMaterial({
-                color: style.edge, transparent: true, opacity: 0.3 + this.day.neon * 0.55
-            })
-        );
+        // Neon palettes give the tall towers glowing corner strips and crown.
+        var edges = style.form === 'tower' && this.palette.neonEdges
+            ? this.neonOutline(w, h, d)
+            : new THREE.LineSegments(
+                new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
+                new THREE.LineBasicMaterial({
+                    color: this.palette.neonEdges ? this.accentColour() : style.edge,
+                    transparent: true, opacity: 0.3 + this.day.neon * 0.55
+                })
+            );
         edges.position.y = h / 2;
         body.add(edges);
 
@@ -9647,6 +9974,11 @@ define('format_mnemo/vr', [], function() {
             ad.mat.opacity = ad.base * (0.72 + 0.28 * flick);
         }
 
+        // Scroll the code-rain columns downward.
+        for (var cr = 0; cr < this.codeRain.length; cr++) {
+            this.codeRain[cr].tex.offset.y += this.codeRain[cr].speed * dt;
+        }
+
         // Blink the rooftop beacons roughly once a second.
         var on = (Math.floor(this.time * 1.3) % 2) === 0;
         for (var b = 0; b < this.beacons.length; b++) {
@@ -9658,6 +9990,9 @@ define('format_mnemo/vr', [], function() {
 
         // Glide the flying-car traffic.
         this.updateTraffic(dt);
+
+        // Let the rain fall.
+        this.updateRain(dt);
 
         // Slowly revolve the Void's planet field (one turn per hour).
         this.spinPlanets(dt);
@@ -9766,6 +10101,10 @@ define('format_mnemo/vr', [], function() {
         }
         var w = Math.max(1, this.root.clientWidth);
         var h = Math.max(1, this.root.clientHeight || 480);
+        // The scene target matches the canvas's device pixels, so high-DPI
+        // screens stay sharp; the bloom targets stay at half the CSS size so the
+        // glow keeps the same on-screen spread at any pixel ratio.
+        var pr = this.renderer.getPixelRatio();
         // Multisample the scene target so geometry/neon edges stay smooth; the
         // plain default framebuffer's antialias no longer applies once we render
         // through an offscreen target.
@@ -9775,7 +10114,7 @@ define('format_mnemo/vr', [], function() {
         // All post targets stay linear: tone mapping is applied writing the
         // scene here, bloom is summed in linear light, and the final composite
         // encodes to sRGB for display (see compositeMat).
-        var scene = new THREE.WebGLRenderTarget(w, h, full);
+        var scene = new THREE.WebGLRenderTarget(Math.round(w * pr), Math.round(h * pr), full);
         var bright = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurA = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurB = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
@@ -9791,7 +10130,9 @@ define('format_mnemo/vr', [], function() {
         ].join('\n');
 
         var thresholdMat = new THREE.ShaderMaterial({
-            uniforms: {tDiffuse: {value: null}, threshold: {value: 0.62}, knee: {value: 0.2}},
+            uniforms: {
+                tDiffuse: {value: null}, threshold: {value: this.palette.glow ? 0.5 : 0.62}, knee: {value: 0.2}
+            },
             toneMapped: false,
             vertexShader: vert,
             fragmentShader: [
@@ -9830,7 +10171,8 @@ define('format_mnemo/vr', [], function() {
 
         // Bloom is subtle by day (so the bright sky does not wash out) and
         // strong after dark, when neon and lit windows should blaze.
-        var bloomStrength = 0.12 + 0.9 * this.day.night;
+        // Neon palettes glow harder (palette.glow scales the bloom).
+        var bloomStrength = (0.12 + 0.9 * this.day.night) * (this.palette.glow || 1);
         var compositeMat = new THREE.ShaderMaterial({
             uniforms: {tScene: {value: null}, tBloom: {value: null}, strength: {value: bloomStrength}},
             toneMapped: false,
@@ -10285,7 +10627,8 @@ define('format_mnemo/vr', [], function() {
         this.renderer.setSize(w, h, false);
         if (this.postfx) {
             var fx = this.postfx;
-            fx.scene.setSize(w, h);
+            var pr = this.renderer.getPixelRatio();
+            fx.scene.setSize(Math.round(w * pr), Math.round(h * pr));
             fx.bright.setSize(w / 2, h / 2);
             fx.blurA.setSize(w / 2, h / 2);
             fx.blurB.setSize(w / 2, h / 2);
