@@ -321,6 +321,8 @@ define('format_mnemo/vr', [], function() {
         this.codeRain = []; // Scrolling code-rain columns (Matrix palette).
         this.rain = null; // Falling rain streaks (Matrix palette).
         this.wetMaterials = []; // Road/ground materials that reflect the city.
+        this.wetEnv = null; // The current reflection capture (a render target).
+        this.wetCaptureTimer = null; // Pending reflection re-capture.
         this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
@@ -2212,15 +2214,27 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Advance the weather each frame: the falling rain and the drifting mist.
+     * Advance the weather each frame: the falling rain and the drifting mist,
+     * both kept centred on the viewer.
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateWeather = function(dt) {
         this.updateRain(dt);
+        // The mist layers follow the viewer (so they cover any length of
+        // avenue) while their pattern stays put in the world: the texture is
+        // shifted by the viewer's position, plus a slow drift. Each 320 m plane
+        // repeats the pattern 4 times; local +y runs along world -z.
+        var px = this.player.position.x;
+        var pz = this.player.position.z;
+        var perMetre = 4 / 320;
         for (var i = 0; i < this.mists.length; i++) {
-            this.mists[i].tex.offset.x += this.mists[i].dx * dt;
-            this.mists[i].tex.offset.y += this.mists[i].dy * dt;
+            var m = this.mists[i];
+            m.ox += m.dx * dt;
+            m.oy += m.dy * dt;
+            m.mesh.position.x = px;
+            m.mesh.position.z = pz;
+            m.tex.offset.set(m.ox + px * perMetre, m.oy - pz * perMetre);
         }
     };
 
@@ -2268,7 +2282,11 @@ define('format_mnemo/vr', [], function() {
         tex.needsUpdate = true;
         mat.roughnessMap = tex;
         mat.roughness = 1;
-        mat.metalness = Math.max(mat.metalness, 0.6);
+        // An uploaded surface texture keeps the low metalness that lets its
+        // colour show (see showSurfaceTexture); bare asphalt turns glossy.
+        if (!mat.map) {
+            mat.metalness = Math.max(mat.metalness, 0.6);
+        }
         mat.needsUpdate = true;
         this.wetMaterials.push(mat);
     };
@@ -2325,6 +2343,9 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var THREE = this.THREE;
+        if (this.wetEnv) {
+            this.wetEnv.dispose();
+        }
         var pmrem = new THREE.PMREMGenerator(this.renderer);
         // PMREM captures from the origin; lift the eye 1.8 m by dropping the
         // scene, then put it back. The low mist is hidden for the capture so it
@@ -2351,6 +2372,27 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Retake the wet-street reflection shortly after an asynchronous load (a
+     * building model or street props) changes the static scene. Debounced so
+     * a burst of loads costs one capture, and deferred while a headset is
+     * presenting (the capture renders the scene off-screen).
+     */
+    Cyberspace.prototype.scheduleWetCapture = function() {
+        if (!this.wetMaterials.length) {
+            return;
+        }
+        var self = this;
+        window.clearTimeout(this.wetCaptureTimer);
+        this.wetCaptureTimer = window.setTimeout(function() {
+            if (self.renderer && self.renderer.xr && self.renderer.xr.isPresenting) {
+                self.scheduleWetCapture();
+                return;
+            }
+            self.applyWetReflections();
+        }, 800);
+    };
+
+    /**
      * Low, drifting fog layers hugging the streets (fog-tinted soft noise on
      * a few stacked planes), scrolled slowly in tick.
      */
@@ -2372,12 +2414,15 @@ define('format_mnemo/vr', [], function() {
                 })
             );
             mist.rotation.x = -Math.PI / 2;
-            mist.position.set(0, heights[i], -80);
+            mist.position.set(0, heights[i], 0);
             mist.raycast = function() {
                 return; // Haze, not a solid: never picked or snapped to.
             };
             this.scene.add(mist);
-            this.mists.push({mesh: mist, tex: layerTex, dx: (Math.random() - 0.5) * 0.004, dy: 0.002 + Math.random() * 0.003});
+            this.mists.push({
+                mesh: mist, tex: layerTex, ox: layerTex.offset.x, oy: layerTex.offset.y,
+                dx: (Math.random() - 0.5) * 0.004, dy: 0.002 + Math.random() * 0.003
+            });
         }
     };
 
@@ -3538,6 +3583,8 @@ define('format_mnemo/vr', [], function() {
                     onReady(tpl);
                 }
                 self.buildPlacedObjectsOfType(name, tpl);
+                // Refresh the wet-street reflection so it shows the props.
+                self.scheduleWetCapture();
                 return null;
             }).catch(function(e) {
                 if (window.console) {
@@ -5648,6 +5695,8 @@ define('format_mnemo/vr', [], function() {
             }
             built.body.visible = false;
             built.group.add(model);
+            // Refresh the wet-street reflection so it shows the model.
+            self.scheduleWetCapture();
             // The scene uses a static shadow map (autoUpdate off, refreshed only
             // as the player moves), so force one refresh now that the geometry
             // changed or the swap leaves a stale shadow for a still viewer.

@@ -949,6 +949,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                wetMaterials: [], scheduleWetCapture: CS.prototype.scheduleWetCapture,
                 loadModel: () => Promise.resolve(tpl)
             };
             await CS.prototype.applyBuildingModel.call(self, {}, built);
@@ -3704,6 +3705,40 @@ const scenarios = [
                 !!wet.mat.roughnessMap && wet.queued === 1 && wet.mat.roughnessMap.repeat.y === 30 &&
                 wet.mat.metalness >= 0.6;
             return {pass, detail: `dry=${dry.queued} wet=${wet.queued} metal=${wet.mat.metalness}`};
+        }
+    },
+    {
+        name: 'wet: an uploaded road texture keeps its low metalness when made wet',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, texCache: {}, wetMaterials: [], palette: {wet: true},
+                puddleTexture: CS.prototype.puddleTexture};
+            const mat = new THREE.MeshStandardMaterial({roughness: 0.5, metalness: 0.15, map: new THREE.Texture()});
+            CS.prototype.makeWet.call(self, mat, 4, 4);
+            const pass = mat.metalness === 0.15 && !!mat.roughnessMap && self.wetMaterials.length === 1;
+            return {pass, detail: `metal=${mat.metalness} queued=${self.wetMaterials.length}`};
+        }
+    },
+    {
+        name: 'mist: layers follow the viewer while the pattern stays fixed in the world',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const mesh = new THREE.Object3D();
+            const player = new THREE.Object3D();
+            const self = {player, rain: null, updateRain: CS.prototype.updateRain,
+                mists: [{mesh, tex, ox: 0, oy: 0, dx: 0, dy: 0}]};
+            player.position.set(0, 0, 0);
+            CS.prototype.updateWeather.call(self, 0.016);
+            const v0 = tex.offset.y;
+            player.position.set(0, 0, -320);
+            CS.prototype.updateWeather.call(self, 0.016);
+            // 320 m along the avenue is exactly 4 pattern repeats: same world spot.
+            const shift = tex.offset.y - v0;
+            const pass = mesh.position.z === -320 && Math.abs(shift - 4) < 1e-9;
+            return {pass, detail: `meshz=${mesh.position.z} shift=${shift}`};
         }
     },
     {
