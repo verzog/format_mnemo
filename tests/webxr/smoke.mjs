@@ -949,6 +949,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                wetMaterials: [], scheduleWetCapture: CS.prototype.scheduleWetCapture,
                 loadModel: () => Promise.resolve(tpl)
             };
             await CS.prototype.applyBuildingModel.call(self, {}, built);
@@ -1077,6 +1078,7 @@ const scenarios = [
                 registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
                 surfaceMeshList: CS.prototype.surfaceMeshList,
                 scene: {add: (o) => added.push(o)},
+                palette: {}, makeWet: CS.prototype.makeWet,
                 paveStrip: CS.prototype.paveStrip
             };
             self.paveStrip(0, 0, 16, 32, 0);
@@ -1097,6 +1099,7 @@ const scenarios = [
                 THREE, roadTexture: null, roadScale: 8, surfaces: [],
                 tiledClone: CS.prototype.tiledClone,
                 scene: {add: (o) => added.push(o)},
+                palette: {}, makeWet: CS.prototype.makeWet,
                 paveStrip: CS.prototype.paveStrip
             };
             self.paveStrip(0, 0, 16, 32, 0);
@@ -3682,6 +3685,99 @@ const scenarios = [
             const pass = withSky.bg === tex && withSky.starfield === 0 &&
                 without.starfield === 1;
             return {pass, detail: `skyBg=${withSky.bg === tex} skyStar=${withSky.starfield} procStar=${without.starfield}`};
+        }
+    },
+    {
+        name: 'wet: makeWet adds puddles and queues the reflection only for wet palettes',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (wet) => {
+                const self = {THREE, texCache: {}, wetMaterials: [], palette: {wet},
+                    puddleTexture: CS.prototype.puddleTexture};
+                const mat = new THREE.MeshStandardMaterial({roughness: 0.5, metalness: 0.5});
+                CS.prototype.makeWet.call(self, mat, 20, 30);
+                return {mat, queued: self.wetMaterials.length};
+            };
+            const dry = mk(false);
+            const wet = mk(true);
+            const pass = !dry.mat.roughnessMap && dry.queued === 0 && dry.mat.roughness === 0.5 &&
+                !!wet.mat.roughnessMap && wet.queued === 1 && wet.mat.roughnessMap.repeat.y === 30 &&
+                wet.mat.metalness >= 0.6;
+            return {pass, detail: `dry=${dry.queued} wet=${wet.queued} metal=${wet.mat.metalness}`};
+        }
+    },
+    {
+        name: 'wet: an uploaded road texture keeps its low metalness when made wet',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE, texCache: {}, wetMaterials: [], palette: {wet: true},
+                puddleTexture: CS.prototype.puddleTexture};
+            const mat = new THREE.MeshStandardMaterial({roughness: 0.5, metalness: 0.15, map: new THREE.Texture()});
+            CS.prototype.makeWet.call(self, mat, 4, 4);
+            const pass = mat.metalness === 0.15 && !!mat.roughnessMap && self.wetMaterials.length === 1;
+            return {pass, detail: `metal=${mat.metalness} queued=${self.wetMaterials.length}`};
+        }
+    },
+    {
+        name: 'mist: layers follow the viewer while the pattern stays fixed in the world',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const mesh = new THREE.Object3D();
+            const player = new THREE.Object3D();
+            const self = {player, rain: null, updateRain: CS.prototype.updateRain,
+                mists: [{mesh, tex, ox: 0, oy: 0, dx: 0, dy: 0}]};
+            player.position.set(0, 0, 0);
+            CS.prototype.updateWeather.call(self, 0.016);
+            const v0 = tex.offset.y;
+            player.position.set(0, 0, -320);
+            CS.prototype.updateWeather.call(self, 0.016);
+            // 320 m along the avenue is exactly 4 pattern repeats: same world spot.
+            const shift = tex.offset.y - v0;
+            const pass = mesh.position.z === -320 && Math.abs(shift - 4) < 1e-9;
+            return {pass, detail: `meshz=${mesh.position.z} shift=${shift}`};
+        }
+    },
+    {
+        name: 'batching: mergeGeometries joins painted, UV-baked boxes into one geometry',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {THREE};
+            const a = CS.prototype.paintGeometry.call(self, new THREE.BoxGeometry(1, 1, 1), 0xff0000);
+            const b = CS.prototype.paintGeometry.call(self, new THREE.BoxGeometry(1, 1, 1).translate(5, 0, 0), 0x00ff00);
+            CS.prototype.transformUvs.call(self, b, 0.5, 0.5, 0.5, 0);
+            const m = CS.prototype.mergeGeometries.call(self, [a, b]);
+            const n = m.attributes.position.count;
+            const maxU = Math.max(...m.attributes.uv.array.filter((v, i) => i % 2 === 0).slice(36));
+            const lastR = m.attributes.color.getX(n - 1);
+            const lastG = m.attributes.color.getY(n - 1);
+            const pass = n === 72 && !m.index && !!m.attributes.normal && maxU <= 1 && lastR === 0 && lastG > 0.9;
+            return {pass, detail: `verts=${n} maxU=${maxU} last=${lastR},${lastG.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'batching: neon outline is one object (strips or circuit lines), not one per strip',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (edges) => {
+                const self = {THREE, day: {neon: 1}, matCache: {},
+                    palette: {primary: 0xff00ff, secondary: 0x00ffff, neonEdges: edges}};
+                ['accentColour', 'paintGeometry', 'mergeGeometries', 'neonOutlineGeometry', 'circuitGeometry',
+                    'neonEdgeMaterial', 'neonEdgeObject'].forEach((f) => {
+                    self[f] = CS.prototype[f];
+                });
+                return CS.prototype.neonOutline.call(self, 4, 10, 4);
+            };
+            const strips = mk(true);
+            const lines = mk('line');
+            const pass = strips.isMesh && strips.children.length === 0 && strips.geometry.attributes.color &&
+                lines.isLineSegments && lines.geometry.attributes.position.count >= 24;
+            return {pass, detail: `strips=${strips.type} lines=${lines.type}`};
         }
     },
     {

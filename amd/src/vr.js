@@ -50,7 +50,9 @@ define('format_mnemo/vr', [], function() {
     // A neonEdges of 'line' traces thin glowing lines rather than strips. A
     // third horizonGlow entry sets its colour (default: the primary). "rain"
     // adds falling rain streaks, "landmarks" raises that many giant towers and
-    // "streams" limits code rain and search beams to those colours.
+    // "streams" limits code rain and search beams to those colours. "wet" gives
+    // the roads and ground glossy puddles that reflect the city, and "mist"
+    // adds low drifting fog layers and light cones under the street lamps.
     var PALETTES = {
         cyan: {primary: 0x00e5ff, secondary: 0x0066ff, sky: 0x03060f, haze: 0x0a1830},
         amber: {primary: 0xffb300, secondary: 0xff5722, sky: 0x0a0600, haze: 0x2a1400},
@@ -64,19 +66,19 @@ define('format_mnemo/vr', [], function() {
                 0xd5b66b, 0xff3b3b],
             windows: [0xd5b66b, 0xe2c787, 0xc9a557, 0xeedca8], windowDensity: 0.55,
             neonEdges: 'line', gridGlow: true, codeRain: 90, horizonGlow: [0.3, 0.3, 0x74cdaa],
-            rain: true, landmarks: 3, streams: [0x00ff89, 0x00c7aa, 0x8bfff3]
+            rain: true, landmarks: 3, streams: [0x00ff89, 0x00c7aa, 0x8bfff3], wet: true, mist: true
         },
         neon: {
             primary: 0xff2bd6, secondary: 0x00e5ff, sky: 0x07020f, haze: 0x1c0630, glow: 1.6,
             accents: [0xff2bd6, 0x00e5ff, 0xff7a1a, 0x9d4dff],
             windows: [0xff7bd8, 0x6fe8ff, 0xffb35c, 0xb48cff, 0xfff2cf],
-            neonEdges: true
+            neonEdges: true, wet: true, mist: true
         },
         neonorange: {
             primary: 0xff6a00, secondary: 0xff2b4e, sky: 0x04050f, haze: 0x0c0a24, glow: 1.6,
             accents: [0xff6a00, 0xffa31a, 0xff2b4e, 0x2b8cff],
             windows: [0xffa040, 0xffd08a, 0xff6a3d, 0x8fc8ff],
-            neonEdges: true
+            neonEdges: true, wet: true, mist: true
         }
     };
 
@@ -318,6 +320,10 @@ define('format_mnemo/vr', [], function() {
         this.ads = []; // Holographic billboards that flicker.
         this.codeRain = []; // Scrolling code-rain columns (Matrix palette).
         this.rain = null; // Falling rain streaks (Matrix palette).
+        this.wetMaterials = []; // Road/ground materials that reflect the city.
+        this.wetEnv = null; // The current reflection capture (a render target).
+        this.wetCaptureTimer = null; // Pending reflection re-capture.
+        this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
@@ -483,6 +489,8 @@ define('format_mnemo/vr', [], function() {
         this.buildEnvironment();
         this.buildRaycaster();
         this.buildCity();
+        // Wet palettes: reflect the finished city in the puddles.
+        this.applyWetReflections();
         // Original glTF props (lamps, kiosks, barriers, flying traffic); loads
         // asynchronously and falls back cleanly if models are unavailable.
         this.buildProps();
@@ -645,12 +653,11 @@ define('format_mnemo/vr', [], function() {
         if (this.config.environment !== 'void') {
             // Wet asphalt: a lit, slightly reflective ground that catches the
             // sun by day and the neon by night.
-            var ground = new THREE.Mesh(
-                new THREE.PlaneGeometry(1400, 1400),
-                new THREE.MeshStandardMaterial({
-                    color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
-                })
-            );
+            var groundMat = new THREE.MeshStandardMaterial({
+                color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
+            });
+            this.makeWet(groundMat, 1400 / 10, 1400 / 10);
+            var ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = -0.02;
             ground.receiveShadow = true;
@@ -669,6 +676,9 @@ define('format_mnemo/vr', [], function() {
             }
             if (this.palette.rain) {
                 this.buildRain();
+            }
+            if (this.palette.mist) {
+                this.buildMist();
             }
         }
 
@@ -1707,15 +1717,27 @@ define('format_mnemo/vr', [], function() {
         return Math.max(1, Math.round(height / (MODULE_H / FLOORS_PER_MODULE)));
     };
 
+    /**
+     * The facade texture repeat for a face of the given size: whole window
+     * modules across, and whole storeys up. Repeating by storeys, not whole
+     * modules, keeps every building on the same floor pitch so window rows line
+     * up with the storey-quantised height (see floorHeight). The module has
+     * FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
+     * gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
+     *
+     * @param {Number} width Face width.
+     * @param {Number} height Face height.
+     * @return {Number[]} [x repeat, y repeat].
+     */
+    Cyberspace.prototype.facadeRepeat = function(width, height) {
+        return [Math.max(1, Math.round(width / MODULE_W)), this.facadeStoreys(height) / FLOORS_PER_MODULE];
+    };
+
     Cyberspace.prototype.facadeMaterial = function(style, width, height) {
         var THREE = this.THREE;
-        var rx = Math.max(1, Math.round(width / MODULE_W));
-        // Repeat the facade by whole storeys, not whole modules, so every
-        // building shares the same floor pitch and window rows line up with the
-        // storey-quantised height (see floorHeight). The module has
-        // FLOORS_PER_MODULE rows, and its cell boundaries sit in the concrete
-        // gutter, so a storey-aligned vertical repeat cuts cleanly between rows.
-        var ry = this.facadeStoreys(height) / FLOORS_PER_MODULE;
+        var rep = this.facadeRepeat(width, height);
+        var rx = rep[0];
+        var ry = rep[1];
         var mix = !!this.palette.windows;
         var key = style.body + '|' + style.lit + '|' + rx + 'x' + ry + (mix ? '|mix' : '');
         if (this.matCache[key]) {
@@ -1908,30 +1930,236 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.addGreebles = function(group, style, w, d, h) {
         var THREE = this.THREE;
-        var vent = new THREE.Mesh(
-            new THREE.BoxGeometry(w * 0.82, 1.1, 0.35), this.trimMaterial(style, 0, 0)
-        );
-        vent.position.set(0, 0.75, d / 2 + 0.16);
-        group.add(vent);
+        // Each detail samples its own cell of the 2x2 trim sheet; the four are
+        // merged into one mesh (one draw call per building, not four).
+        var parts = [
+            {size: [w * 0.82, 1.1, 0.35], at: [0, 0.75, d / 2 + 0.16], cell: [0, 0]}, // Base vent.
+            // Access panel on the right side wall, clear of the front signboard.
+            {size: [0.2, 1.6, 1.2], at: [w / 2 + 0.06, 1.7, -d * 0.12], cell: [0, 1]},
+            {size: [0.4, h * 0.9, 0.4], at: [w / 2 - 0.3, h * 0.45, d / 2 - 0.3], cell: [1, 0]}, // Pipe.
+            {size: [1.7, 1.1, 1.7], cell: [1, 1], // Rooftop unit.
+                at: [(Math.random() - 0.5) * w * 0.4, h + 0.55, (Math.random() - 0.5) * d * 0.4]}
+        ];
+        var geos = [];
+        for (var i = 0; i < parts.length; i++) {
+            var pt = parts[i];
+            var geo = new THREE.BoxGeometry(pt.size[0], pt.size[1], pt.size[2]);
+            this.transformUvs(geo, 0.5, 0.5, pt.cell[0] * 0.5, (1 - pt.cell[1]) * 0.5);
+            geo.translate(pt.at[0], pt.at[1], pt.at[2]);
+            geos.push(geo);
+        }
+        group.add(new THREE.Mesh(this.mergeGeometries(geos), this.trimSheetMaterial(style)));
+    };
 
-        // Access panel on the right side wall, clear of the front signboard.
-        var panel = new THREE.Mesh(
-            new THREE.BoxGeometry(0.2, 1.6, 1.2), this.trimMaterial(style, 0, 1)
-        );
-        panel.position.set(w / 2 + 0.06, 1.7, -d * 0.12);
-        group.add(panel);
+    /**
+     * The whole-sheet trim material for a style (the 2x2 detail cells are picked
+     * by each detail's own UVs; see addGreebles), cached per style.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.trimSheetMaterial = function(style) {
+        var THREE = this.THREE;
+        var key = 'trimsheet_' + style.body;
+        if (this.matCache[key]) {
+            return this.matCache[key];
+        }
+        var tex = this.trimSheet(style);
+        var mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: tex.map,
+            normalMap: tex.normal,
+            roughnessMap: tex.rough,
+            roughness: 1,
+            metalness: 0.5,
+            emissive: 0xffffff,
+            emissiveMap: tex.emissive,
+            emissiveIntensity: Math.max(0.35, this.day.windowEmissive)
+        });
+        this.matCache[key] = mat;
+        return mat;
+    };
 
-        var pipe = new THREE.Mesh(
-            new THREE.BoxGeometry(0.4, h * 0.9, 0.4), this.trimMaterial(style, 1, 0)
-        );
-        pipe.position.set(w / 2 - 0.3, h * 0.45, d / 2 - 0.3);
-        group.add(pipe);
+    /**
+     * Scale and offset a geometry's UVs in place (bakes a texture repeat/offset
+     * into the mesh so differently-tiled meshes can share one material).
+     *
+     * @param {Object} geo A Three.BufferGeometry with a uv attribute.
+     * @param {Number} su U scale.
+     * @param {Number} sv V scale.
+     * @param {Number} ou U offset.
+     * @param {Number} ov V offset.
+     * @return {Object} The same geometry.
+     */
+    Cyberspace.prototype.transformUvs = function(geo, su, sv, ou, ov) {
+        var uv = geo.attributes.uv;
+        for (var i = 0; i < uv.count; i++) {
+            uv.setXY(i, uv.getX(i) * su + ou, uv.getY(i) * sv + ov);
+        }
+        uv.needsUpdate = true;
+        return geo;
+    };
 
-        var unit = new THREE.Mesh(
-            new THREE.BoxGeometry(1.7, 1.1, 1.7), this.trimMaterial(style, 1, 1)
-        );
-        unit.position.set((Math.random() - 0.5) * w * 0.4, h + 0.55, (Math.random() - 0.5) * d * 0.4);
-        group.add(unit);
+    /**
+     * Fill a geometry's vertex colour attribute with one colour.
+     *
+     * @param {Object} geo A Three.BufferGeometry.
+     * @param {Number} colour Hex int colour.
+     * @return {Object} The same geometry.
+     */
+    Cyberspace.prototype.paintGeometry = function(geo, colour) {
+        var c = new this.THREE.Color(colour);
+        var n = geo.attributes.position.count;
+        var arr = new Float32Array(n * 3);
+        for (var i = 0; i < n; i++) {
+            arr[i * 3] = c.r;
+            arr[i * 3 + 1] = c.g;
+            arr[i * 3 + 2] = c.b;
+        }
+        geo.setAttribute('color', new this.THREE.BufferAttribute(arr, 3));
+        return geo;
+    };
+
+    /**
+     * Merge geometries into one non-indexed geometry, keeping the attributes
+     * (position, normal, uv, color) that every input has. Static scenery merged
+     * this way draws in one call instead of one per piece.
+     *
+     * @param {Array} list Three.BufferGeometry objects, already transformed.
+     * @return {Object} The merged Three.BufferGeometry.
+     */
+    Cyberspace.prototype.mergeGeometries = function(list) {
+        var THREE = this.THREE;
+        var parts = [];
+        var i;
+        for (i = 0; i < list.length; i++) {
+            parts.push(list[i].index ? list[i].toNonIndexed() : list[i]);
+        }
+        var out = new THREE.BufferGeometry();
+        ['position', 'normal', 'uv', 'color'].forEach(function(name) {
+            var total = 0;
+            var size = 0;
+            for (var p = 0; p < parts.length; p++) {
+                var a = parts[p].attributes[name];
+                if (!a) {
+                    return;
+                }
+                size = a.itemSize;
+                total += a.array.length;
+            }
+            if (!parts.length) {
+                return;
+            }
+            var arr = new Float32Array(total);
+            var offset = 0;
+            for (var q = 0; q < parts.length; q++) {
+                arr.set(parts[q].attributes[name].array, offset);
+                offset += parts[q].attributes[name].array.length;
+            }
+            out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+        });
+        return out;
+    };
+
+    /**
+     * The neon edge geometry for a box: glowing strips (or, for a 'line'
+     * palette, thin circuit lines) with vertex colours, centred on the box.
+     * Mergeable, so a whole skyline's outlines can draw in one call.
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @return {Object} A Three.BufferGeometry.
+     */
+    Cyberspace.prototype.neonOutlineGeometry = function(w, h, d) {
+        var THREE = this.THREE;
+        if (this.palette.neonEdges === 'line') {
+            return this.circuitGeometry(w, h, d, this.accentColour());
+        }
+        var self = this;
+        var geos = [];
+        var t = 0.16;
+        var corner = this.accentColour();
+        var crown = this.accentColour();
+        var strip = function(sx, sy, sz, x, y, z, colour) {
+            geos.push(self.paintGeometry(new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z), colour));
+        };
+        [-1, 1].forEach(function(ix) {
+            [-1, 1].forEach(function(iz) {
+                strip(t, h, t, ix * w / 2, 0, iz * d / 2, corner);
+            });
+            strip(t, t, d, ix * w / 2, h / 2, 0, crown);
+            strip(w, t, t, 0, h / 2, ix * d / 2, crown);
+        });
+        return this.mergeGeometries(geos);
+    };
+
+    /**
+     * Thin glowing circuit lines: the box edges plus a few floor bands traced
+     * round it, like the wireframe light-traces of a data-space.
+     *
+     * @param {Number} w Box width.
+     * @param {Number} h Box height.
+     * @param {Number} d Box depth.
+     * @param {Number} colour Hex int colour.
+     * @param {Boolean} plain Edges only, no bands.
+     * @return {Object} A Three.BufferGeometry of line segments, centred on the box.
+     */
+    Cyberspace.prototype.circuitGeometry = function(w, h, d, colour, plain) {
+        var THREE = this.THREE;
+        var edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d));
+        var pts = Array.prototype.slice.call(edges.attributes.position.array);
+        var bands = plain ? 0 : 1 + Math.floor(Math.random() * 3);
+        var hw = w / 2 + 0.02;
+        var hd = d / 2 + 0.02;
+        var corners = [
+            [-hw, -hd], [hw, -hd], [hw, -hd], [hw, hd], [hw, hd], [-hw, hd], [-hw, hd], [-hw, -hd]
+        ];
+        for (var i = 0; i < bands; i++) {
+            var y = (Math.random() - 0.5) * h * 0.8;
+            for (var c = 0; c < corners.length; c++) {
+                pts.push(corners[c][0], y, corners[c][1]);
+            }
+        }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
+        return this.paintGeometry(geo, colour);
+    };
+
+    /**
+     * The shared material for neon edges: additive vertex-coloured strips, or
+     * vertex-coloured lines for a 'line' palette (a neon accent, dimmer by day).
+     *
+     * @param {Number} opacity Line opacity (lines only; strips use their own).
+     * @return {Object} A Three material.
+     */
+    Cyberspace.prototype.neonEdgeMaterial = function(opacity) {
+        var THREE = this.THREE;
+        var lines = this.palette.neonEdges !== true;
+        var key = lines ? 'edgeline_' + opacity.toFixed(3) : 'edgestrip';
+        if (!this.matCache[key]) {
+            this.matCache[key] = lines
+                ? new THREE.LineBasicMaterial({vertexColors: true, transparent: true, opacity: opacity})
+                : new THREE.MeshBasicMaterial({
+                    vertexColors: true, transparent: true, opacity: 0.45 + this.day.neon * 0.45,
+                    depthWrite: false, blending: THREE.AdditiveBlending
+                });
+        }
+        return this.matCache[key];
+    };
+
+    /**
+     * Wrap edge geometry from neonOutlineGeometry (or plain circuitGeometry
+     * lines) in the matching object: strips as a mesh, lines as line segments.
+     *
+     * @param {Object} geo The edge geometry.
+     * @param {Number} lineOpacity Opacity when drawn as lines.
+     * @return {Object} A Three.Mesh or Three.LineSegments.
+     */
+    Cyberspace.prototype.neonEdgeObject = function(geo, lineOpacity) {
+        var THREE = this.THREE;
+        var mat = this.neonEdgeMaterial(lineOpacity);
+        return mat.isLineBasicMaterial ? new THREE.LineSegments(geo, mat) : new THREE.Mesh(geo, mat);
     };
 
     /**
@@ -1949,76 +2177,16 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * Glowing neon strips up the four vertical corners of a box and round its
-     * crown, in two different accent colours (a neon accent, so dimmer by day).
+     * crown in two accent colours (or thin circuit lines for a 'line' palette),
+     * as one object centred on the box.
      *
      * @param {Number} w Box width.
      * @param {Number} h Box height.
      * @param {Number} d Box depth.
-     * @return {Object} A Three.Group centred on the box centre.
+     * @return {Object} A Three.Mesh or Three.LineSegments.
      */
     Cyberspace.prototype.neonOutline = function(w, h, d) {
-        var THREE = this.THREE;
-        var group = new THREE.Group();
-        var opacity = 0.45 + this.day.neon * 0.45;
-        var self = this;
-        if (this.palette.neonEdges === 'line') {
-            return this.circuitOutline(w, h, d);
-        }
-        var strip = function(sx, sy, sz, x, y, z, colour) {
-            var mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(sx, sy, sz),
-                new THREE.MeshBasicMaterial({
-                    color: colour, transparent: true, opacity: opacity,
-                    depthWrite: false, blending: THREE.AdditiveBlending
-                })
-            );
-            mesh.position.set(x, y, z);
-            group.add(mesh);
-        };
-        var t = 0.16;
-        var corner = self.accentColour();
-        var crown = self.accentColour();
-        [-1, 1].forEach(function(ix) {
-            [-1, 1].forEach(function(iz) {
-                strip(t, h, t, ix * w / 2, 0, iz * d / 2, corner);
-            });
-            strip(t, t, d, ix * w / 2, h / 2, 0, crown);
-            strip(w, t, t, 0, h / 2, ix * d / 2, crown);
-        });
-        return group;
-    };
-
-    /**
-     * Thin glowing circuit lines: the box edges plus a few floor bands traced
-     * round it, like the wireframe light-traces of a data-space.
-     *
-     * @param {Number} w Box width.
-     * @param {Number} h Box height.
-     * @param {Number} d Box depth.
-     * @return {Object} A Three.Group centred on the box centre.
-     */
-    Cyberspace.prototype.circuitOutline = function(w, h, d) {
-        var THREE = this.THREE;
-        var group = new THREE.Group();
-        var mat = new THREE.LineBasicMaterial({
-            color: this.accentColour(), transparent: true, opacity: 0.55 + this.day.neon * 0.4
-        });
-        group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)), mat));
-        var bands = 1 + Math.floor(Math.random() * 3);
-        for (var i = 0; i < bands; i++) {
-            var y = (Math.random() - 0.5) * h * 0.8;
-            var hw = w / 2 + 0.02;
-            var hd = d / 2 + 0.02;
-            var corners = [
-                [-hw, -hd], [hw, -hd], [hw, -hd], [hw, hd], [hw, hd], [-hw, hd], [-hw, hd], [-hw, -hd]
-            ];
-            var pts = [];
-            for (var c = 0; c < corners.length; c++) {
-                pts.push(new THREE.Vector3(corners[c][0], y, corners[c][1]));
-            }
-            group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat));
-        }
-        return group;
+        return this.neonEdgeObject(this.neonOutlineGeometry(w, h, d), 0.55 + this.day.neon * 0.4);
     };
 
     /**
@@ -2043,6 +2211,31 @@ define('format_mnemo/vr', [], function() {
         rain.frustumCulled = false;
         this.scene.add(rain);
         this.rain = rain;
+    };
+
+    /**
+     * Advance the weather each frame: the falling rain and the drifting mist,
+     * both kept centred on the viewer.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updateWeather = function(dt) {
+        this.updateRain(dt);
+        // The mist layers follow the viewer (so they cover any length of
+        // avenue) while their pattern stays put in the world: the texture is
+        // shifted by the viewer's position, plus a slow drift. Each 320 m plane
+        // repeats the pattern 4 times; local +y runs along world -z.
+        var px = this.player.position.x;
+        var pz = this.player.position.z;
+        var perMetre = 4 / 320;
+        for (var i = 0; i < this.mists.length; i++) {
+            var m = this.mists[i];
+            m.ox += m.dx * dt;
+            m.oy += m.dy * dt;
+            m.mesh.position.x = px;
+            m.mesh.position.z = pz;
+            m.tex.offset.set(m.ox + px * perMetre, m.oy - pz * perMetre);
+        }
     };
 
     /**
@@ -2071,6 +2264,206 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Make a surface material wet for palettes that ask for it: a puddle
+     * roughness map (glossy standing water in patches, damp asphalt between)
+     * and a place on the list that applyWetReflections gives the city's
+     * reflection to. A no-op for other palettes.
+     *
+     * @param {Object} mat A Three.MeshStandardMaterial.
+     * @param {Number} rx Puddle-map repeat across.
+     * @param {Number} ry Puddle-map repeat along.
+     */
+    Cyberspace.prototype.makeWet = function(mat, rx, ry) {
+        if (!this.palette.wet) {
+            return;
+        }
+        var tex = this.puddleTexture().clone();
+        tex.repeat.set(Math.max(1, rx), Math.max(1, ry));
+        tex.needsUpdate = true;
+        mat.roughnessMap = tex;
+        mat.roughness = 1;
+        // An uploaded surface texture keeps the low metalness that lets its
+        // colour show (see showSurfaceTexture); bare asphalt turns glossy.
+        if (!mat.map) {
+            mat.metalness = Math.max(mat.metalness, 0.6);
+        }
+        mat.needsUpdate = true;
+        this.wetMaterials.push(mat);
+    };
+
+    /**
+     * A tileable puddle roughness map: mid-grey (damp) with soft dark blobs
+     * (near-mirror water), cached.
+     *
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.puddleTexture = function() {
+        if (this.texCache.puddle) {
+            return this.texCache.puddle;
+        }
+        var THREE = this.THREE;
+        var SIZE = 256;
+        var canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgb(195,195,195)';
+        ctx.fillRect(0, 0, SIZE, SIZE);
+        for (var i = 0; i < 16; i++) {
+            var x = Math.random() * SIZE;
+            var y = Math.random() * SIZE;
+            var r = 8 + Math.random() * 26;
+            // Draw each blob wrapped round the tile edges so the map tiles.
+            for (var ox = -SIZE; ox <= SIZE; ox += SIZE) {
+                for (var oy = -SIZE; oy <= SIZE; oy += SIZE) {
+                    var g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+                    g.addColorStop(0, 'rgba(12,12,12,1)');
+                    g.addColorStop(0.7, 'rgba(20,20,20,0.85)');
+                    g.addColorStop(1, 'rgba(20,20,20,0)');
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+                }
+            }
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        this.texCache.puddle = tex;
+        return tex;
+    };
+
+    /**
+     * Give the wet surfaces a reflection of the city: render the finished
+     * scene once into a prefiltered environment map from just above the street
+     * and set it on every wet material. One capture at load, so the per-frame
+     * cost is only the material's environment lookup (cheap enough for VR).
+     */
+    Cyberspace.prototype.applyWetReflections = function() {
+        if (!this.wetMaterials.length || !this.renderer) {
+            return;
+        }
+        var THREE = this.THREE;
+        if (this.wetEnv) {
+            this.wetEnv.dispose();
+        }
+        var pmrem = new THREE.PMREMGenerator(this.renderer);
+        // PMREM captures from the origin; lift the eye 1.8 m by dropping the
+        // scene, then put it back. The low mist is hidden for the capture so it
+        // does not wash the reflection out.
+        var m;
+        for (m = 0; m < this.mists.length; m++) {
+            this.mists[m].mesh.visible = false;
+        }
+        this.scene.position.y = -1.8;
+        this.scene.updateMatrixWorld(true);
+        var target = pmrem.fromScene(this.scene, 0.02, 0.1, 900);
+        this.scene.position.y = 0;
+        this.scene.updateMatrixWorld(true);
+        for (m = 0; m < this.mists.length; m++) {
+            this.mists[m].mesh.visible = true;
+        }
+        pmrem.dispose();
+        this.wetEnv = target;
+        for (var i = 0; i < this.wetMaterials.length; i++) {
+            this.wetMaterials[i].envMap = target.texture;
+            this.wetMaterials[i].envMapIntensity = 1;
+            this.wetMaterials[i].needsUpdate = true;
+        }
+    };
+
+    /**
+     * Retake the wet-street reflection shortly after an asynchronous load (a
+     * building model or street props) changes the static scene. Debounced so
+     * a burst of loads costs one capture, and deferred while a headset is
+     * presenting (the capture renders the scene off-screen).
+     */
+    Cyberspace.prototype.scheduleWetCapture = function() {
+        if (!this.wetMaterials.length) {
+            return;
+        }
+        var self = this;
+        window.clearTimeout(this.wetCaptureTimer);
+        this.wetCaptureTimer = window.setTimeout(function() {
+            if (self.renderer && self.renderer.xr && self.renderer.xr.isPresenting) {
+                self.scheduleWetCapture();
+                return;
+            }
+            self.applyWetReflections();
+        }, 800);
+    };
+
+    /**
+     * Low, drifting fog layers hugging the streets (fog-tinted soft noise on
+     * a few stacked planes), scrolled slowly in tick.
+     */
+    Cyberspace.prototype.buildMist = function() {
+        var THREE = this.THREE;
+        var tex = this.mistTexture();
+        var tint = this.day.fog.clone().multiplyScalar(1.6);
+        var heights = [0.25, 0.6, 1.0, 5];
+        for (var i = 0; i < heights.length; i++) {
+            var layerTex = tex.clone();
+            layerTex.repeat.set(4, 4);
+            layerTex.offset.set(Math.random(), Math.random());
+            layerTex.needsUpdate = true;
+            var mist = new THREE.Mesh(
+                new THREE.PlaneGeometry(320, 320),
+                new THREE.MeshBasicMaterial({
+                    map: layerTex, color: tint, transparent: true,
+                    opacity: i === heights.length - 1 ? 0.04 : 0.05, depthWrite: false
+                })
+            );
+            mist.rotation.x = -Math.PI / 2;
+            mist.position.set(0, heights[i], 0);
+            mist.raycast = function() {
+                return; // Haze, not a solid: never picked or snapped to.
+            };
+            this.scene.add(mist);
+            this.mists.push({
+                mesh: mist, tex: layerTex, ox: layerTex.offset.x, oy: layerTex.offset.y,
+                dx: (Math.random() - 0.5) * 0.004, dy: 0.002 + Math.random() * 0.003
+            });
+        }
+    };
+
+    /**
+     * A tileable soft-noise alpha texture for the mist layers, cached.
+     *
+     * @return {Object} Three.CanvasTexture.
+     */
+    Cyberspace.prototype.mistTexture = function() {
+        if (this.texCache.mist) {
+            return this.texCache.mist;
+        }
+        var THREE = this.THREE;
+        var SIZE = 256;
+        var canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, SIZE, SIZE);
+        for (var i = 0; i < 60; i++) {
+            var x = Math.random() * SIZE;
+            var y = Math.random() * SIZE;
+            var r = 20 + Math.random() * 60;
+            for (var ox = -SIZE; ox <= SIZE; ox += SIZE) {
+                for (var oy = -SIZE; oy <= SIZE; oy += SIZE) {
+                    var g = ctx.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+                    g.addColorStop(0, 'rgba(255,255,255,0.35)');
+                    g.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = g;
+                    ctx.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+                }
+            }
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        this.texCache.mist = tex;
+        return tex;
+    };
+
+    /**
      * Falling glyph columns: tall additive planes of green code that scroll
      * downward (see tick), standing among and beyond the streets.
      */
@@ -2079,22 +2472,36 @@ define('format_mnemo/vr', [], function() {
         var tex = this.codeRainTexture();
         var opacity = 0.35 + this.day.night * 0.5;
         var count = typeof this.palette.codeRain === 'number' ? this.palette.codeRain : 26;
+        // Columns are merged into three meshes, one per scroll speed, each with
+        // its own scrolling copy of the glyph texture (three draw calls, not one
+        // per column). Each column's colour and start offset are baked in.
+        var speeds = [0.1, 0.18, 0.28];
+        var groups = [[], [], []];
+        var dummy = new THREE.Object3D();
         for (var i = 0; i < count; i++) {
+            var h = 30 + Math.random() * 50;
+            var geo = new THREE.PlaneGeometry(1.2 + Math.random() * 1.4, h);
+            this.transformUvs(geo, 1, 1, 0, Math.random());
+            var side = Math.random() < 0.5 ? -1 : 1;
+            dummy.position.set(side * (30 + Math.random() * 110), h / 2, 20 - Math.random() * 300);
+            dummy.lookAt(0, dummy.position.y, dummy.position.z + 40);
+            dummy.updateMatrix();
+            geo.applyMatrix4(dummy.matrix);
+            groups[i % 3].push(this.paintGeometry(geo, this.accentColour(true)));
+        }
+        for (var g = 0; g < groups.length; g++) {
+            if (!groups[g].length) {
+                continue;
+            }
             var colTex = tex.clone();
             colTex.wrapT = THREE.RepeatWrapping;
-            colTex.offset.y = Math.random();
             colTex.needsUpdate = true;
-            var h = 30 + Math.random() * 50;
             var mat = new THREE.MeshBasicMaterial({
-                map: colTex, color: this.accentColour(true), transparent: true, opacity: opacity,
+                map: colTex, vertexColors: true, transparent: true, opacity: opacity,
                 depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false
             });
-            var col = new THREE.Mesh(new THREE.PlaneGeometry(1.2 + Math.random() * 1.4, h), mat);
-            var side = Math.random() < 0.5 ? -1 : 1;
-            col.position.set(side * (30 + Math.random() * 110), h / 2, 20 - Math.random() * 300);
-            col.lookAt(0, col.position.y, col.position.z + 40);
-            this.scene.add(col);
-            this.codeRain.push({tex: colTex, speed: 0.08 + Math.random() * 0.22});
+            this.scene.add(new THREE.Mesh(this.mergeGeometries(groups[g]), mat));
+            this.codeRain.push({tex: colTex, speed: speeds[g]});
         }
     };
 
@@ -2142,8 +2549,13 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         // Alternate the two coldest, most monumental styles.
         var styleKeys = ['neomilitarism', 'entropism'];
+        // The slabs and their edges are static, so they are merged: one mesh
+        // per style for the bodies and one for all the edge glow.
+        var bodies = {};
+        var edges = [];
         for (var i = 0; i < n; i++) {
-            var style = STYLES[styleKeys[i % styleKeys.length]];
+            var key = styleKeys[i % styleKeys.length];
+            var style = STYLES[key];
             var side = Math.random() < 0.5 ? -1 : 1;
             var x = side * (34 + Math.random() * 120);
             var z = 30 - Math.random() * 320;
@@ -2151,36 +2563,22 @@ define('format_mnemo/vr', [], function() {
             var d = 8 + Math.random() * 16;
             var h = 26 + Math.random() * 60;
 
-            // Lit slab with a wall of windows on every face.
-            var body = new THREE.Mesh(
-                new THREE.BoxGeometry(w, h, d),
-                this.facadeMaterial(style, w, h)
-            );
-            body.position.set(x, h / 2, z);
-            body.castShadow = true;
-            body.receiveShadow = true;
-            this.scene.add(body);
+            // Lit slab with a wall of windows on every face; the facade repeat
+            // is baked into its UVs so every slab of a style shares a material.
+            var rep = this.facadeRepeat(w, h);
+            var body = this.transformUvs(new THREE.BoxGeometry(w, h, d), rep[0], rep[1], 0, 0);
+            (bodies[key] = bodies[key] || []).push(body.translate(x, h / 2, z));
             // Register the slab as a solid so roaming traffic clears its roof
             // instead of flying through the skyline.
             this.recordFootprint(x, z, w, d, h);
 
             // Crown edge glow (a neon accent, so it fades by day) and an
             // occasional blinking aviation beacon. Neon palettes trace the
-            // corners and crown with glowing strips instead.
-            if (this.palette.neonEdges) {
-                var outline = this.neonOutline(w, h, d);
-                outline.position.copy(body.position);
-                this.scene.add(outline);
-            } else {
-                var edges = new THREE.LineSegments(
-                    new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, d)),
-                    new THREE.LineBasicMaterial({
-                        color: style.edge, transparent: true, opacity: 0.2 + this.day.neon * 0.4
-                    })
-                );
-                edges.position.copy(body.position);
-                this.scene.add(edges);
-            }
+            // corners and crown with glowing strips or circuit lines instead.
+            var edge = this.palette.neonEdges
+                ? this.neonOutlineGeometry(w, h, d)
+                : this.circuitGeometry(w, h, d, style.edge, true);
+            edges.push(edge.translate(x, h / 2, z));
 
             if (Math.random() < 0.5) {
                 var beacon = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -2192,6 +2590,18 @@ define('format_mnemo/vr', [], function() {
                 this.beacons.push(beacon);
                 this.scene.add(beacon);
             }
+        }
+        for (var k in bodies) {
+            var slab = new THREE.Mesh(
+                this.mergeGeometries(bodies[k]), this.facadeMaterial(STYLES[k], MODULE_W, MODULE_H)
+            );
+            slab.castShadow = true;
+            slab.receiveShadow = true;
+            this.scene.add(slab);
+        }
+        if (edges.length) {
+            var opacity = this.palette.neonEdges ? 0.55 + this.day.neon * 0.4 : 0.2 + this.day.neon * 0.4;
+            this.scene.add(this.neonEdgeObject(this.mergeGeometries(edges), opacity));
         }
         this.buildLandmarks(this.palette.landmarks || 0);
     };
@@ -2236,6 +2646,7 @@ define('format_mnemo/vr', [], function() {
         var THREE = this.THREE;
         var self = this;
         var primary = this.palette.primary;
+        this.slumGeos = [];
 
         // A couple of ribbons crossing the avenue at different heights.
         var ribbons = [
@@ -2279,6 +2690,14 @@ define('format_mnemo/vr', [], function() {
                 self.buildSlumCluster(px, r.z);
             }
         });
+        // All the slum boxes under every highway, as one mesh.
+        if (this.slumGeos.length) {
+            var slums = new THREE.Mesh(
+                this.mergeGeometries(this.slumGeos), this.facadeMaterial(STYLES.entropism, MODULE_W, MODULE_H)
+            );
+            this.scene.add(slums);
+        }
+        this.slumGeos = [];
     };
 
     /**
@@ -2290,8 +2709,9 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.buildSlumCluster = function(cx, cz) {
         var THREE = this.THREE;
-        var style = STYLES.entropism;
-        var mat = this.facadeMaterial(style, 4, 5);
+        // Boxes are batched into this.slumGeos and merged into one mesh by
+        // buildElevatedHighways; the slum facade repeat is baked into the UVs.
+        var rep = this.facadeRepeat(4, 5);
         var y = 0;
         var boxes = 3 + Math.floor(Math.random() * 4);
         for (var b = 0; b < boxes; b++) {
@@ -2300,12 +2720,11 @@ define('format_mnemo/vr', [], function() {
             var h = 2 + Math.random() * 2.4;
             var jx = (Math.random() - 0.5) * 2.2;
             var jz = (Math.random() - 0.5) * 2.2;
-            var box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-            box.position.set(cx + jx, y + h / 2, cz + jz);
-            box.rotation.y = Math.random() * 0.5;
-            this.scene.add(box);
+            var rot = Math.random() * 0.5;
+            var box = this.transformUvs(new THREE.BoxGeometry(w, h, d), rep[0], rep[1], 0, 0);
+            this.slumGeos.push(box.rotateY(rot).translate(cx + jx, y + h / 2, cz + jz));
             // Register each slum box as a solid so traffic clears the cluster.
-            this.recordFootprint(cx + jx, cz + jz, w, d, y + h, box.rotation.y);
+            this.recordFootprint(cx + jx, cz + jz, w, d, y + h, rot);
             y += h * (0.7 + Math.random() * 0.2);
         }
     };
@@ -3164,6 +3583,8 @@ define('format_mnemo/vr', [], function() {
                     onReady(tpl);
                 }
                 self.buildPlacedObjectsOfType(name, tpl);
+                // Refresh the wet-street reflection so it shows the props.
+                self.scheduleWetCapture();
                 return null;
             }).catch(function(e) {
                 if (window.console) {
@@ -3611,6 +4032,47 @@ define('format_mnemo/vr', [], function() {
         light.position.set(0, 3.4, 0);
         light.castShadow = false;
         group.add(light);
+        // Misty palettes show the lamp's light as a soft cone through the haze.
+        if (this.palette.mist) {
+            group.add(this.lampCone());
+        }
+    };
+
+    /**
+     * A soft additive cone of lamp light, brightest at the lamp head and fading
+     * to the ground (geometry and material shared; the editor's brightness
+     * slider gives a lamp its own material copy when it is changed).
+     *
+     * @return {Object} A Three.Mesh, positioned in the lamp's local space.
+     */
+    Cyberspace.prototype.lampCone = function() {
+        var THREE = this.THREE;
+        if (!this.lampConeParts) {
+            var canvas = document.createElement('canvas');
+            canvas.width = 4;
+            canvas.height = 64;
+            var ctx = canvas.getContext('2d');
+            var g = ctx.createLinearGradient(0, 0, 0, 64);
+            g.addColorStop(0, 'rgba(255,255,255,0.9)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, 4, 64);
+            var geo = new THREE.CylinderGeometry(0.12, 2.1, 3.3, 20, 1, true);
+            geo.translate(0, 1.65, 0);
+            this.lampConeParts = {
+                geo: geo,
+                mat: new THREE.MeshBasicMaterial({
+                    map: new THREE.CanvasTexture(canvas), color: this.palette.primary,
+                    transparent: true, opacity: 0.1 + this.day.night * 0.14, depthWrite: false,
+                    blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+                })
+            };
+        }
+        var cone = new THREE.Mesh(this.lampConeParts.geo, this.lampConeParts.mat);
+        cone.raycast = function() {
+            return; // Light, not a solid: never picked or snapped to.
+        };
+        return cone;
     };
 
     Cyberspace.prototype.scatterStreetProps = function(tpl, kind) {
@@ -4468,6 +4930,7 @@ define('format_mnemo/vr', [], function() {
             var rdiv = this.roadScale * this.roadTexMult;
             this.showSurfaceTexture(mat, this.tiledClone(this.roadTexture, w / rdiv, d / rdiv));
         }
+        this.makeWet(mat, w / 10, d / 10);
         var road = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
         road.rotation.x = -Math.PI / 2;
         road.position.set(cx, y + 0.02, cz);
@@ -5232,6 +5695,8 @@ define('format_mnemo/vr', [], function() {
             }
             built.body.visible = false;
             built.group.add(model);
+            // Refresh the wet-street reflection so it shows the model.
+            self.scheduleWetCapture();
             // The scene uses a static shadow map (autoUpdate off, refreshed only
             // as the player moves), so force one refresh now that the geometry
             // changed or the swap leaves a stale shadow for a still viewer.
@@ -9991,8 +10456,8 @@ define('format_mnemo/vr', [], function() {
         // Glide the flying-car traffic.
         this.updateTraffic(dt);
 
-        // Let the rain fall.
-        this.updateRain(dt);
+        // Let the rain fall and the mist drift.
+        this.updateWeather(dt);
 
         // Slowly revolve the Void's planet field (one turn per hour).
         this.spinPlanets(dt);
