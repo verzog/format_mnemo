@@ -15,18 +15,20 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 /**
- * Version details for the Mnemo (VR cyberspace) course format.
+ * Install steps for the Mnemo (VR cyberspace) course format.
  *
  * @package    format_mnemo
  * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-
-$plugin->version   = 2026101000;
-$plugin->requires  = 2025100600; // Moodle 5.1.
-$plugin->supported = [501, 503]; // Moodle 5.1 - 5.3.
-$plugin->component = 'format_mnemo';
-$plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = 'v0.1.0';
+/**
+ * Install the Mnemo course format.
+ *
+ * @return bool
+ */
+function xmldb_format_mnemo_install() {
+    // Let the model uploaders accept .glb and .fbx files.
+    \format_mnemo\local\model_filetypes::register();
+    return true;
+}

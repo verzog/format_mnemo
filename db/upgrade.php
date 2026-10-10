@@ -202,5 +202,14 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026091700, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026101000) {
+        // The model uploaders accept .glb and .fbx, but Moodle core knows
+        // neither extension and silently drops unknown types, so uploads were
+        // refused as "File type not accepted". Register any that are missing.
+        \format_mnemo\local\model_filetypes::register();
+
+        upgrade_plugin_savepoint(true, 2026101000, 'format', 'mnemo');
+    }
+
     return true;
 }

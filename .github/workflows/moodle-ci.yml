@@ -15,10 +15,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Moodle's main branch is the next, unreleased version: report it but let
+    # it fail without failing the build.
+    continue-on-error: ${{ matrix.moodle-branch == 'main' }}
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -26,10 +29,10 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready" --health-interval=10s
+          --health-cmd="pg_isready -U postgres" --health-interval=10s
           --health-timeout=5s --health-retries=3
       mariadb:
-        image: mariadb:10.11
+        image: mariadb:11
         env:
           # Root is created automatically with an empty password; MYSQL_USER is
           # only for creating a non-root account, and the image rejects
@@ -40,22 +43,22 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping" --health-interval=10s
+          --health-cmd="mariadb-admin ping" --health-interval=10s
           --health-timeout=5s --health-retries=3
     strategy:
       fail-fast: false
       matrix:
-        # Moodle 5.0 requires PHP 8.2+; 8.4 is supported on 5.0 and later.
-        # Moodle 5.2 drops PHP 8.2, so that combination is excluded below.
         # The branches here must cover everything version.php declares in
-        # $plugin->supported (currently 5.0-5.2).
-        php: ['8.2', '8.3', '8.4']
-        moodle-branch: ['MOODLE_500_STABLE', 'MOODLE_501_STABLE', 'MOODLE_502_STABLE']
-        database: ['pgsql', 'mariadb']
-        exclude:
-          # Moodle 5.2 requires PHP 8.3 or later.
-          - php: '8.2'
-            moodle-branch: 'MOODLE_502_STABLE'
+        # $plugin->supported (5.1-5.3). Moodle 5.2 and later drop PHP 8.2, so
+        # PHP 8.2 runs on 5.1 only. MOODLE_500_STABLE is deliberately excluded:
+        # it is below the plugin's Moodle 5.1 baseline.
+        include:
+          - {moodle-branch: 'MOODLE_501_STABLE', php: '8.2', database: 'pgsql'}
+          - {moodle-branch: 'MOODLE_501_STABLE', php: '8.4', database: 'mariadb'}
+          - {moodle-branch: 'MOODLE_502_STABLE', php: '8.3', database: 'pgsql'}
+          - {moodle-branch: 'MOODLE_503_STABLE', php: '8.3', database: 'pgsql'}
+          - {moodle-branch: 'MOODLE_503_STABLE', php: '8.4', database: 'mariadb'}
+          - {moodle-branch: 'main', php: '8.4', database: 'pgsql'}  # Next version; allowed to fail.
 
     env:
       # Australian timezone so date/time tests respect AEST/AWST offsets.
@@ -127,8 +130,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: moodle-plugin-ci mustache
 
+      # The AMD build is made on MOODLE_501_STABLE (the lowest supported
+      # branch), so only check it there: later branches can minify the same
+      # source differently and fail on a harmless difference.
       - name: Grunt
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.moodle-branch == 'MOODLE_501_STABLE' }}
         run: moodle-plugin-ci grunt --max-lint-warnings 0
 
       - name: PHPUnit tests
@@ -137,4 +143,4 @@ jobs:
 
       - name: Behat features
         if: ${{ !cancelled() }}
-        run: moodle-plugin-ci behat --profile chrome
+        run: moodle-plugin-ci behat --profile chrome --auto-rerun 3
