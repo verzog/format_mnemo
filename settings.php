@@ -227,6 +227,8 @@ if ($ADMIN->fulltree) {
         'amber' => get_string('palette_amber', 'format_mnemo'),
         'magenta' => get_string('palette_magenta', 'format_mnemo'),
         'green' => get_string('palette_green', 'format_mnemo'),
+        'neon' => get_string('palette_neon', 'format_mnemo'),
+        'neonorange' => get_string('palette_neonorange', 'format_mnemo'),
     ];
     $lightingoptions = [
         'off' => get_string('lighting_off', 'format_mnemo'),
