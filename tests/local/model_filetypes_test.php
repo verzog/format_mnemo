@@ -61,4 +61,39 @@ final class model_filetypes_test extends \advanced_testcase {
 
         $this->assertSame([], model_filetypes::register());
     }
+
+    /**
+     * Nothing is registered when config.php fixes the custom file types.
+     *
+     * @return void
+     */
+    public function test_register_skips_types_fixed_in_config(): void {
+        global $CFG;
+        $this->resetAfterTest();
+        \core_filetypes::delete_type('fbx');
+        $CFG->config_php_settings['customfiletypes'] = [];
+
+        $this->assertSame([], model_filetypes::register());
+        $this->assertArrayNotHasKey('fbx', get_mimetypes_array());
+    }
+
+    /**
+     * Uninstall removes the types the plugin added, but not a redefined one.
+     *
+     * @return void
+     */
+    public function test_uninstall_removes_only_owned_types(): void {
+        $this->resetAfterTest();
+        foreach (array_keys(model_filetypes::TYPES) as $extension) {
+            \core_filetypes::delete_type($extension);
+        }
+        model_filetypes::register();
+        \core_filetypes::update_type('glb', 'glb', 'model/x-admin-glb', 'unknown');
+
+        $this->assertSame(['fbx'], model_filetypes::uninstall());
+        $mimetypes = get_mimetypes_array();
+        $this->assertArrayNotHasKey('fbx', $mimetypes);
+        $this->assertSame('model/x-admin-glb', $mimetypes['glb']['type']);
+        $this->assertFalse(get_config('format_mnemo', 'ownedfiletypes'));
+    }
 }

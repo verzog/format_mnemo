@@ -45,11 +45,18 @@ class model_filetypes {
      * Register each model file type the site does not already know.
      *
      * An existing entry (core, or one an administrator added by hand) is left
-     * untouched, so this is safe to run on every install and upgrade.
+     * untouched, so this is safe to run on every install and upgrade. When
+     * config.php fixes the custom file types, Moodle refuses to change them, so
+     * nothing is registered and the administrator must add the types there.
+     * The extensions added are remembered so uninstall() removes only those.
      *
      * @return string[] The extensions newly registered.
      */
     public static function register(): array {
+        global $CFG;
+        if (array_key_exists('customfiletypes', $CFG->config_php_settings)) {
+            return [];
+        }
         $added = [];
         foreach (self::TYPES as $extension => [$mimetype, $description]) {
             if (array_key_exists($extension, get_mimetypes_array())) {
@@ -58,6 +65,50 @@ class model_filetypes {
             core_filetypes::add_type($extension, $mimetype, 'unknown', [], '', $description);
             $added[] = $extension;
         }
+        if ($added) {
+            $owned = array_merge(self::owned(), $added);
+            set_config('ownedfiletypes', implode(',', array_unique($owned)), 'format_mnemo');
+        }
         return $added;
+    }
+
+    /**
+     * Remove the file types this plugin registered, for the uninstall hook.
+     *
+     * Only a type still holding the custom entry this plugin added (same MIME
+     * type) is removed, so a type an administrator has since redefined stays.
+     *
+     * @return string[] The extensions removed.
+     */
+    public static function uninstall(): array {
+        global $CFG;
+        $removed = [];
+        if (array_key_exists('customfiletypes', $CFG->config_php_settings)) {
+            return $removed;
+        }
+        $mimetypes = get_mimetypes_array();
+        foreach (self::owned() as $extension) {
+            $entry = $mimetypes[$extension] ?? null;
+            if (
+                $entry === null || empty($entry['custom']) || !isset(self::TYPES[$extension]) ||
+                $entry['type'] !== self::TYPES[$extension][0]
+            ) {
+                continue;
+            }
+            core_filetypes::delete_type($extension);
+            $removed[] = $extension;
+        }
+        unset_config('ownedfiletypes', 'format_mnemo');
+        return $removed;
+    }
+
+    /**
+     * The extensions this plugin has registered, as recorded by register().
+     *
+     * @return string[] The owned extensions.
+     */
+    protected static function owned(): array {
+        $value = (string)get_config('format_mnemo', 'ownedfiletypes');
+        return $value === '' ? [] : explode(',', $value);
     }
 }
