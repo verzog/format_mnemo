@@ -251,7 +251,89 @@ function barrier() {
     ];
 }
 
-const props = {av: av(), lamp: lamp(), kiosk: kiosk(), barrier: barrier()};
+// Quiz building: a stepped neo-noir tower (front faces +Z) with warm lit
+// windows, cyan neon corner edges and a magenta crown. Kept well inside the
+// 20,000-triangle building budget, in four materials.
+var FACADE = {color: [0.06, 0.07, 0.09, 1], metallic: 0.4, roughness: 0.55};
+var WINDOW = {color: [0, 0, 0, 1], emissive: [1.6, 1.15, 0.45]};
+var NEON = {color: [0, 0, 0, 1], emissive: [0, 1.6, 1.9]};
+var CROWN = {color: [0, 0, 0, 1], emissive: [1.8, 0.2, 1.3]};
+
+// Lit windows on all four faces of a w x d block: cols per face, one row per
+// floor from y0 upwards. Each pane sits just proud of its face. Some panes are
+// left dark (a fixed pattern) so the tower does not look uniformly lit.
+function windows(w, d, y0, floors, cols, floorh) {
+    var parts = [];
+    var faces = [
+        {ry: 0, half: d / 2, span: w},
+        {ry: Math.PI, half: d / 2, span: w},
+        {ry: Math.PI / 2, half: w / 2, span: d},
+        {ry: -Math.PI / 2, half: w / 2, span: d}
+    ];
+    faces.forEach(function(f, fi) {
+        var pitch = f.span / cols;
+        for (var r = 0; r < floors; r++) {
+            for (var c = 0; c < cols; c++) {
+                if ((r * 7 + c * 3 + fi * 5) % 5 === 0) {
+                    continue;
+                }
+                var x = -f.span / 2 + pitch * (c + 0.5);
+                var y = y0 + floorh * (r + 0.5);
+                // Place on the +Z face, then turn the pane round to its face.
+                var cs = Math.cos(f.ry);
+                var sn = Math.sin(f.ry);
+                parts.push({g: place(box(pitch * 0.62, floorh * 0.5, 0.06), {
+                    t: [x * cs + f.half * sn, y, -x * sn + f.half * cs], ry: f.ry
+                }), m: WINDOW});
+            }
+        }
+    });
+    return parts;
+}
+
+// Neon strips up the four vertical corners of a w x d block.
+function cornerEdges(w, d, y0, h) {
+    var parts = [];
+    [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(function(k) {
+        parts.push({g: place(box(0.14, h, 0.14), {t: [k[0] * w / 2, y0 + h / 2, k[1] * d / 2]}), m: NEON});
+    });
+    return parts;
+}
+
+function buildingQuiz() {
+    var parts = [
+        // Podium, shaft and setback crown block.
+        {g: place(box(12, 3, 12), {t: [0, 1.5, 0]}), m: FACADE},
+        {g: place(box(9, 21, 9), {t: [0, 13.5, 0]}), m: FACADE},
+        {g: place(box(6.5, 5, 6.5), {t: [0, 26.5, 0]}), m: FACADE},
+        // Antenna mast and its beacon.
+        {g: place(cylinder(0.12, 4, 8), {t: [0, 31, 0]}), m: FACADE},
+        {g: place(box(0.4, 0.4, 0.4), {t: [0, 33.2, 0]}), m: CROWN},
+        // Lit entrance and a neon canopy over it, on the front (+Z).
+        {g: place(box(3.2, 2.2, 0.06), {t: [0, 1.1, 6.03]}), m: WINDOW},
+        {g: place(box(5, 0.12, 1.2), {t: [0, 2.6, 6.5]}), m: NEON},
+        // Neon trim round the podium roof edge, and the crown bands.
+        {g: place(box(12.2, 0.14, 0.14), {t: [0, 3.0, 6.03]}), m: NEON},
+        {g: place(box(12.2, 0.14, 0.14), {t: [0, 3.0, -6.03]}), m: NEON},
+        {g: place(box(0.14, 0.14, 12.2), {t: [6.03, 3.0, 0]}), m: NEON},
+        {g: place(box(0.14, 0.14, 12.2), {t: [-6.03, 3.0, 0]}), m: NEON},
+        {g: place(box(9.2, 0.5, 9.2), {t: [0, 24.0, 0]}), m: CROWN},
+        {g: place(box(6.7, 0.3, 6.7), {t: [0, 29.0, 0]}), m: CROWN}
+    ];
+    return parts
+        .concat(windows(9, 9, 3, 10, 4, 2))
+        .concat(windows(6.5, 6.5, 24, 2, 3, 2.2))
+        .concat(cornerEdges(9, 9, 3, 21))
+        .concat(cornerEdges(6.5, 6.5, 24, 5));
+}
+
+const props = {
+    av: av(),
+    lamp: lamp(),
+    kiosk: kiosk(),
+    barrier: barrier(),
+    'building-quiz': buildingQuiz()
+};
 
 await mkdir(outDir, {recursive: true});
 for (const [name, parts] of Object.entries(props)) {

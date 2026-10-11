@@ -77,7 +77,7 @@ if ($ADMIN->fulltree) {
     // models are supported, as are .fbx models and multi-file .zip bundles (a
     // .gltf/.bin/textures, or a model with external textures, named for the
     // prop). The URL setting above, if set, takes precedence.
-    $settings->add(new admin_setting_configstoredfile(
+    $settings->add(new \format_mnemo\admin\setting_modelupload(
         'format_mnemo/assetpack',
         get_string('setting_assetpack', 'format_mnemo'),
         get_string('setting_assetpack_desc', 'format_mnemo'),
@@ -91,7 +91,7 @@ if ($ADMIN->fulltree) {
     // flying-car types setting references them by file base name (e.g. a
     // "hovercar.glb" here is referenced as "hovercar"). A car type naming a
     // model not uploaded here falls back to the bundled "av" vehicle.
-    $settings->add(new admin_setting_configstoredfile(
+    $settings->add(new \format_mnemo\admin\setting_modelupload(
         'format_mnemo/vehicleassets',
         get_string('setting_vehicleassets', 'format_mnemo'),
         get_string('setting_vehicleassets_desc', 'format_mnemo'),
@@ -106,7 +106,7 @@ if ($ADMIN->fulltree) {
     // matching activities render that building instead of the procedural one.
     // Any activity type without an uploaded (or bundled) building keeps the
     // procedural building.
-    $settings->add(new admin_setting_configstoredfile(
+    $settings->add(new \format_mnemo\admin\setting_modelupload(
         'format_mnemo/buildingassets',
         get_string('setting_buildingassets', 'format_mnemo'),
         get_string('setting_buildingassets_desc', 'format_mnemo'),

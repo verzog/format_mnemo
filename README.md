@@ -377,6 +377,32 @@ high-resolution textures. If a strict Content-Security-Policy blocks the addon
 decoders, the plugin falls back to a built-in **uncompressed**-glTF parser, so
 keep an uncompressed copy handy for locked-down sites.
 
+**Size budgets and lite copies.** Each model can have two versions: the full
+model, and an optional lighter copy named with `-lite` (for example
+`building-quiz-lite.glb` uploaded beside `building-quiz.glb`, in the same
+uploader). Headsets (Quest, Pico), phones and slow connections load the lite copy;
+desktops and laptops on a fast connection load the full model. Without a lite
+copy, everyone loads the full model. A lite copy uses its full model's settings
+in the asset viewer (scale, facing, pitch, yaw and roll), so export it at the same
+size and orientation. The connection speed is only reported by
+Chrome-based browsers (including the Quest browser); other browsers count as fast.
+Add `?mnemolite=1` (or `=0`) to a course page address to see the lite (or full)
+models on any device.
+
+| Model | Full: triangles | Full: file size | Lite: triangles | Lite: file size |
+| --- | --- | --- | --- | --- |
+| Prop (lamp, barrier, kiosk) | 10,000 | 3 MB | 3,000 | 1 MB |
+| Flying car | 15,000 | 3 MB | 5,000 | 1 MB |
+| Building | 100,000 | 10 MB | 20,000 | 3 MB |
+
+A model over budget still uploads and works, but it may load slowly or stutter.
+When you save an upload, Moodle warns you about each new model that is over, and
+about a full model over the lite limits that has no lite copy (headsets would
+load it as it is). The asset viewer shows every model's triangle count and file
+size, its lite copy's, and the same warnings. Triangles are counted for `.glb`
+files only; for `.fbx` and `.zip` uploads only the file size is checked. Keep
+textures to 1024 px in lite copies, and 2048 px in full models.
+
 **Multi-file models (ZIP bundles).** A single-file `.glb` is simplest, but many
 models come as **multiple files** — a `.gltf` with a separate `.bin` and a
 `textures/` folder, or an `.fbx` with external texture images. Upload the whole

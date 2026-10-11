@@ -669,6 +669,79 @@ const scenarios = [
         }
     },
     {
+        name: 'lite: headsets, phones and slow connections want lite copies; desktops do not',
+        fn: () => {
+            const want = window.__mnemoModule._wantsLiteModels;
+            const desktop = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0 Safari/537.36';
+            const cases = [
+                [{userAgent: desktop}, {search: ''}, false],
+                [{userAgent: 'Mozilla/5.0 (X11; Linux x86_64; Quest 3) OculusBrowser/38.0'}, {search: ''}, true],
+                [{userAgent: 'Mozilla/5.0 (iPhone) Mobile/15E148 Safari/604.1'}, {search: ''}, true],
+                [{userAgent: desktop, connection: {effectiveType: '3g'}}, {search: ''}, true],
+                [{userAgent: desktop, connection: {effectiveType: 'slow-2g'}}, {search: ''}, true],
+                [{userAgent: desktop, connection: {saveData: true, effectiveType: '4g'}}, {search: ''}, true],
+                [{userAgent: desktop, connection: {effectiveType: '4g', downlink: 2.5}}, {search: ''}, true],
+                [{userAgent: desktop, connection: {effectiveType: '4g', downlink: 10}}, {search: ''}, false],
+                [{userAgent: desktop}, {search: '?id=4&mnemolite=1'}, true],
+                [{userAgent: 'OculusBrowser'}, {search: '?mnemolite=0'}, false],
+                [undefined, undefined, false]
+            ];
+            const bad = cases.filter(c => want(c[0], c[1]) !== c[2]).map(c => JSON.stringify(c));
+            return {pass: bad.length === 0, detail: bad.join(' | ') || `${cases.length} cases`};
+        }
+    },
+    {
+        name: 'lite: loadNamedModel loads the lite copy when wanted, else the full model',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const run = async (useLite, liteFails) => {
+                const calls = [];
+                const self = {
+                    useLite,
+                    config: {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/', packmodels: ['ship'],
+                        litemodels: {ship: 'pack/ship-lite.glb'}},
+                    joinBase: CS.prototype.joinBase,
+                    modelCfg: CS.prototype.modelCfg,
+                    modelBehaviour: CS.prototype.modelBehaviour,
+                    loadNamedModel: CS.prototype.loadNamedModel,
+                    modelExt: CS.prototype.modelExt,
+                    loadModel: (url) => {
+                        calls.push(url);
+                        return liteFails && url.indexOf('-lite') !== -1
+                            ? Promise.reject(new Error('boom'))
+                            : Promise.resolve({url});
+                    }
+                };
+                const tpl = await CS.prototype.loadProp.call(self, 'ship');
+                return calls.join(',') + '=>' + tpl.url;
+            };
+            const lite = await run(true, false);
+            const full = await run(false, false);
+            const fallback = await run(true, true);
+            const pass = lite === 'pack/ship-lite.glb=>pack/ship-lite.glb' &&
+                full === 'pack/ship.glb=>pack/ship.glb' &&
+                fallback === 'pack/ship-lite.glb,pack/ship.glb=>pack/ship.glb';
+            return {pass, detail: `lite=${lite} full=${full} fallback=${fallback}`};
+        }
+    },
+    {
+        name: 'lite: buildingModelUrl gives the lite copy when wanted, the full model when asked',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {useLite: true, config: {buildingsbaseurl: 'm/', buildingmodels: ['quiz'],
+                litemodels: {'building-quiz': 'm/building-quiz-lite.glb', tower: 'm/tower-lite.zip/x.gltf'}},
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt};
+            const lite = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
+            const full = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'}, true);
+            const over = CS.prototype.buildingModelUrl.call(self, {modname: 'page', building: 'tower.glb'});
+            self.useLite = false;
+            const desk = CS.prototype.buildingModelUrl.call(self, {modname: 'quiz'});
+            const pass = lite === 'm/building-quiz-lite.glb' && full === 'm/building-quiz.glb' &&
+                over === 'm/tower-lite.zip/x.gltf' && desk === 'm/building-quiz.glb';
+            return {pass, detail: `lite=${lite} full=${full} over=${over} desk=${desk}`};
+        }
+    },
+    {
         name: 'bundle: buildingModelUrl returns the entry URL for a type-based building bundle',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

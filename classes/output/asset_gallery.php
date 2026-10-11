@@ -25,6 +25,8 @@
 
 namespace format_mnemo\output;
 
+use format_mnemo\local\model_budget;
+use format_mnemo\local\model_variants;
 use moodle_url;
 
 /**
@@ -265,6 +267,7 @@ class asset_gallery {
     ): array {
         global $CFG;
         $uploaded = self::stored_glb_files($filearea);
+        $litefiles = model_variants::lite_files($filearea);
         // Base name => the uploaded file's real extension (glb unless it is an
         // .fbx upload), so a card reconstructs the right filename below.
         $uploadedext = [];
@@ -285,12 +288,14 @@ class asset_gallery {
             $filename = $name . '.' . $ext;
             $path = null;
             $file = null;
+            $filesize = null;
             if ($externalbase !== '') {
                 $url = rtrim($externalbase, '/') . '/' . $name . '.glb';
                 $source = 'url';
             } else if (isset($uploaded[$filename])) {
                 $file = $uploaded[$filename];
                 $source = 'uploaded';
+                $filesize = (int)$file->get_filesize();
                 if ($ext === 'zip') {
                     // A multi-file bundle resolves to its extracted entry URL;
                     // metadata is not read from the zip (left null below).
@@ -306,10 +311,18 @@ class asset_gallery {
                 $url = (new moodle_url('/course/format/mnemo/models/' . $name . '.glb'))->out(false);
                 $source = 'bundled';
                 $path = $CFG->dirroot . '/course/format/mnemo/models/' . $name . '.glb';
+                $filesize = is_readable($path) ? (int)filesize($path) : null;
             } else {
                 continue;
             }
             $meta = self::model_metadata($source, $url, $path, $file);
+            // An uploaded lite copy only counts when the full model is uploaded
+            // too (an external pack or bundled model is what loads otherwise).
+            // The budget category: the prop pack's "av" is the flying car.
+            $budgetcat = model_budget::category($filearea, $name) ?? $category;
+            $lite = $source === 'uploaded' && isset($litefiles[$name])
+                ? self::lite_card($budgetcat, $filearea, $litefiles[$name])
+                : null;
             $out[] = [
                 'key' => $name,
                 'label' => $name,
@@ -318,14 +331,41 @@ class asset_gallery {
                 'category' => $category,
                 'copyright' => $meta['copyright'],
                 'generator' => $meta['generator'],
+                'triangles' => $meta['triangles'],
+                'filesize' => $filesize,
+                'warnings' => model_budget::model_warnings($budgetcat, $name, $filesize, $meta['triangles'], $lite !== null),
+                'lite' => $lite,
             ];
         }
         return $out;
     }
 
     /**
+     * The size details of an uploaded lite copy, for its full model's card.
+     *
+     * @param string $category The model category (prop, vehicle or building).
+     * @param string $filearea The upload file area.
+     * @param \stored_file $file The lite copy's file.
+     * @return array The triangles, filesize and warnings (against the lite budget).
+     */
+    protected static function lite_card(string $category, string $filearea, \stored_file $file): array {
+        $filesize = (int)$file->get_filesize();
+        $triangles = null;
+        if (strtolower(pathinfo($file->get_filename(), PATHINFO_EXTENSION)) === 'glb') {
+            $meta = self::model_metadata('uploaded', self::file_url($filearea, $file), null, $file);
+            $triangles = $meta['triangles'];
+        }
+        return [
+            'filename' => $file->get_filename(),
+            'triangles' => $triangles,
+            'filesize' => $filesize,
+            'warnings' => model_budget::warnings($category, $filesize, $triangles, 'lite'),
+        ];
+    }
+
+    /**
      * The glTF asset metadata (copyright and generator) embedded in a model,
-     * read from its GLB header. Cached per source+URL so the gallery does not
+     * and its triangle count, read from its GLB header. Cached per source+URL so the gallery does not
      * re-read local files or re-fetch remote packs on every view. Best-effort:
      * anything unreadable (a truncated file, a remote fetch failure, a model
      * with no such fields) yields nulls.
@@ -334,13 +374,14 @@ class asset_gallery {
      * @param string $url The model's effective URL (the cache key with source).
      * @param string|null $path Local filesystem path, for a bundled model.
      * @param \stored_file|null $file The stored file, for an uploaded model.
-     * @return array{copyright: ?string, generator: ?string}
+     * @return array The copyright, generator and triangles (each possibly null).
      */
     protected static function model_metadata(string $source, string $url, ?string $path, ?\stored_file $file): array {
         $cache = \cache::make('format_mnemo', 'modelmeta');
         $cachekey = sha1($source . '|' . $url);
         $cached = $cache->get($cachekey);
-        if (is_array($cached)) {
+        // Entries cached before triangle counts were added are re-read.
+        if (is_array($cached) && array_key_exists('triangles', $cached)) {
             return $cached;
         }
         $head = self::glb_head_bytes($source, $url, $path, $file);
@@ -362,20 +403,17 @@ class asset_gallery {
      */
     protected static function glb_head_bytes(string $source, string $url, ?string $path, ?\stored_file $file): string {
         global $CFG;
-        // Cap on how much of the file to read: the JSON chunk sits right after
-        // the 12-byte header, so a few hundred KB covers any realistic model.
+        // Cap on how much of a remote file to read: the JSON chunk sits right
+        // after the 12-byte header, so this covers the asset block of almost any
+        // model. Local files are read to the end of their JSON chunk instead.
         $cap = 1048576;
         if ($source === 'bundled' && $path !== null && is_readable($path)) {
-            return (string)file_get_contents($path, false, null, 0, $cap);
+            $fh = fopen($path, 'rb');
+            return $fh === false ? '' : self::read_glb_head($fh);
         }
         if ($source === 'uploaded' && $file !== null) {
             $fh = $file->get_content_file_handle();
-            if ($fh === false) {
-                return '';
-            }
-            $bytes = (string)fread($fh, $cap);
-            fclose($fh);
-            return $bytes;
+            return $fh === false ? '' : self::read_glb_head($fh);
         }
         if ($source === 'url') {
             // Never make network calls under unit tests: they must stay
@@ -420,15 +458,36 @@ class asset_gallery {
     }
 
     /**
-     * Parse the glTF asset block (copyright, generator) out of the leading
-     * bytes of a GLB. Tolerant of anything malformed or truncated - it simply
+     * Read a local GLB's 12-byte header and its whole JSON chunk (the length
+     * the chunk header declares, up to 16 MB), then close the handle. A local
+     * model's JSON can be over the 1 MB a remote read takes, and the triangle
+     * count needs all of it.
+     *
+     * @param resource $fh An open file handle at the start of the file.
+     * @return string The header and JSON chunk bytes (possibly short or empty).
+     */
+    protected static function read_glb_head($fh): string {
+        $bytes = (string)fread($fh, 20);
+        if (strlen($bytes) === 20 && substr($bytes, 0, 4) === 'glTF') {
+            $length = unpack('V', substr($bytes, 12, 4))[1];
+            if ($length > 0 && $length <= 16777216) {
+                $bytes .= (string)stream_get_contents($fh, $length);
+            }
+        }
+        fclose($fh);
+        return $bytes;
+    }
+
+    /**
+     * Parse the glTF asset block (copyright, generator) and the triangle count
+     * out of the leading bytes of a GLB. Tolerant of anything malformed or truncated - it simply
      * returns nulls rather than raising.
      *
      * @param string $bytes The leading bytes of a GLB (header + JSON chunk).
-     * @return array{copyright: ?string, generator: ?string}
+     * @return array The copyright, generator and triangles (each possibly null).
      */
     protected static function parse_glb_asset(string $bytes): array {
-        $none = ['copyright' => null, 'generator' => null];
+        $none = ['copyright' => null, 'generator' => null, 'triangles' => null];
         // 12-byte GLB header (magic, version, length) + 8-byte chunk header.
         if (strlen($bytes) < 20 || substr($bytes, 0, 4) !== 'glTF') {
             return $none;
@@ -442,8 +501,12 @@ class asset_gallery {
         // If the buffer was truncated before the whole JSON chunk (a ranged
         // remote read), json_decode fails and we fall back to nulls.
         $data = json_decode($json, true);
-        if (!is_array($data) || !isset($data['asset']) || !is_array($data['asset'])) {
+        if (!is_array($data)) {
             return $none;
+        }
+        $triangles = model_budget::count_triangles($data);
+        if (!isset($data['asset']) || !is_array($data['asset'])) {
+            return ['triangles' => $triangles] + $none;
         }
         $asset = $data['asset'];
         $clean = function ($value): ?string {
@@ -461,6 +524,7 @@ class asset_gallery {
         return [
             'copyright' => $clean($asset['copyright'] ?? null),
             'generator' => $clean($asset['generator'] ?? null),
+            'triangles' => $triangles,
         ];
     }
 
@@ -611,7 +675,9 @@ class asset_gallery {
     protected static function stored_glb_files(string $filearea): array {
         $map = [];
         foreach (self::stored_files($filearea) as $file) {
-            if (preg_match('/\.(glb|fbx|zip)$/i', $file->get_filename())) {
+            // Lite copies belong to their full model, not a card of their own.
+            $islite = model_variants::is_lite_file($file->get_filename());
+            if (!$islite && preg_match('/\.(glb|fbx|zip)$/i', $file->get_filename())) {
                 $map[$file->get_filename()] = $file;
             }
         }

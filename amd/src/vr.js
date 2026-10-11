@@ -186,6 +186,9 @@ define('format_mnemo/vr', [], function() {
         this.config = config;
         this.loaders = loaders || {};
         assets = assets || {};
+        // Whether to load the lighter "-lite" copies of uploaded models: on
+        // headsets, phones and slow connections (see wantsLiteModels).
+        this.useLite = wantsLiteModels(window.navigator, window.location);
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
@@ -4207,9 +4210,10 @@ define('format_mnemo/vr', [], function() {
      * @param {String} base The category's base URL.
      * @param {Array|null} pack The model base names the server enumerated in that
      *     upload area, or null when unknown (then every name is probed).
+     * @param {Boolean} full True to skip the lite copy (used after it fails).
      * @return {Promise} Resolves with a Three.Group template.
      */
-    Cyberspace.prototype.loadNamedModel = function(name, base, pack) {
+    Cyberspace.prototype.loadNamedModel = function(name, base, pack, full) {
         var self = this;
         // The uploaded model's real extension (glb unless the server flagged this
         // name as an .fbx upload). The bundled fallback is always .glb.
@@ -4233,6 +4237,17 @@ define('format_mnemo/vr', [], function() {
         // per-model "animate" behaviour toggle, off by default). Stamped on the
         // resolved template so every placed clone knows to spin up a mixer.
         var animate = !!this.modelBehaviour(name).animate;
+        // On a headset, phone or slow connection, an uploaded "-lite" copy loads
+        // in place of the full model; if it fails, the full model is used.
+        var lite = !full && this.useLite && (this.config.litemodels || {})[name];
+        if (lite) {
+            return this.loadModel(lite).then(function(tpl) {
+                tpl.mnemoAnimate = animate;
+                return tpl;
+            }, function() {
+                return self.loadNamedModel(name, base, pack, true);
+            });
+        }
         var p;
         // When the server enumerated the (Moodle-hosted) upload area and this
         // model is not in it, skip the probe and load the bundled model directly,
@@ -5858,12 +5873,17 @@ define('format_mnemo/vr', [], function() {
      * Buildings resolve from their own upload area (config.buildingsbaseurl),
      * separate from the props base.
      *
+     * On a headset, phone or slow connection, a building's uploaded "-lite"
+     * copy is returned instead, unless full is set.
+     *
      * @param {Object} act The activity node (modname, building).
+     * @param {Boolean} full True to skip the lite copy.
      * @return {String|null} The model URL, or null.
      */
-    Cyberspace.prototype.buildingModelUrl = function(act) {
+    Cyberspace.prototype.buildingModelUrl = function(act, full) {
         var base = this.config.buildingsbaseurl || this.config.modelsbaseurl;
         var mu = this.config.modelurls || {};
+        var lm = (!full && this.useLite && this.config.litemodels) || {};
         if (act.building) {
             if (/^https?:/.test(act.building) || act.building.charAt(0) === '/' ||
                 act.building.indexOf('data:') === 0) {
@@ -5873,6 +5893,9 @@ define('format_mnemo/vr', [], function() {
             // the bundle's entry URL; a plain .glb/.fbx override resolves against
             // the buildings base as before.
             var ob = act.building.replace(/\.(glb|fbx|zip)$/i, '');
+            if (lm[ob]) {
+                return lm[ob];
+            }
             if (mu[ob]) {
                 return mu[ob];
             }
@@ -5881,6 +5904,9 @@ define('format_mnemo/vr', [], function() {
         var list = this.config.buildingmodels || [];
         if (base && act.modname && list.indexOf(act.modname) !== -1) {
             var name = 'building-' + act.modname;
+            if (lm[name]) {
+                return lm[name];
+            }
             // A building uploaded as a .zip bundle has an explicit entry URL.
             if (mu[name]) {
                 return mu[name];
@@ -5916,7 +5942,14 @@ define('format_mnemo/vr', [], function() {
             return null;
         }
         var self = this;
-        return this.loadModel(url).then(function(tpl) {
+        // A lite copy that fails to load falls back to the full model.
+        var fullurl = this.buildingModelUrl(act, true);
+        return this.loadModel(url).catch(function(e) {
+            if (fullurl && fullurl !== url) {
+                return self.loadModel(fullurl);
+            }
+            throw e;
+        }).then(function(tpl) {
             // Buildings bypass loadNamedModel, so stamp the animate toggle here
             // from the model's logical name (the per-activity override's base
             // name, else "building-<modname>"), matching how the asset viewer
@@ -7487,6 +7520,37 @@ define('format_mnemo/vr', [], function() {
         ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
         Enter: 'Enter', Tab: 'Tab', Backquote: '`', Escape: 'Esc'
     };
+
+    /**
+     * Whether this visitor should get the lighter "-lite" model copies: forced
+     * by ?mnemolite=1/0, else true on a headset or phone, or on a connection the
+     * browser reports as slow (data saver, 2G/3G, or under 5 Mbps).
+     *
+     * @param {Object} nav The browser navigator (userAgent, connection).
+     * @param {Object} loc The page location (search).
+     * @return {Boolean} True to load lite copies where they exist.
+     */
+    function wantsLiteModels(nav, loc) {
+        // A ?mnemolite=1 or ?mnemolite=0 on the page address forces the choice,
+        // so an admin can check either set of models from any device.
+        var force = /[?&]mnemolite=([01])/.exec((loc && loc.search) || '');
+        if (force) {
+            return force[1] === '1';
+        }
+        nav = nav || {};
+        // Standalone headsets (Quest, Pico, Wolvic) and phones.
+        if (/OculusBrowser|Quest|Pico|Wolvic|Mobi/i.test(nav.userAgent || '')) {
+            return true;
+        }
+        // Chromium-based browsers (Quest's included) report the connection;
+        // others do not, and count as fast.
+        var conn = nav.connection;
+        if (!conn) {
+            return false;
+        }
+        return !!conn.saveData || /(^|-)(2g|3g)$/.test(conn.effectiveType || '') ||
+            (typeof conn.downlink === 'number' && conn.downlink > 0 && conn.downlink < 5);
+    }
 
     /**
      * A short, human-readable label for a keyboard code (KeyW -> W, Digit1 -> 1,
@@ -14658,6 +14722,7 @@ define('format_mnemo/vr', [], function() {
         _previewAxes: previewAxes,
         _previewTurnQuaternion: previewTurnQuaternion,
         _previewEulerDegrees: previewEulerDegrees,
+        _wantsLiteModels: wantsLiteModels,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
