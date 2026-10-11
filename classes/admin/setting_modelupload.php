@@ -25,14 +25,15 @@
 namespace format_mnemo\admin;
 
 use format_mnemo\local\model_budget;
+use format_mnemo\local\model_licence;
 
 /**
  * A model upload setting that warns about over-budget models.
  *
  * Works like the standard stored-file setting, then checks each model the save
- * added or replaced against the size budget for its category, and queues a
- * warning for any that are over. Models already there are not re-checked, so
- * saving the page again does not repeat old warnings.
+ * added or replaced against the size budget for its category and for licence
+ * problems, and queues a warning for each one found. Models already there are
+ * not re-checked, so saving the page again does not repeat old warnings.
  */
 class setting_modelupload extends \admin_setting_configstoredfile {
     /**
@@ -52,6 +53,7 @@ class setting_modelupload extends \admin_setting_configstoredfile {
                 }
             }
             model_budget::notify_uploads($this->filearea, $changed);
+            model_licence::notify_uploads($changed);
         }
         return $result;
     }

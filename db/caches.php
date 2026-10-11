@@ -35,4 +35,12 @@ $definitions = [
         'simpledata' => true,
         'ttl' => 86400,
     ],
+    // The model credits list shown under the 3D view, keyed by a revision of
+    // everything it is built from (model files, model settings, language), so
+    // it is rebuilt only when one of those changes.
+    'modelcredits' => [
+        'mode' => cache_store::MODE_APPLICATION,
+        'simplekeys' => true,
+        'simpledata' => true,
+    ],
 ];

@@ -669,6 +669,27 @@ const scenarios = [
         }
     },
     {
+        name: 'credits: entries stay hidden until their model loads, then show with the list',
+        fn: () => {
+            const M = window.__mnemoModule;
+            const wrap = document.createElement('div');
+            wrap.className = 'format-mnemo';
+            wrap.innerHTML = '<details data-mnemo-credits><summary>Credits</summary><ul>' +
+                '<li data-mnemo-credit="lamp">Lamp</li><li data-mnemo-credit="building-quiz">Tower</li>' +
+                '</ul></details><div class="stage"></div>';
+            document.body.appendChild(wrap);
+            const list = M._initCredits(wrap.querySelector('.stage'));
+            const items = () => Array.from(wrap.querySelectorAll('li')).map(li => li.hidden);
+            const before = list.hidden && items().every(h => h);
+            M._showCredit(list, 'building-quiz');
+            const after = !list.hidden && items().join() === 'true,false';
+            M._showCredit(null, 'lamp');
+            const none = M._initCredits(document.createElement('div')) === null;
+            wrap.remove();
+            return {pass: before && after && none, detail: `before=${before} after=${after} none=${none}`};
+        }
+    },
+    {
         name: 'lite: headsets, phones and slow connections want lite copies; desktops do not',
         fn: () => {
             const want = window.__mnemoModule._wantsLiteModels;

@@ -24,12 +24,15 @@
     * data-mnemo-root - the scene mount point the WebXR module renders into.
     * data-mnemo-fallback - the accessible list, hidden once the scene loads.
     * data-mnemo-toggle - switches between 3D and list views.
+    * data-mnemo-credits - the model credits list; data-mnemo-credit on each
+      entry names its model, so the 3D view can hide models it does not use.
 
     Context variables required for this template:
     * rootid - unique DOM id for this scene.
     * environment - environment key (adds a CSS modifier class).
     * palette - palette key (adds a CSS modifier class).
     * sections - array of section nodes with their activities.
+    * credits - array of {name, html}: each model's credit line (escaped HTML).
 
     Example context (json):
     {
@@ -42,6 +45,11 @@
         "str_controls": "Drag to look, W/S to fly, click a node to open it.",
         "str_arialabel": "Interactive 3D view of the course.",
         "str_emptynode": "This node has no activities yet.",
+        "hascredits": true,
+        "str_credits": "Credits",
+        "credits": [
+            {"name": "building-quiz", "html": "<a href=\"https://example.com/tower\">Tower</a> by Ada, CC-BY-4.0"}
+        ],
         "sections": [
             {
                 "number": 1,
@@ -62,6 +70,16 @@
             {{str_toggle}}
         </button>
         <p class="format-mnemo__controls" data-mnemo-controls>{{str_controls}}</p>
+        {{#hascredits}}
+        <details class="format-mnemo__credits" data-mnemo-credits>
+            <summary>{{str_credits}}</summary>
+            <ul>
+                {{#credits}}
+                <li data-mnemo-credit="{{name}}">{{{html}}}</li>
+                {{/credits}}
+            </ul>
+        </details>
+        {{/hascredits}}
     </div>
 
     <div class="format-mnemo__stage"

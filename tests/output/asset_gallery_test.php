@@ -402,6 +402,88 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * A model's card carries its credit (the file's, with typed fields winning)
+     * and licence flags, and credits() lists every creditable model.
+     */
+    public function test_model_credits(): void {
+        $this->resetAfterTest();
+        $this->make_glb_file('statue.glb', [
+            'version' => '2.0',
+            'extras' => ['title' => 'Statue', 'license' => 'CC-BY-NC-4.0'],
+        ]);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame('Statue', $bykey['statue']['credit']['title']);
+        // Non-commercial, and needs credit with no author recorded.
+        $this->assertSame(['warning', 'warning'], array_column($bykey['statue']['licenceflags'], 'level'));
+        // The bundled models name no author or licence, so none is credited.
+        $this->assertSame([], $bykey['lamp']['licenceflags']);
+        $this->assertSame(['statue'], array_column(asset_gallery::credits(), 'name'));
+
+        // A typed author fills the gap.
+        \format_mnemo\local\model_config::set('statue', ['credit' => ['author' => 'Ada']]);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame(['warning', 'info'], array_column($bykey['statue']['licenceflags'], 'level'));
+        $this->assertStringContainsString('Statue by Ada, CC-BY-NC-4.0', asset_gallery::credits()[0]['html']);
+    }
+
+    /**
+     * Two models sharing a name in different areas (an "av" prop and an "av"
+     * vehicle) each keep their credit; a copyright-only model is credited; the
+     * sun or moon model is credited from its file.
+     */
+    public function test_credits_cover_every_model(): void {
+        $this->resetAfterTest();
+        $store = function (string $filearea, string $filename, array $asset): void {
+            get_file_storage()->create_file_from_string([
+                'contextid' => \context_system::instance()->id,
+                'component' => 'format_mnemo',
+                'filearea' => $filearea,
+                'itemid' => 0,
+                'filepath' => '/',
+                'filename' => $filename,
+            ], $this->make_glb(['version' => '2.0'] + $asset));
+        };
+        $store('assetpack', 'av.glb', ['extras' => ['author' => 'Ada', 'license' => 'CC-BY-4.0']]);
+        $store('vehicleassets', 'av.glb', ['extras' => ['author' => 'Grace', 'license' => 'CC-BY-4.0']]);
+        $store('assetpack', 'bench.glb', ['copyright' => '(c) 2026 Alan, CC-BY-4.0']);
+        $store('moonasset', 'moon.glb', ['extras' => ['title' => 'Moon', 'author' => 'Hedy', 'license' => 'CC0']]);
+
+        $credits = asset_gallery::credits();
+        $this->assertSame(['av', 'av', 'bench', 'moon'], array_column($credits, 'name'));
+        $html = implode(' | ', array_column($credits, 'html'));
+        $this->assertStringContainsString('by Ada', $html);
+        $this->assertStringContainsString('by Grace', $html);
+        $this->assertStringContainsString('bench, (c) 2026 Alan, CC-BY-4.0', $html);
+        $this->assertStringContainsString('Moon by Hedy, CC0', $html);
+    }
+
+    /**
+     * The credits list is cached until a model changes; a remote model whose
+     * metadata is not cached yet queues a background fetch instead of being
+     * fetched on the course page, and the incomplete list is not cached.
+     */
+    public function test_credits_cache_and_remote_fetch(): void {
+        $this->resetAfterTest();
+        $this->make_glb_file('statue.glb', ['version' => '2.0', 'extras' => ['author' => 'Ada']]);
+        $this->assertCount(1, asset_gallery::credits());
+        $this->make_glb_file('bench.glb', ['version' => '2.0', 'extras' => ['author' => 'Grace']]);
+        // A new upload changes the revision, so the list is rebuilt.
+        $this->assertCount(2, asset_gallery::credits());
+
+        // An external pack: its models' metadata is not cached, so a task is queued.
+        set_config('assetbaseurl', 'https://pack.example.com/models', 'format_mnemo');
+        $this->assertSame([], \core\task\manager::get_adhoc_tasks('\\format_mnemo\\task\\fetch_model_metadata'));
+        asset_gallery::credits();
+        $this->assertCount(1, \core\task\manager::get_adhoc_tasks('\\format_mnemo\\task\\fetch_model_metadata'));
+    }
+
+    /**
      * An uploaded model whose JSON chunk is over 1 MB still has its triangles
      * counted (the whole chunk is read for local files).
      */

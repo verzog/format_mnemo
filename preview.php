@@ -29,6 +29,7 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use format_mnemo\output\asset_gallery;
 use format_mnemo\local\model_config;
+use format_mnemo\local\model_licence;
 
 admin_externalpage_setup('format_mnemo_preview');
 
@@ -70,6 +71,12 @@ if ($savemodel !== '' && confirm_sesskey()) {
             'roll' => $numornull($rollraw),
             'scale' => $numornull($scaleraw),
             'behaviour' => $behaviour,
+            'credit' => [
+                'title' => optional_param('credit_title', '', PARAM_TEXT),
+                'author' => optional_param('credit_author', '', PARAM_TEXT),
+                'licence' => optional_param('credit_licence', '', PARAM_TEXT),
+                'source' => optional_param('credit_source', '', PARAM_URL),
+            ],
         ]);
         redirect(
             $PAGE->url,
@@ -223,6 +230,40 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
             get_string('preview_beh_animate_note', 'format_mnemo'),
             ['class' => 'format-mnemo-preview__hint']
         ),
+        'format-mnemo-preview__field'
+    );
+
+    // Credit fields: each one filled in here replaces what the model file says
+    // (most useful for models whose file names no author or licence).
+    $credit = $cfg['credit'] ?? [];
+    $creditrows = '';
+    foreach (model_licence::FIELDS as $field) {
+        $id = 'credit_' . $field . '_' . $name;
+        $creditrows .= html_writer::div(
+            html_writer::tag(
+                'label',
+                get_string('preview_credit_' . $field, 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__field-label', 'for' => $id]
+            ) .
+            html_writer::empty_tag('input', [
+                'type' => $field === 'source' ? 'url' : 'text', 'name' => 'credit_' . $field, 'id' => $id,
+                'maxlength' => 255, 'class' => 'format-mnemo-preview__credit', 'value' => $credit[$field] ?? '',
+            ]),
+            'format-mnemo-preview__field'
+        );
+    }
+    $rows .= html_writer::div(
+        html_writer::tag(
+            'span',
+            get_string('preview_credit', 'format_mnemo'),
+            ['class' => 'format-mnemo-preview__field-label']
+        ) .
+        html_writer::tag(
+            'small',
+            get_string('preview_credit_help', 'format_mnemo'),
+            ['class' => 'format-mnemo-preview__hint']
+        ) .
+        $creditrows,
         'format-mnemo-preview__field'
     );
 
@@ -383,6 +424,25 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
         $body .= html_writer::div(
             get_string('preview_generator', 'format_mnemo', s($model['generator'])),
             'format-mnemo-preview__use text-muted'
+        );
+    }
+    // Credit and licence: the credit line students see, then a flag for each
+    // licence problem (and a note when the author must be credited).
+    if (!empty($model['credit']) && model_licence::is_creditable($model['credit'])) {
+        $body .= html_writer::div(
+            get_string(
+                'preview_creditline',
+                'format_mnemo',
+                model_licence::credit_html($model['credit'], $model['label'])
+            ),
+            'format-mnemo-preview__use'
+        );
+    }
+    foreach ($model['licenceflags'] ?? [] as $flag) {
+        $body .= html_writer::div(
+            s($flag['text']),
+            'format-mnemo-preview__budget alert alert-' . $flag['level'],
+            ['role' => 'note']
         );
     }
     // Size: the triangle count and file size when known, then a warning for

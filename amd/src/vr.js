@@ -189,6 +189,9 @@ define('format_mnemo/vr', [], function() {
         // Whether to load the lighter "-lite" copies of uploaded models: on
         // headsets, phones and slow connections (see wantsLiteModels).
         this.useLite = wantsLiteModels(window.navigator, window.location);
+        // The model credits list under the scene: hidden entry by entry until
+        // the model it credits is actually loaded (see noteModelUsed).
+        this.credits = initCredits(root);
         // World-space XZ footprints of placed buildings, so scattered props
         // (kiosks, lamps, barriers) can avoid dropping on top of a building.
         this.footprints = [];
@@ -808,6 +811,8 @@ define('format_mnemo/vr', [], function() {
         // an image skins it. Anything absent keeps the procedural disc.
         var asset = isday ? this.sunAsset : this.moonAsset;
         if (asset && asset.kind === 'model' && asset.url) {
+            // The model's credit (if it has one) is listed as "sun" or "moon".
+            body.credit = isday ? 'sun' : 'moon';
             this.buildCelestialModel(body, asset.url);
             return;
         }
@@ -907,7 +912,7 @@ define('format_mnemo/vr', [], function() {
      * and kept if the load fails.
      *
      * @param {Object} b The body descriptor {dir, colour, size, core, maria,
-     *     opacity, distance}.
+     *     opacity, distance, credit}; credit names the model's credit entry.
      * @param {String} url The model URL.
      */
     Cyberspace.prototype.buildCelestialModel = function(b, url) {
@@ -940,6 +945,7 @@ define('format_mnemo/vr', [], function() {
             model.position.sub(centre);
             self.dressCelestialModel(model);
             holder.remove(placeholder);
+            showCredit(self.credits, b.credit);
             holder.add(model);
             return holder;
         }).catch(function() {
@@ -4243,6 +4249,7 @@ define('format_mnemo/vr', [], function() {
         if (lite) {
             return this.loadModel(lite).then(function(tpl) {
                 tpl.mnemoAnimate = animate;
+                showCredit(self.credits, name);
                 return tpl;
             }, function() {
                 return self.loadNamedModel(name, base, pack, true);
@@ -4268,6 +4275,7 @@ define('format_mnemo/vr', [], function() {
         return p.then(function(tpl) {
             if (tpl) {
                 tpl.mnemoAnimate = animate;
+                showCredit(self.credits, name);
             }
             return tpl;
         });
@@ -5985,6 +5993,7 @@ define('format_mnemo/vr', [], function() {
             }
             built.body.visible = false;
             built.group.add(model);
+            showCredit(self.credits, name);
             // Refresh the wet-street reflection so it shows the model.
             self.scheduleWetCapture();
             // The scene uses a static shadow map (autoUpdate off, refreshed only
@@ -7520,6 +7529,45 @@ define('format_mnemo/vr', [], function() {
         ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
         Enter: 'Enter', Tab: 'Tab', Backquote: '`', Escape: 'Esc'
     };
+
+    /**
+     * Find the model credits list next to a scene and hide every entry, so only
+     * the credits of models the scene loads are shown (each revealed by
+     * showCredit). Without JavaScript, the list stays complete.
+     *
+     * @param {Element} root The scene mount point.
+     * @return {Element|null} The credits list, or null when there is none.
+     */
+    function initCredits(root) {
+        var wrap = root && root.closest ? root.closest('.format-mnemo') : null;
+        var list = wrap ? wrap.querySelector('[data-mnemo-credits]') : null;
+        if (!list) {
+            return null;
+        }
+        list.hidden = true;
+        list.querySelectorAll('[data-mnemo-credit]').forEach(function(item) {
+            item.hidden = true;
+        });
+        return list;
+    }
+
+    /**
+     * Reveal a model's credit (and the credits list) once the model is loaded.
+     *
+     * @param {Element|null} list The credits list from initCredits.
+     * @param {String} name The model base name.
+     */
+    function showCredit(list, name) {
+        if (!list) {
+            return;
+        }
+        list.querySelectorAll('[data-mnemo-credit]').forEach(function(item) {
+            if (item.getAttribute('data-mnemo-credit') === name) {
+                item.hidden = false;
+                list.hidden = false;
+            }
+        });
+    }
 
     /**
      * Whether this visitor should get the lighter "-lite" model copies: forced
@@ -14723,6 +14771,8 @@ define('format_mnemo/vr', [], function() {
         _previewTurnQuaternion: previewTurnQuaternion,
         _previewEulerDegrees: previewEulerDegrees,
         _wantsLiteModels: wantsLiteModels,
+        _initCredits: initCredits,
+        _showCredit: showCredit,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
