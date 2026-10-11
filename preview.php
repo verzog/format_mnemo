@@ -385,6 +385,21 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
             'format-mnemo-preview__use text-muted'
         );
     }
+    // Size: the triangle count and file size when known, then a warning for
+    // each headset budget the model is over.
+    $size = [];
+    if (isset($model['triangles'])) {
+        $size[] = get_string('preview_triangles', 'format_mnemo', number_format($model['triangles']));
+    }
+    if (isset($model['filesize'])) {
+        $size[] = display_size($model['filesize']);
+    }
+    if ($size) {
+        $body .= html_writer::div(implode(' · ', $size), 'format-mnemo-preview__use text-muted');
+    }
+    foreach ($model['warnings'] ?? [] as $warning) {
+        $body .= html_writer::div(s($warning), 'format-mnemo-preview__budget alert alert-warning', ['role' => 'note']);
+    }
     // Per-model settings panel: environments, facing, scale and behaviour
     // (including "animate"), saved to model_config. Offered for every
     // configurable model - props, vehicles and buildings - but not the

@@ -25,6 +25,7 @@
 
 namespace format_mnemo\output;
 
+use format_mnemo\local\model_budget;
 use moodle_url;
 
 /**
@@ -285,12 +286,14 @@ class asset_gallery {
             $filename = $name . '.' . $ext;
             $path = null;
             $file = null;
+            $filesize = null;
             if ($externalbase !== '') {
                 $url = rtrim($externalbase, '/') . '/' . $name . '.glb';
                 $source = 'url';
             } else if (isset($uploaded[$filename])) {
                 $file = $uploaded[$filename];
                 $source = 'uploaded';
+                $filesize = (int)$file->get_filesize();
                 if ($ext === 'zip') {
                     // A multi-file bundle resolves to its extracted entry URL;
                     // metadata is not read from the zip (left null below).
@@ -306,6 +309,7 @@ class asset_gallery {
                 $url = (new moodle_url('/course/format/mnemo/models/' . $name . '.glb'))->out(false);
                 $source = 'bundled';
                 $path = $CFG->dirroot . '/course/format/mnemo/models/' . $name . '.glb';
+                $filesize = is_readable($path) ? (int)filesize($path) : null;
             } else {
                 continue;
             }
@@ -318,6 +322,9 @@ class asset_gallery {
                 'category' => $category,
                 'copyright' => $meta['copyright'],
                 'generator' => $meta['generator'],
+                'triangles' => $meta['triangles'],
+                'filesize' => $filesize,
+                'warnings' => model_budget::warnings($category, $filesize, $meta['triangles']),
             ];
         }
         return $out;
@@ -325,7 +332,7 @@ class asset_gallery {
 
     /**
      * The glTF asset metadata (copyright and generator) embedded in a model,
-     * read from its GLB header. Cached per source+URL so the gallery does not
+     * and its triangle count, read from its GLB header. Cached per source+URL so the gallery does not
      * re-read local files or re-fetch remote packs on every view. Best-effort:
      * anything unreadable (a truncated file, a remote fetch failure, a model
      * with no such fields) yields nulls.
@@ -334,13 +341,14 @@ class asset_gallery {
      * @param string $url The model's effective URL (the cache key with source).
      * @param string|null $path Local filesystem path, for a bundled model.
      * @param \stored_file|null $file The stored file, for an uploaded model.
-     * @return array{copyright: ?string, generator: ?string}
+     * @return array The copyright, generator and triangles (each possibly null).
      */
     protected static function model_metadata(string $source, string $url, ?string $path, ?\stored_file $file): array {
         $cache = \cache::make('format_mnemo', 'modelmeta');
         $cachekey = sha1($source . '|' . $url);
         $cached = $cache->get($cachekey);
-        if (is_array($cached)) {
+        // Entries cached before triangle counts were added are re-read.
+        if (is_array($cached) && array_key_exists('triangles', $cached)) {
             return $cached;
         }
         $head = self::glb_head_bytes($source, $url, $path, $file);
@@ -420,15 +428,15 @@ class asset_gallery {
     }
 
     /**
-     * Parse the glTF asset block (copyright, generator) out of the leading
-     * bytes of a GLB. Tolerant of anything malformed or truncated - it simply
+     * Parse the glTF asset block (copyright, generator) and the triangle count
+     * out of the leading bytes of a GLB. Tolerant of anything malformed or truncated - it simply
      * returns nulls rather than raising.
      *
      * @param string $bytes The leading bytes of a GLB (header + JSON chunk).
-     * @return array{copyright: ?string, generator: ?string}
+     * @return array The copyright, generator and triangles (each possibly null).
      */
     protected static function parse_glb_asset(string $bytes): array {
-        $none = ['copyright' => null, 'generator' => null];
+        $none = ['copyright' => null, 'generator' => null, 'triangles' => null];
         // 12-byte GLB header (magic, version, length) + 8-byte chunk header.
         if (strlen($bytes) < 20 || substr($bytes, 0, 4) !== 'glTF') {
             return $none;
@@ -442,8 +450,12 @@ class asset_gallery {
         // If the buffer was truncated before the whole JSON chunk (a ranged
         // remote read), json_decode fails and we fall back to nulls.
         $data = json_decode($json, true);
-        if (!is_array($data) || !isset($data['asset']) || !is_array($data['asset'])) {
+        if (!is_array($data)) {
             return $none;
+        }
+        $triangles = model_budget::count_triangles($data);
+        if (!isset($data['asset']) || !is_array($data['asset'])) {
+            return ['triangles' => $triangles] + $none;
         }
         $asset = $data['asset'];
         $clean = function ($value): ?string {
@@ -461,6 +473,7 @@ class asset_gallery {
         return [
             'copyright' => $clean($asset['copyright'] ?? null),
             'generator' => $clean($asset['generator'] ?? null),
+            'triangles' => $triangles,
         ];
     }
 

@@ -377,6 +377,23 @@ high-resolution textures. If a strict Content-Security-Policy blocks the addon
 decoders, the plugin falls back to a built-in **uncompressed**-glTF parser, so
 keep an uncompressed copy handy for locked-down sites.
 
+**Size budgets.** These limits keep the city smooth on standalone headsets
+(such as Quest) as well as desktop browsers. Each is the most a model of that kind
+should use; the file size is after compression.
+
+| Model | Triangles (max) | File size (max) |
+| --- | --- | --- |
+| Prop (lamp, barrier, kiosk) | 3,000 | 1 MB |
+| Flying car | 5,000 | 1 MB |
+| Building | 20,000 | 3 MB |
+
+A model over budget still uploads and works, but it may load slowly or stutter on
+a headset. When you save an upload, Moodle warns you about each new model that is
+over, and the asset viewer shows every model's triangle count and file size, with
+a warning on any that are over. Triangles are counted for `.glb` files only; for
+`.fbx` and `.zip` uploads only the file size is checked. Keep textures to 1024 px
+for props and cars, and 2048 px for buildings.
+
 **Multi-file models (ZIP bundles).** A single-file `.glb` is simplest, but many
 models come as **multiple files** — a `.gltf` with a separate `.bin` and a
 `textures/` folder, or an `.fbx` with external texture images. Upload the whole

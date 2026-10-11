@@ -995,6 +995,12 @@
     font-size: 0.85em;
 }
 
+.format-mnemo-preview__budget {
+    margin: 6px 0 0;
+    padding: 4px 8px;
+    font-size: 0.85em;
+}
+
 .format-mnemo-preview__settings {
     margin-top: 8px;
     font-size: 0.85em;

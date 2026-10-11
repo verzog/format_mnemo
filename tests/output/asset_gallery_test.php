@@ -295,10 +295,11 @@ final class asset_gallery_test extends \advanced_testcase {
      * Build a minimal GLB byte string with the given glTF asset block.
      *
      * @param array $asset The asset object (e.g. copyright/generator/version).
+     * @param array $extra Other top-level glTF properties (e.g. meshes).
      * @return string The GLB bytes.
      */
-    protected function make_glb(array $asset): string {
-        $json = json_encode(['asset' => $asset]);
+    protected function make_glb(array $asset, array $extra = []): string {
+        $json = json_encode(['asset' => $asset] + $extra);
         // Pad the JSON chunk to a 4-byte boundary with spaces, per the GLB spec.
         while (strlen($json) % 4 !== 0) {
             $json .= ' ';
@@ -354,6 +355,43 @@ final class asset_gallery_test extends \advanced_testcase {
         }
         $this->assertSame('(c) 2026 Ada Lovelace, CC-BY-4.0', $bykey['rocket']['copyright']);
         $this->assertSame('Blender 4.2', $bykey['rocket']['generator']);
+    }
+
+    /**
+     * Model cards carry the triangle count and file size, and a warning for
+     * each budget an uploaded model is over; the bundled models are within.
+     */
+    public function test_model_budgets(): void {
+        $this->resetAfterTest();
+
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $quiz = $bykey['building-quiz'];
+        $this->assertGreaterThan(0, $quiz['triangles']);
+        $this->assertGreaterThan(0, $quiz['filesize']);
+        $this->assertSame([], $quiz['warnings']);
+
+        // An uploaded prop over the prop triangle budget gets one warning.
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'assetpack',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'statue.glb',
+        ], $this->make_glb(['version' => '2.0'], [
+            'accessors' => [['count' => 30000]],
+            'meshes' => [['primitives' => [['attributes' => ['POSITION' => 0]]]]],
+        ]));
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame(10000, $bykey['statue']['triangles']);
+        $this->assertCount(1, $bykey['statue']['warnings']);
+        $this->assertStringContainsString('10,000', $bykey['statue']['warnings'][0]);
     }
 
     /**
