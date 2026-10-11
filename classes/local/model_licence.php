@@ -166,13 +166,13 @@ class model_licence {
 
     /**
      * Whether a model's credit is worth showing students: it names an author
-     * or a licence.
+     * or a licence, or carries a copyright notice.
      *
      * @param array $credit A credit (see merge()).
      * @return bool True to list it under the 3D view.
      */
     public static function is_creditable(array $credit): bool {
-        return !empty($credit['author']) || !empty($credit['licence']);
+        return !empty($credit['author']) || !empty($credit['licence']) || !empty($credit['copyright']);
     }
 
     /**
@@ -195,7 +195,9 @@ class model_licence {
         $title = $title === '' ? $fallback : $title;
         $source = self::safe_url($credit['source'] ?? null) ?? $titleurl;
         [$author, $authorurl] = self::split_link((string)($credit['author'] ?? ''));
-        [$licence, $licenceurl] = self::split_link((string)($credit['licence'] ?? ''));
+        // With no licence named, the copyright notice stands in for it (the
+        // standard glTF field, which often names the licence too).
+        [$licence, $licenceurl] = self::split_link((string)($credit['licence'] ?? $credit['copyright'] ?? ''));
         $a = (object)[
             'title' => $part($title, $source),
             'author' => $part($author, $authorurl),

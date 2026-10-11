@@ -147,6 +147,12 @@ final class model_licence_test extends \advanced_testcase {
         $this->assertStringNotContainsString('javascript:', $html);
         $this->assertStringContainsString('&lt;b&gt;Tower&lt;/b&gt; by Ada &lt;script&gt;', $html);
 
+        // A copyright notice alone is credited, standing in for the licence.
+        $copyright = ['copyright' => '(c) 2026 Ada, CC-BY-4.0'];
+        $this->assertTrue(model_licence::is_creditable($copyright));
+        $this->assertSame('bench, (c) 2026 Ada, CC-BY-4.0', model_licence::credit_html($copyright, 'bench'));
+        $this->assertFalse(model_licence::is_creditable(['title' => 'Bench']));
+
         // No title falls back to the model name.
         $html = model_licence::credit_html(['licence' => 'CC0'], 'lamp');
         $this->assertSame('lamp, CC0', $html);

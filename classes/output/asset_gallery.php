@@ -47,6 +47,12 @@ class asset_gallery {
     protected static $metafetchdeadline = null;
 
     /**
+     * @var bool Whether a remote model's metadata was skipped (not cached yet)
+     * in this request because remote reads were off; see credits().
+     */
+    protected static $remotemissed = false;
+
+    /**
      * The texture assets, each as an ordered map describing one card: its key,
      * label/usage string keys, effective URL (or null) and source. A URL setting
      * takes precedence over an uploaded file, matching the scene renderer.
@@ -145,6 +151,7 @@ class asset_gallery {
                 'url' => self::file_url($body . 'asset', $file),
                 'kind' => self::asset_kind($file->get_filename()),
                 'source' => 'uploaded',
+                'file' => $file,
             ];
         }
         return null;
@@ -236,14 +243,19 @@ class asset_gallery {
         foreach (['sun', 'moon'] as $body) {
             $cel = self::celestial($body);
             if ($cel !== null && $cel['kind'] === 'model') {
+                // Credit from the model file only: the sun and moon have no
+                // model settings to type one into.
+                $meta = self::model_metadata($cel['source'], $cel['url'], null, $cel['file'] ?? null, $remote);
                 $out[] = [
                     'key' => $body,
                     'label' => get_string('preview_tex_' . $body, 'format_mnemo'),
                     'url' => $cel['url'],
                     'source' => $cel['source'],
                     'category' => 'celestial',
-                    'copyright' => null,
-                    'generator' => null,
+                    'copyright' => $meta['copyright'],
+                    'generator' => $meta['generator'],
+                    'credit' => model_licence::merge($meta['credit'], []),
+                    'licenceflags' => model_licence::flags(model_licence::merge($meta['credit'], [])),
                 ];
             }
         }
@@ -406,6 +418,7 @@ class asset_gallery {
         // Without remote reads (the course page), a remote model not yet in the
         // cache gets no metadata, and nothing is cached for it.
         if ($source === 'url' && !$remote) {
+            self::$remotemissed = true;
             return self::parse_glb_asset('');
         }
         $head = self::glb_head_bytes($source, $url, $path, $file);
@@ -625,22 +638,73 @@ class asset_gallery {
     }
 
     /**
-     * The credits to show under the 3D view: every model that names an author
-     * or a licence, keyed by model name, as escaped credit-line HTML. Remote
-     * packs are not fetched (only their cached metadata is used), so the
-     * course page never waits on them.
+     * The credits to show under the 3D view: every model that names an author,
+     * a licence or a copyright notice, as escaped credit-line HTML. Two models
+     * may share a name (an "av" prop and an "av" vehicle), so each keeps its
+     * own entry.
      *
-     * @return string[] Model name => credit line HTML, sorted by name.
+     * Building the list reads every model's metadata, so it is cached until a
+     * model, a model setting or the language changes. Remote packs are never
+     * fetched here (the course page must not wait on them): when a remote
+     * model's metadata is not cached yet, a background task fetches it and the
+     * list is rebuilt on a later page view.
+     *
+     * @return array[] Each credit: name (the model's base name) and html, sorted by name.
      */
     public static function credits(): array {
+        $cache = \cache::make('format_mnemo', 'modelcredits');
+        $key = self::credits_revision();
+        $cached = $cache->get($key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+        self::$remotemissed = false;
         $out = [];
+        $seen = [];
         foreach (self::models(false) as $model) {
-            if (!empty($model['credit']) && model_licence::is_creditable($model['credit'])) {
-                $out[(string)$model['key']] = model_licence::credit_html($model['credit'], (string)$model['label']);
+            if (empty($model['credit']) || !model_licence::is_creditable($model['credit'])) {
+                continue;
+            }
+            $name = (string)$model['key'];
+            $html = model_licence::credit_html($model['credit'], (string)$model['label']);
+            if (!isset($seen[$name . '|' . $html])) {
+                $seen[$name . '|' . $html] = true;
+                $out[] = ['name' => $name, 'html' => $html];
             }
         }
-        ksort($out, SORT_STRING);
+        usort($out, function ($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+        if (self::$remotemissed) {
+            \core\task\manager::queue_adhoc_task(new \format_mnemo\task\fetch_model_metadata(), true);
+        } else {
+            $cache->set($key, $out);
+        }
         return $out;
+    }
+
+    /**
+     * A key that changes whenever the credits list could: any model file
+     * (uploaded or bundled), the model settings, the asset-pack and sun/moon
+     * URLs, or the language the credit lines are written in.
+     *
+     * @return string The revision key.
+     */
+    protected static function credits_revision(): string {
+        global $CFG;
+        $parts = [current_language(), (string)get_config('format_mnemo', 'version')];
+        foreach (['assetbaseurl', 'sunasseturl', 'moonasseturl', 'modelconfig'] as $setting) {
+            $parts[] = (string)get_config('format_mnemo', $setting);
+        }
+        foreach (['assetpack', 'vehicleassets', 'buildingassets', 'sunasset', 'moonasset'] as $filearea) {
+            foreach (self::stored_files($filearea) as $file) {
+                $parts[] = $filearea . '/' . $file->get_filename() . '/' . $file->get_contenthash();
+            }
+        }
+        foreach (glob($CFG->dirroot . '/course/format/mnemo/models/*.glb') ?: [] as $path) {
+            $parts[] = basename($path) . '/' . (int)@filemtime($path);
+        }
+        return sha1(implode("\n", $parts));
     }
 
     /**

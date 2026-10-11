@@ -811,6 +811,8 @@ define('format_mnemo/vr', [], function() {
         // an image skins it. Anything absent keeps the procedural disc.
         var asset = isday ? this.sunAsset : this.moonAsset;
         if (asset && asset.kind === 'model' && asset.url) {
+            // The model's credit (if it has one) is listed as "sun" or "moon".
+            body.credit = isday ? 'sun' : 'moon';
             this.buildCelestialModel(body, asset.url);
             return;
         }
@@ -910,7 +912,7 @@ define('format_mnemo/vr', [], function() {
      * and kept if the load fails.
      *
      * @param {Object} b The body descriptor {dir, colour, size, core, maria,
-     *     opacity, distance}.
+     *     opacity, distance, credit}; credit names the model's credit entry.
      * @param {String} url The model URL.
      */
     Cyberspace.prototype.buildCelestialModel = function(b, url) {
@@ -943,6 +945,7 @@ define('format_mnemo/vr', [], function() {
             model.position.sub(centre);
             self.dressCelestialModel(model);
             holder.remove(placeholder);
+            showCredit(self.credits, b.credit);
             holder.add(model);
             return holder;
         }).catch(function() {
