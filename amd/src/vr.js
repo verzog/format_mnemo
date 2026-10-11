@@ -14326,15 +14326,140 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
-     * Render the admin asset viewer's model previews: load each model, frame it,
-     * and spin them all in one animation loop through a single shared WebGL
-     * renderer whose output is copied into each card's 2D canvas (so the gallery
-     * uses only one WebGL context however many models it shows).
+     * Axis markers for a model preview: an arrow along each of the model's own
+     * axes (X red, Y green, Z blue) with a letter at its tip, drawn over the
+     * model (no depth test) so they are never hidden inside it.
+     *
+     * @param {Object} THREE The Three.js namespace.
+     * @param {Number} len Arrow length.
+     * @return {Object} A Three.Group centred on the origin.
+     */
+    function previewAxes(THREE, len) {
+        var group = new THREE.Group();
+        var axes = [
+            {dir: [1, 0, 0], colour: '#ff4d4d', label: 'X'},
+            {dir: [0, 1, 0], colour: '#4dff6a', label: 'Y'},
+            {dir: [0, 0, 1], colour: '#4d9dff', label: 'Z'}
+        ];
+        axes.forEach(function(a) {
+            var dir = new THREE.Vector3(a.dir[0], a.dir[1], a.dir[2]);
+            var arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(), len, a.colour, len * 0.14, len * 0.07);
+            arrow.traverse(function(o) {
+                if (o.material) {
+                    o.material.depthTest = false;
+                    o.material.depthWrite = false;
+                    o.material.transparent = true;
+                }
+                o.renderOrder = 10;
+            });
+            group.add(arrow);
+            var canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            var ctx = canvas.getContext('2d');
+            ctx.font = 'bold 44px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineWidth = 6;
+            ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+            ctx.strokeText(a.label, 32, 34);
+            ctx.fillStyle = a.colour;
+            ctx.fillText(a.label, 32, 34);
+            var sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(canvas), depthTest: false, depthWrite: false, transparent: true
+            }));
+            sprite.position.copy(dir).multiplyScalar(len * 1.18);
+            sprite.scale.setScalar(len * 0.24);
+            sprite.renderOrder = 11;
+            group.add(sprite);
+        });
+        return group;
+    }
+
+    /**
+     * The next snapped orientation for a preview turn: a 90° step about the
+     * scene's (world) up axis for left/right and its side axis for up/down,
+     * applied on top of the current orientation; reset returns to none.
+     *
+     * @param {Object} THREE The Three.js namespace.
+     * @param {Object} current The current Three.Quaternion.
+     * @param {String} turn One of left, right, up, down, reset.
+     * @return {Object} The target Three.Quaternion.
+     */
+    function previewTurnQuaternion(THREE, current, turn) {
+        if (turn === 'reset') {
+            return new THREE.Quaternion();
+        }
+        var steps = {
+            left: [0, 1, 0, 1], right: [0, 1, 0, -1], up: [1, 0, 0, -1], down: [1, 0, 0, 1]
+        };
+        var st = steps[turn];
+        if (!st) {
+            return current.clone();
+        }
+        var step = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(st[0], st[1], st[2]), st[3] * Math.PI / 2);
+        return step.multiply(current.clone()).normalize();
+    }
+
+    /**
+     * The pitch/yaw/roll (X/Y/Z Euler, whole degrees) of an orientation, in the
+     * same terms as the model settings' orientation correction.
+     *
+     * @param {Object} THREE The Three.js namespace.
+     * @param {Object} q A Three.Quaternion.
+     * @return {Object} {pitch, yaw, roll} in degrees.
+     */
+    function previewEulerDegrees(THREE, q) {
+        // A right-angle pose has several equivalent pitch/yaw/roll spellings
+        // (two right turns are "yaw 180" or "pitch 180, roll 180"): try the
+        // right-angle combinations and report the simplest - fewest non-zero
+        // angles, then yaw before pitch before roll.
+        var quarter = [0, 90, 180, -90];
+        var best = null;
+        var probe = new THREE.Quaternion();
+        var euler = new THREE.Euler();
+        var d2r = Math.PI / 180;
+        for (var a = 0; a < 4; a++) {
+            for (var b = 0; b < 4; b++) {
+                for (var c = 0; c < 4; c++) {
+                    probe.setFromEuler(euler.set(quarter[a] * d2r, quarter[b] * d2r, quarter[c] * d2r, 'XYZ'));
+                    if (Math.abs(probe.dot(q)) < 0.9999) {
+                        continue;
+                    }
+                    var cost = (a ? 10 : 0) + (b ? 9 : 0) + (c ? 11 : 0);
+                    if (!best || cost < best.cost) {
+                        best = {cost: cost, pitch: quarter[a], yaw: quarter[b], roll: quarter[c]};
+                    }
+                }
+            }
+        }
+        if (best) {
+            return {pitch: best.pitch, yaw: best.yaw, roll: best.roll};
+        }
+        var e = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+        var deg = function(r) {
+            var d = Math.round(r * 180 / Math.PI);
+            // Report 180 rather than -180, and never "-0".
+            if (d === -180) {
+                return 180;
+            }
+            return d || 0;
+        };
+        return {pitch: deg(e.x), yaw: deg(e.y), roll: deg(e.z)};
+    }
+
+    /**
+     * Render the admin asset viewer's model previews: load each model, frame it
+     * with axis markers over a floor grid, and draw it through a single shared
+     * WebGL renderer whose output is copied into each card's 2D canvas (so the
+     * gallery uses only one WebGL context however many models it shows). Cards
+     * redraw only when a turn button changes them.
      *
      * @param {Object} config The preview config ({models: [{canvasid, url}], addonsbaseurl}).
      * @param {Object} loaded The loaded Three.js + addon namespace.
+     * @param {Object} root The preview root element (for the turn buttons).
      */
-    function renderModelPreviews(config, loaded) {
+    function renderModelPreviews(config, loaded, root) {
         var THREE = loaded.THREE;
         var models = config.models || [];
         if (!models.length || typeof THREE.WebGLRenderer !== 'function') {
@@ -14362,7 +14487,10 @@ define('format_mnemo/vr', [], function() {
             key.position.set(3, 5, 4);
             scene.add(key);
             var cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
-            var entry = {ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null};
+            var entry = {
+                ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null, base: null,
+                id: m.canvasid, from: null, to: null, t: 1
+            };
             entries.push(entry);
             load(m.url).then(function(object) {
                 // A model that loads but has no renderable geometry (an empty
@@ -14380,13 +14508,24 @@ define('format_mnemo/vr', [], function() {
                         (m.orient.yaw || 0) * d2r, (m.orient.roll || 0) * d2r);
                 }
                 framePreviewModel(THREE, object, cam);
-                // Spin a centred pivot, not the translated model: rotating the
+                var dims = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
+                var maxdim = Math.max(dims.x, dims.y, dims.z) || 1;
+                // Turn a centred pivot, not the translated model: rotating the
                 // model directly would orbit its original local origin (off the
-                // camera target) for a model whose root is not centred.
+                // camera target) for a model whose root is not centred. The
+                // axis markers ride on the pivot so they turn with the model.
                 var pivot = new THREE.Group();
                 pivot.add(object);
+                pivot.add(previewAxes(THREE, maxdim * 0.7));
                 scene.add(pivot);
+                // A fixed floor grid below the model: the scene's own up.
+                var grid = new THREE.GridHelper(maxdim * 2.4, 8, 0x8aa0b4, 0x56606e);
+                grid.position.y = -maxdim * 0.62;
+                scene.add(grid);
                 entry.model = pivot;
+                entry.base = object.quaternion.clone();
+                drawEntry(entry);
+                showOrientation(entry);
                 return null;
             }).catch(function(e) {
                 // Report the failure on the card (and log details) rather than
@@ -14405,20 +14544,84 @@ define('format_mnemo/vr', [], function() {
         if (!entries.length) {
             return;
         }
-        var spin = function() {
+        // Each turn button snaps its card's model 90° (a short eased turn), and
+        // the readout shows the resulting pitch/yaw/roll. Cards are only redrawn
+        // when they change, not every frame.
+        var animating = false;
+        var step = function() {
+            animating = false;
             for (var i = 0; i < entries.length; i++) {
                 var e = entries[i];
-                if (!e.model) {
+                if (!e.model || e.t >= 1) {
                     continue;
                 }
-                e.model.rotation.y += 0.012;
-                renderer.render(e.scene, e.cam);
-                e.ctx.clearRect(0, 0, size, size);
-                e.ctx.drawImage(renderer.domElement, 0, 0, size, size);
+                e.t = Math.min(1, e.t + 0.08);
+                var k = e.t < 0.5 ? 2 * e.t * e.t : 1 - Math.pow(-2 * e.t + 2, 2) / 2;
+                e.model.quaternion.slerpQuaternions(e.from, e.to, k);
+                if (e.t >= 1) {
+                    e.model.quaternion.copy(e.to);
+                    showOrientation(e);
+                } else {
+                    animating = true;
+                }
+                drawEntry(e);
             }
-            window.requestAnimationFrame(spin);
+            if (animating) {
+                window.requestAnimationFrame(step);
+            }
         };
-        window.requestAnimationFrame(spin);
+        if (root) {
+            root.addEventListener('click', function(ev) {
+                var btn = ev.target.closest('[data-mnemo-turn]');
+                var row = btn && btn.closest('[data-mnemo-turn-for]');
+                if (!row) {
+                    return;
+                }
+                var id = row.getAttribute('data-mnemo-turn-for');
+                for (var i = 0; i < entries.length; i++) {
+                    var e = entries[i];
+                    if (e.id === id && e.model) {
+                        e.from = e.model.quaternion.clone();
+                        // Stack onto the turn already in progress so fast clicks
+                        // never land between 90° steps.
+                        e.to = previewTurnQuaternion(THREE, e.to || e.from, btn.getAttribute('data-mnemo-turn'));
+                        e.t = 0;
+                        if (!animating) {
+                            animating = true;
+                            window.requestAnimationFrame(step);
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * Render one card's scene and copy it into the card's 2D canvas.
+         *
+         * @param {Object} e The preview entry.
+         */
+        function drawEntry(e) {
+            renderer.render(e.scene, e.cam);
+            e.ctx.clearRect(0, 0, size, size);
+            e.ctx.drawImage(renderer.domElement, 0, 0, size, size);
+        }
+
+        /**
+         * Write a card's current pitch/yaw/roll (the turn plus any saved
+         * orientation correction) into its readout line.
+         *
+         * @param {Object} e The preview entry.
+         */
+        function showOrientation(e) {
+            var out = document.getElementById(e.id + '-orient');
+            if (!out || !e.model) {
+                return;
+            }
+            var q = e.model.quaternion.clone().multiply(e.base || new THREE.Quaternion());
+            var d = previewEulerDegrees(THREE, q);
+            var tpl = strings.orientation || 'Pitch {pitch}° · yaw {yaw}° · roll {roll}°';
+            out.textContent = tpl.replace('{pitch}', d.pitch).replace('{yaw}', d.yaw).replace('{roll}', d.roll);
+        }
     }
 
     return {
@@ -14436,6 +14639,9 @@ define('format_mnemo/vr', [], function() {
         _previewModelLoader: previewModelLoader,
         _previewFailMessage: previewFailMessage,
         _drawPreviewMessage: drawPreviewMessage,
+        _previewAxes: previewAxes,
+        _previewTurnQuaternion: previewTurnQuaternion,
+        _previewEulerDegrees: previewEulerDegrees,
 
         /**
          * Entry point invoked from PHP with the scene root's DOM id.
@@ -14494,8 +14700,9 @@ define('format_mnemo/vr', [], function() {
         },
 
         /**
-         * Entry point for the admin asset viewer (preview.php): render a live,
-         * spinning 3D preview of each prop model into its card canvas. Textures
+         * Entry point for the admin asset viewer (preview.php): render a 3D
+         * preview of each prop model, with axis markers and 90° turn buttons,
+         * into its card canvas. Textures
          * are shown by the page as plain images and need no client code, so this
          * only wires up the model previews. Best-effort: if Three.js or the glTF
          * addon loader cannot load, the gallery keeps its labels and links.
@@ -14515,7 +14722,7 @@ define('format_mnemo/vr', [], function() {
             }
             loadThree(config).then(function(loaded) {
                 try {
-                    renderModelPreviews(config, loaded);
+                    renderModelPreviews(config, loaded, root);
                 } catch (e) {
                     if (window.console) {
                         window.console.error(e);

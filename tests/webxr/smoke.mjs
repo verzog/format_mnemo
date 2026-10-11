@@ -3826,6 +3826,46 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: turn buttons snap 90 degrees and the readout picks the simplest pitch/yaw/roll',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            const turn = (q, t) => M._previewTurnQuaternion(THREE, q, t);
+            const deg = (q) => M._previewEulerDegrees(THREE, q);
+            const fmt = (d) => `${d.pitch},${d.yaw},${d.roll}`;
+            let q = new THREE.Quaternion();
+            const left = fmt(deg(q = turn(q, 'left')));
+            const half = fmt(deg(q = turn(q, 'left')));
+            const full = fmt(deg(turn(turn(q, 'left'), 'left')));
+            const up = fmt(deg(turn(new THREE.Quaternion(), 'up')));
+            const reset = fmt(deg(turn(q, 'reset')));
+            // A saved non-right-angle correction falls back to the plain Euler.
+            const odd = fmt(deg(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 4, 0))));
+            const pass = left === '0,90,0' && half === '0,180,0' && full === '0,0,0' && up === '-90,0,0' &&
+                reset === '0,0,0' && odd === '0,45,0';
+            return {pass, detail: `left=${left} half=${half} full=${full} up=${up} reset=${reset} odd=${odd}`};
+        }
+    },
+    {
+        name: 'preview: axis markers are three arrows with X/Y/Z labels drawn over the model',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const axes = window.__mnemoModule._previewAxes(THREE, 2);
+            const arrows = axes.children.filter((c) => c.type === 'ArrowHelper');
+            const labels = axes.children.filter((c) => c.isSprite);
+            let overlay = true;
+            axes.traverse((o) => {
+                if (o.material && o.material.depthTest !== false) {
+                    overlay = false;
+                }
+            });
+            const tips = labels.map((l) => l.position.toArray().map((v) => Math.round(v * 100) / 100).join('/'));
+            const pass = arrows.length === 3 && labels.length === 3 && overlay &&
+                tips.join() === '2.36/0/0,0/2.36/0,0/0/2.36';
+            return {pass, detail: `arrows=${arrows.length} labels=${labels.length} overlay=${overlay} tips=${tips}`};
+        }
+    },
+    {
         name: 'batching: mergeGeometries joins painted, UV-baked boxes into one geometry',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

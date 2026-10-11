@@ -254,8 +254,8 @@ foreach ($models as $i => $model) {
     // Reflect a configurable model's orientation correction in its preview, so
     // an admin sees the effect of the pitch/yaw/roll they set (celestials have
     // no model-config entry). A vehicle's yaw is its travel-facing in the scene,
-    // not a fixed pose (and the preview spins on Y anyway), so its yaw is zeroed
-    // here to match how the scene orients it (pitch/roll only).
+    // not a fixed pose, so its yaw is zeroed here to match how the scene orients
+    // it (pitch/roll only).
     if (in_array($model['key'], $configurable, true)) {
         $cfg = model_config::get($model['key']);
         $isvehicle = ($model['category'] ?? 'prop') === 'vehicle';
@@ -276,6 +276,13 @@ $config['strings'] = [
     'loadfailed' => get_string('preview_model_failed', 'format_mnemo'),
     'loadfailedfbx' => get_string('preview_model_failed_fbx', 'format_mnemo'),
     'nogeometry' => get_string('preview_model_empty', 'format_mnemo'),
+    // The orientation readout under each card, with {pitch}/{yaw}/{roll}
+    // placeholders the client fills in after each turn.
+    'orientation' => get_string(
+        'preview_orientation',
+        'format_mnemo',
+        (object)['pitch' => '{pitch}', 'yaw' => '{yaw}', 'roll' => '{roll}']
+    ),
 ];
 
 echo $OUTPUT->header();
@@ -330,16 +337,34 @@ echo html_writer::end_div();
 
 // Models.
 echo $OUTPUT->heading(get_string('preview_models', 'format_mnemo'), 3);
+echo html_writer::tag('p', get_string('preview_axes', 'format_mnemo'), ['class' => 'text-muted']);
 
 // Render one model card. The canvas id keeps the model's index in the full list
 // so it stays aligned with $modelconfig (the client renders into it by id).
 $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $configurable, $PAGE): string {
+    $canvasid = $rootid . '-model-' . $i;
     $canvas = html_writer::tag('canvas', '', [
-        'id' => $rootid . '-model-' . $i,
+        'id' => $canvasid,
         'class' => 'format-mnemo-preview__canvas',
         'width' => 240, 'height' => 240,
         'aria-label' => $model['label'],
     ]);
+    // Snap-turn buttons (90° per press) and a readout of the resulting
+    // orientation, wired up client-side (initPreview) by the canvas id.
+    $turns = '';
+    $turnbuttons = ['left' => '←', 'right' => '→', 'up' => '↑', 'down' => '↓', 'reset' => '⟲'];
+    foreach ($turnbuttons as $turn => $glyph) {
+        $label = get_string('preview_turn_' . $turn, 'format_mnemo');
+        $turns .= html_writer::tag('button', $glyph, [
+            'type' => 'button',
+            'class' => 'btn btn-sm btn-secondary format-mnemo-preview__turnbtn',
+            'data-mnemo-turn' => $turn,
+            'title' => $label,
+            'aria-label' => $label,
+        ]);
+    }
+    $canvas .= html_writer::div($turns, 'format-mnemo-preview__turns', ['data-mnemo-turn-for' => $canvasid]) .
+        html_writer::div('', 'format-mnemo-preview__orient', ['id' => $canvasid . '-orient', 'aria-live' => 'polite']);
     $body = html_writer::div($model['label'], 'format-mnemo-preview__name') .
         $sourcebadge($model['source']) .
         html_writer::link(
