@@ -14423,7 +14423,9 @@ define('format_mnemo/vr', [], function() {
             for (var b = 0; b < 4; b++) {
                 for (var c = 0; c < 4; c++) {
                     probe.setFromEuler(euler.set(quarter[a] * d2r, quarter[b] * d2r, quarter[c] * d2r, 'XYZ'));
-                    if (Math.abs(probe.dot(q)) < 0.9999) {
+                    // Only a true right-angle pose (to rounding error) snaps; a
+                    // saved 89° falls through to the exact Euler below.
+                    if (Math.abs(probe.dot(q)) < 1 - 1e-9) {
                         continue;
                     }
                     var cost = (a ? 10 : 0) + (b ? 9 : 0) + (c ? 11 : 0);
@@ -14489,7 +14491,7 @@ define('format_mnemo/vr', [], function() {
             var cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
             var entry = {
                 ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null, base: null,
-                id: m.canvasid, from: null, to: null, t: 1
+                id: m.canvasid, from: null, to: null, t: 1, queue: []
             };
             entries.push(entry);
             load(m.url).then(function(object) {
@@ -14516,7 +14518,11 @@ define('format_mnemo/vr', [], function() {
                 // axis markers ride on the pivot so they turn with the model.
                 var pivot = new THREE.Group();
                 pivot.add(object);
-                pivot.add(previewAxes(THREE, maxdim * 0.7));
+                // Start the markers from the model's saved orientation too, so
+                // they show its own axes (centred on the pivot either way).
+                var axes = previewAxes(THREE, maxdim * 0.7);
+                axes.quaternion.copy(object.quaternion);
+                pivot.add(axes);
                 scene.add(pivot);
                 // A fixed floor grid below the model: the scene's own up.
                 var grid = new THREE.GridHelper(maxdim * 2.4, 8, 0x8aa0b4, 0x56606e);
@@ -14545,9 +14551,16 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         // Each turn button snaps its card's model 90° (a short eased turn), and
-        // the readout shows the resulting pitch/yaw/roll. Cards are only redrawn
-        // when they change, not every frame.
+        // the readout shows the resulting pitch/yaw/roll. Presses made during a
+        // turn are queued and played one 90° step at a time, so the motion
+        // always follows the buttons pressed. Cards are only redrawn when they
+        // change, not every frame.
         var animating = false;
+        var startTurn = function(e) {
+            e.from = e.model.quaternion.clone();
+            e.to = previewTurnQuaternion(THREE, e.from, e.queue.shift());
+            e.t = 0;
+        };
         var step = function() {
             animating = false;
             for (var i = 0; i < entries.length; i++) {
@@ -14561,9 +14574,11 @@ define('format_mnemo/vr', [], function() {
                 if (e.t >= 1) {
                     e.model.quaternion.copy(e.to);
                     showOrientation(e);
-                } else {
-                    animating = true;
+                    if (e.queue.length) {
+                        startTurn(e);
+                    }
                 }
+                animating = animating || e.t < 1;
                 drawEntry(e);
             }
             if (animating) {
@@ -14581,11 +14596,12 @@ define('format_mnemo/vr', [], function() {
                 for (var i = 0; i < entries.length; i++) {
                     var e = entries[i];
                     if (e.id === id && e.model) {
-                        e.from = e.model.quaternion.clone();
-                        // Stack onto the turn already in progress so fast clicks
-                        // never land between 90° steps.
-                        e.to = previewTurnQuaternion(THREE, e.to || e.from, btn.getAttribute('data-mnemo-turn'));
-                        e.t = 0;
+                        var turn = btn.getAttribute('data-mnemo-turn');
+                        // Reset drops any queued turns; others wait their turn.
+                        e.queue = turn === 'reset' ? ['reset'] : e.queue.concat([turn]);
+                        if (e.t >= 1) {
+                            startTurn(e);
+                        }
                         if (!animating) {
                             animating = true;
                             window.requestAnimationFrame(step);

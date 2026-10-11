@@ -3841,9 +3841,11 @@ const scenarios = [
             const reset = fmt(deg(turn(q, 'reset')));
             // A saved non-right-angle correction falls back to the plain Euler.
             const odd = fmt(deg(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 4, 0))));
+            // Close to a right angle is not a right angle: 89° stays 89°.
+            const near = fmt(deg(new THREE.Quaternion().setFromEuler(new THREE.Euler(89 * Math.PI / 180, 0, 0))));
             const pass = left === '0,90,0' && half === '0,180,0' && full === '0,0,0' && up === '-90,0,0' &&
-                reset === '0,0,0' && odd === '0,45,0';
-            return {pass, detail: `left=${left} half=${half} full=${full} up=${up} reset=${reset} odd=${odd}`};
+                reset === '0,0,0' && odd === '0,45,0' && near === '89,0,0';
+            return {pass, detail: `left=${left} half=${half} full=${full} up=${up} reset=${reset} odd=${odd} near=${near}`};
         }
     },
     {
