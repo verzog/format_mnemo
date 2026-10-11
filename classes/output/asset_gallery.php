@@ -26,6 +26,8 @@
 namespace format_mnemo\output;
 
 use format_mnemo\local\model_budget;
+use format_mnemo\local\model_config;
+use format_mnemo\local\model_licence;
 use format_mnemo\local\model_variants;
 use moodle_url;
 
@@ -199,9 +201,11 @@ class asset_gallery {
      * uploaded pack files, so an uploaded-only model (e.g. building-forum.glb
      * with no bundled counterpart) still gets a card.
      *
+     * @param bool $remote Whether a remote pack's models may be fetched for their
+     *     metadata (false on the course page, which must not wait on them).
      * @return array[] The model entries.
      */
-    public static function models(): array {
+    public static function models(bool $remote = true): array {
         // Categorise the bundled models by naming convention: building-* are
         // buildings, "av" is the flying-car vehicle, the rest are props.
         $bundledprops = [];
@@ -222,9 +226,9 @@ class asset_gallery {
         // upload area (no external URL), then bundled.
         $externalpack = (string)get_config('format_mnemo', 'assetbaseurl');
         $out = array_merge(
-            self::area_model_cards('prop', 'assetpack', $bundledprops, $externalpack),
-            self::area_model_cards('vehicle', 'vehicleassets', $bundledvehicles, ''),
-            self::area_model_cards('building', 'buildingassets', $bundledbuildings, '')
+            self::area_model_cards('prop', 'assetpack', $bundledprops, $externalpack, $remote),
+            self::area_model_cards('vehicle', 'vehicleassets', $bundledvehicles, '', $remote),
+            self::area_model_cards('building', 'buildingassets', $bundledbuildings, '', $remote)
         );
 
         // Sun and moon assets that are 3D models (a plain image is a texture,
@@ -257,17 +261,20 @@ class asset_gallery {
      * @param string $filearea The upload file area for this category.
      * @param array $bundledset The bundled model names in this category, as keys.
      * @param string $externalbase An external asset-pack base URL, or '' if none.
+     * @param bool $remote Whether a remote model may be fetched for its metadata.
      * @return array[] The model entries.
      */
     protected static function area_model_cards(
         string $category,
         string $filearea,
         array $bundledset,
-        string $externalbase
+        string $externalbase,
+        bool $remote = true
     ): array {
         global $CFG;
         $uploaded = self::stored_glb_files($filearea);
         $litefiles = model_variants::lite_files($filearea);
+        $configs = model_config::all();
         // Base name => the uploaded file's real extension (glb unless it is an
         // .fbx upload), so a card reconstructs the right filename below.
         $uploadedext = [];
@@ -315,7 +322,10 @@ class asset_gallery {
             } else {
                 continue;
             }
-            $meta = self::model_metadata($source, $url, $path, $file);
+            $meta = self::model_metadata($source, $url, $path, $file, $remote);
+            // The credit: the file's own, with any field typed into the model's
+            // settings taking precedence. A lite copy shares its full model's.
+            $credit = model_licence::merge($meta['credit'], $configs[$name]['credit'] ?? []);
             // An uploaded lite copy only counts when the full model is uploaded
             // too (an external pack or bundled model is what loads otherwise).
             // The budget category: the prop pack's "av" is the flying car.
@@ -335,6 +345,8 @@ class asset_gallery {
                 'filesize' => $filesize,
                 'warnings' => model_budget::model_warnings($budgetcat, $name, $filesize, $meta['triangles'], $lite !== null),
                 'lite' => $lite,
+                'credit' => $credit,
+                'licenceflags' => model_licence::flags($credit),
             ];
         }
         return $out;
@@ -374,15 +386,27 @@ class asset_gallery {
      * @param string $url The model's effective URL (the cache key with source).
      * @param string|null $path Local filesystem path, for a bundled model.
      * @param \stored_file|null $file The stored file, for an uploaded model.
-     * @return array The copyright, generator and triangles (each possibly null).
+     * @param bool $remote Whether a remote model may be fetched on a cache miss.
+     * @return array The copyright, generator, triangles and credit.
      */
-    protected static function model_metadata(string $source, string $url, ?string $path, ?\stored_file $file): array {
+    protected static function model_metadata(
+        string $source,
+        string $url,
+        ?string $path,
+        ?\stored_file $file,
+        bool $remote = true
+    ): array {
         $cache = \cache::make('format_mnemo', 'modelmeta');
         $cachekey = sha1($source . '|' . $url);
         $cached = $cache->get($cachekey);
-        // Entries cached before triangle counts were added are re-read.
-        if (is_array($cached) && array_key_exists('triangles', $cached)) {
+        // Entries cached before triangle counts and credits were added are re-read.
+        if (is_array($cached) && array_key_exists('credit', $cached)) {
             return $cached;
+        }
+        // Without remote reads (the course page), a remote model not yet in the
+        // cache gets no metadata, and nothing is cached for it.
+        if ($source === 'url' && !$remote) {
+            return self::parse_glb_asset('');
         }
         $head = self::glb_head_bytes($source, $url, $path, $file);
         $meta = self::parse_glb_asset($head);
@@ -484,10 +508,10 @@ class asset_gallery {
      * returns nulls rather than raising.
      *
      * @param string $bytes The leading bytes of a GLB (header + JSON chunk).
-     * @return array The copyright, generator and triangles (each possibly null).
+     * @return array The copyright, generator, triangles and credit.
      */
     protected static function parse_glb_asset(string $bytes): array {
-        $none = ['copyright' => null, 'generator' => null, 'triangles' => null];
+        $none = ['copyright' => null, 'generator' => null, 'triangles' => null, 'credit' => []];
         // 12-byte GLB header (magic, version, length) + 8-byte chunk header.
         if (strlen($bytes) < 20 || substr($bytes, 0, 4) !== 'glTF') {
             return $none;
@@ -525,6 +549,7 @@ class asset_gallery {
             'copyright' => $clean($asset['copyright'] ?? null),
             'generator' => $clean($asset['generator'] ?? null),
             'triangles' => $triangles,
+            'credit' => model_licence::from_asset($asset),
         ];
     }
 
@@ -597,6 +622,25 @@ class asset_gallery {
             }
         }
         return array_map('strval', array_keys($names));
+    }
+
+    /**
+     * The credits to show under the 3D view: every model that names an author
+     * or a licence, keyed by model name, as escaped credit-line HTML. Remote
+     * packs are not fetched (only their cached metadata is used), so the
+     * course page never waits on them.
+     *
+     * @return string[] Model name => credit line HTML, sorted by name.
+     */
+    public static function credits(): array {
+        $out = [];
+        foreach (self::models(false) as $model) {
+            if (!empty($model['credit']) && model_licence::is_creditable($model['credit'])) {
+                $out[(string)$model['key']] = model_licence::credit_html($model['credit'], (string)$model['label']);
+            }
+        }
+        ksort($out, SORT_STRING);
+        return $out;
     }
 
     /**

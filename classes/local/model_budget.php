@@ -227,6 +227,18 @@ class model_budget {
      * @return int|null The triangle count, or null if it cannot be read.
      */
     public static function file_triangles(\stored_file $file): ?int {
+        $gltf = self::file_gltf($file);
+        return $gltf === null ? null : self::count_triangles($gltf);
+    }
+
+    /**
+     * The decoded glTF JSON of a stored .glb file, read from its header and
+     * JSON chunk only.
+     *
+     * @param \stored_file $file The stored model file.
+     * @return array|null The glTF JSON, or null for another format or an unreadable file.
+     */
+    public static function file_gltf(\stored_file $file): ?array {
         if (strtolower(pathinfo($file->get_filename(), PATHINFO_EXTENSION)) !== 'glb') {
             return null;
         }
@@ -245,7 +257,7 @@ class model_budget {
             }
         }
         fclose($fh);
-        return is_array($gltf) ? self::count_triangles($gltf) : null;
+        return is_array($gltf) ? $gltf : null;
     }
 
     /**

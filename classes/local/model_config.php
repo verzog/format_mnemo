@@ -141,7 +141,7 @@ class model_config {
      * bad value falls back to its default rather than reaching the client.
      *
      * @param array $cfg The raw config.
-     * @return array{envs: string[], yaw: ?float, scale: ?float, behaviour: array}
+     * @return array The envs, yaw, pitch, roll, scale, behaviour and credit.
      */
     protected static function normalise(array $cfg): array {
         $envs = [];
@@ -184,8 +184,23 @@ class model_config {
                 }
             }
         }
+        // Credit typed in by an admin (title, author, licence, source URL), for
+        // a model whose file names none or names it wrongly. Each non-empty
+        // field overrides the file's own; the source must be a web address.
+        $credit = [];
+        if (!empty($cfg['credit']) && is_array($cfg['credit'])) {
+            foreach (model_licence::FIELDS as $field) {
+                $value = model_licence::clean($cfg['credit'][$field] ?? null);
+                if ($field === 'source' && $value !== null) {
+                    $value = model_licence::safe_url($value);
+                }
+                if ($value !== null) {
+                    $credit[$field] = $value;
+                }
+            }
+        }
         return ['envs' => $envs, 'yaw' => $yaw, 'pitch' => $pitch, 'roll' => $roll,
-            'scale' => $scale, 'behaviour' => $behaviour];
+            'scale' => $scale, 'behaviour' => $behaviour, 'credit' => $credit];
     }
 
     /**
@@ -215,6 +230,7 @@ class model_config {
      */
     protected static function is_default(array $cfg): bool {
         return empty($cfg['envs']) && $cfg['yaw'] === null && $cfg['pitch'] === null &&
-            $cfg['roll'] === null && $cfg['scale'] === null && empty($cfg['behaviour']);
+            $cfg['roll'] === null && $cfg['scale'] === null && empty($cfg['behaviour']) &&
+            empty($cfg['credit']);
     }
 }

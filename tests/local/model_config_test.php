@@ -196,4 +196,28 @@ final class model_config_test extends \advanced_testcase {
         $client = model_config::for_client();
         $this->assertTrue($client['beacon']['behaviour']['animate']);
     }
+
+    /**
+     * A typed credit is stored on its own, trimmed, with an unsafe source
+     * dropped, and is kept out of the scene client's payload.
+     */
+    public function test_credit(): void {
+        $this->resetAfterTest();
+        model_config::set('statue', ['credit' => [
+            'title' => ' Statue ',
+            'author' => 'Ada',
+            'licence' => '',
+            'source' => 'javascript:alert(1)',
+            'bogus' => 'x',
+        ]]);
+        $this->assertSame(['title' => 'Statue', 'author' => 'Ada'], model_config::get('statue')['credit']);
+        $this->assertArrayNotHasKey('credit', model_config::for_client()['statue']);
+
+        model_config::set('statue', ['credit' => ['source' => 'https://example.com/statue']]);
+        $this->assertSame(['source' => 'https://example.com/statue'], model_config::get('statue')['credit']);
+
+        // Clearing every field removes the entry.
+        model_config::set('statue', ['credit' => ['title' => '']]);
+        $this->assertArrayNotHasKey('statue', model_config::all());
+    }
 }

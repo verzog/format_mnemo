@@ -402,6 +402,37 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * A model's card carries its credit (the file's, with typed fields winning)
+     * and licence flags, and credits() lists every creditable model.
+     */
+    public function test_model_credits(): void {
+        $this->resetAfterTest();
+        $this->make_glb_file('statue.glb', [
+            'version' => '2.0',
+            'extras' => ['title' => 'Statue', 'license' => 'CC-BY-NC-4.0'],
+        ]);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame('Statue', $bykey['statue']['credit']['title']);
+        // Non-commercial, and needs credit with no author recorded.
+        $this->assertSame(['warning', 'warning'], array_column($bykey['statue']['licenceflags'], 'level'));
+        // The bundled models name no author or licence, so none is credited.
+        $this->assertSame([], $bykey['lamp']['licenceflags']);
+        $this->assertSame(['statue'], array_keys(asset_gallery::credits()));
+
+        // A typed author fills the gap.
+        \format_mnemo\local\model_config::set('statue', ['credit' => ['author' => 'Ada']]);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame(['warning', 'info'], array_column($bykey['statue']['licenceflags'], 'level'));
+        $this->assertStringContainsString('Statue by Ada, CC-BY-NC-4.0', asset_gallery::credits()['statue']);
+    }
+
+    /**
      * An uploaded model whose JSON chunk is over 1 MB still has its triangles
      * counted (the whole chunk is read for local files).
      */

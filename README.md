@@ -403,6 +403,31 @@ size, its lite copy's, and the same warnings. Triangles are counted for `.glb`
 files only; for `.fbx` and `.zip` uploads only the file size is checked. Keep
 textures to 1024 px in lite copies, and 2048 px in full models.
 
+**Credits and licences.** Many free models (for example CC-BY models from
+Sketchfab) may only be used if their author is credited. The plugin reads each
+model's title, author, licence and source from its file. Sketchfab downloads carry
+these, and so does any `.glb` whose glTF `asset` block sets `copyright` or the
+`author`, `license`, `source` and `title` extras. For a model whose file has none
+(an `.fbx`, a `.zip`, or an AI-made model), type them into the model's **Model
+settings** in the asset viewer; anything typed there replaces what the file says.
+A `-lite` copy shares its full model's credit.
+
+- **Students** see a **Credits** list under the 3D view, naming each model the
+  scene shows that has an author or licence, with links to its source, author and
+  licence.
+- **Admins** see the credit and these flags on each asset viewer card, and as a
+  message when they upload the model:
+  - **Non-commercial (NC):** not for a site that charges for courses.
+  - **No derivatives (ND):** don't upload an edited or reduced copy, such as a
+    `-lite` copy.
+  - **Restrictive** (store licences such as "Standard" or "Editorial") or
+    **unrecognised:** check the licence before using the model.
+  - **Needs credit (BY):** shown in the Credits list; flagged as a warning when no
+    author is recorded.
+
+The flags are a guide read from the file, not legal advice: check the licence
+itself before using a model.
+
 **Multi-file models (ZIP bundles).** A single-file `.glb` is simplest, but many
 models come as **multiple files** — a `.gltf` with a separate `.bin` and a
 `textures/` folder, or an `.fbx` with external texture images. Upload the whole

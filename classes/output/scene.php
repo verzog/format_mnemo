@@ -1424,6 +1424,15 @@ class scene implements renderable, templatable {
         }, $config['sections']));
         $data->hassections = !empty($config['sections']);
 
+        // Credits for the models that name an author or licence (CC-BY and
+        // similar need them shown). The 3D view hides those it does not use.
+        $data->credits = [];
+        foreach (asset_gallery::credits() as $name => $html) {
+            $data->credits[] = ['name' => $name, 'html' => $html];
+        }
+        $data->hascredits = !empty($data->credits);
+        $data->str_credits = get_string('credits', 'format_mnemo');
+
         // UI strings for the template.
         $data->str_loading = get_string('loadingscene', 'format_mnemo');
         $data->str_listview = get_string('listview', 'format_mnemo');
