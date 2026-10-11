@@ -58,6 +58,7 @@ final class model_budget_test extends \advanced_testcase {
             'accessors' => [['count' => $triangles * 3], ['count' => $triangles * 3]],
             'meshes' => [['primitives' => [['attributes' => ['POSITION' => 1], 'indices' => 0]]]],
             'nodes' => [['mesh' => 0]],
+            'scenes' => [['nodes' => [0]]],
         ];
     }
 
@@ -87,22 +88,23 @@ final class model_budget_test extends \advanced_testcase {
      */
     public static function triangle_provider(): array {
         $accessors = [['count' => 30], ['count' => 12]];
+        $node = ['nodes' => [['mesh' => 0]], 'scenes' => [['nodes' => [0]]]];
         return [
             'indexed triangles' => [self::one_mesh(10), 10],
             'no indices uses the vertex count' => [[
                 'accessors' => $accessors,
                 'meshes' => [['primitives' => [['attributes' => ['POSITION' => 1]]]]],
-            ], 4],
+            ] + $node, 4],
             'triangle strip' => [[
                 'accessors' => $accessors,
                 'meshes' => [['primitives' => [['attributes' => ['POSITION' => 1], 'indices' => 0, 'mode' => 5]]]],
-            ], 28],
+            ] + $node, 28],
             'lines are not triangles' => [[
                 'accessors' => $accessors,
                 'meshes' => [['primitives' => [['attributes' => ['POSITION' => 1], 'indices' => 0, 'mode' => 1]]]],
-            ], 0],
+            ] + $node, 0],
             'a mesh used by two nodes counts twice' => [[
-                'nodes' => [['mesh' => 0], ['mesh' => 0]],
+                'nodes' => [['children' => [1, 2]], ['mesh' => 0], ['mesh' => 0]],
             ] + self::one_mesh(10), 20],
             'GPU instancing counts each instance' => [[
                 'accessors' => [['count' => 30], ['count' => 30], ['count' => 5]],
@@ -110,6 +112,21 @@ final class model_budget_test extends \advanced_testcase {
                     'attributes' => ['TRANSLATION' => 2],
                 ]]]],
             ] + self::one_mesh(10), 50],
+            'only the default scene counts' => [[
+                'nodes' => [['mesh' => 0], ['mesh' => 0], ['mesh' => 0]],
+                'scenes' => [['nodes' => [0, 1]], ['nodes' => [2]]],
+                'scene' => 1,
+            ] + self::one_mesh(10), 10],
+            'an unused mesh does not count' => [[
+                'nodes' => [['name' => 'empty']],
+            ] + self::one_mesh(10), 0],
+            'no scenes counts the root nodes and their children' => [[
+                'nodes' => [['children' => [1]], ['mesh' => 0]],
+                'scenes' => null,
+            ] + self::one_mesh(10), 10],
+            'a node loop is counted once' => [[
+                'nodes' => [['mesh' => 0, 'children' => [1]], ['mesh' => 0, 'children' => [0]]],
+            ] + self::one_mesh(10), 20],
             'no meshes' => [['asset' => ['version' => '2.0']], null],
         ];
     }
@@ -137,10 +154,43 @@ final class model_budget_test extends \advanced_testcase {
         $warnings = model_budget::warnings('building', 21579384, 623000);
         $this->assertCount(2, $warnings);
         $this->assertStringContainsString('623,000', $warnings[0]);
+        $this->assertStringContainsString('100,000', $warnings[0]);
+
+        $this->assertCount(1, model_budget::warnings('prop', 4000000, 100));
+        $this->assertCount(1, model_budget::warnings('vehicle', 1000, 15001));
+
+        // The lite tier is tighter.
+        $this->assertSame([], model_budget::warnings('building', 1000, 25000));
+        $this->assertCount(1, model_budget::warnings('building', 1000, 25000, 'lite'));
+        $this->assertCount(1, model_budget::warnings('prop', 2000000, 100, 'lite'));
+    }
+
+    /**
+     * The prop pack's flying car gets the vehicle budget; other models get
+     * their area's category.
+     */
+    public function test_category(): void {
+        $this->assertSame('vehicle', model_budget::category('assetpack', 'av'));
+        $this->assertSame('prop', model_budget::category('assetpack', 'lamp'));
+        $this->assertSame('vehicle', model_budget::category('vehicleassets', 'hovercar'));
+        $this->assertSame('building', model_budget::category('buildingassets', 'building-quiz'));
+        $this->assertNull(model_budget::category('signfont', 'x'));
+    }
+
+    /**
+     * A full model over the lite budget with no lite copy also gets a lite-copy
+     * suggestion naming the file to upload; with a lite copy it does not.
+     */
+    public function test_model_warnings(): void {
+        $warnings = model_budget::model_warnings('building', 'building-quiz', 1000, 25000, false);
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('building-quiz-lite.glb', $warnings[0]);
         $this->assertStringContainsString('20,000', $warnings[0]);
 
-        $this->assertCount(1, model_budget::warnings('prop', 2000000, 100));
-        $this->assertCount(1, model_budget::warnings('vehicle', 1000, 5001));
+        $this->assertSame([], model_budget::model_warnings('building', 'building-quiz', 1000, 25000, true));
+        $this->assertSame([], model_budget::model_warnings('building', 'building-quiz', 1000, 500, false));
+        // Over the full budget too: both warnings.
+        $this->assertCount(2, model_budget::model_warnings('building', 'building-quiz', 1000, 150000, false));
     }
 
     /**
@@ -158,7 +208,7 @@ final class model_budget_test extends \advanced_testcase {
     }
 
     /**
-     * The bundled models are all within their budgets.
+     * The bundled models are all within even the lite budgets.
      */
     public function test_bundled_models_within_budget(): void {
         global $CFG;
@@ -169,12 +219,14 @@ final class model_budget_test extends \advanced_testcase {
             $len = unpack('V', substr($bytes, 12, 4))[1];
             $tris = model_budget::count_triangles(json_decode(substr($bytes, 20, $len), true));
             $this->assertGreaterThan(0, $tris, $name);
-            $this->assertSame([], model_budget::warnings($category, strlen($bytes), $tris), $name);
+            $this->assertSame([], model_budget::warnings($category, strlen($bytes), $tris, 'lite'), $name);
         }
     }
 
     /**
-     * Over-budget uploads each queue one warning; within-budget ones none.
+     * Over-budget uploads each queue one warning; within-budget ones none. A
+     * lite copy is checked against the lite budget, and silences the lite-copy
+     * suggestion on its full model.
      */
     public function test_notify_uploads(): void {
         $this->resetAfterTest();
@@ -187,7 +239,15 @@ final class model_budget_test extends \advanced_testcase {
         $this->assertCount(1, $notes);
         $this->assertSame(\core\notification::WARNING, $notes[0]->get_message_type());
         $this->assertStringContainsString('building-forum.glb', $notes[0]->get_message());
-        $this->assertStringContainsString('25,000', $notes[0]->get_message());
+        $this->assertStringContainsString('building-forum-lite.glb', $notes[0]->get_message());
+
+        // A lite copy over the lite budget warns; its full model no longer does.
+        $lite = $this->store('buildingassets', 'building-forum-lite.glb', $this->make_glb(self::one_mesh(21000)));
+        model_budget::notify_uploads('buildingassets', [$big, $lite]);
+        $notes = \core\notification::fetch();
+        $this->assertCount(1, $notes);
+        $this->assertStringContainsString('building-forum-lite.glb', $notes[0]->get_message());
+        $this->assertStringContainsString('21,000', $notes[0]->get_message());
 
         // The small model is within the prop budget too, and an unknown area is ignored.
         model_budget::notify_uploads('assetpack', [$small]);

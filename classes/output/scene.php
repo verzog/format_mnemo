@@ -21,6 +21,7 @@ use context_course;
 use context_module;
 use core_courseformat\base as course_format;
 use format_mnemo\local\model_config;
+use format_mnemo\local\model_variants;
 use moodle_url;
 use renderable;
 use renderer_base;
@@ -800,6 +801,9 @@ class scene implements renderable, templatable {
             // .glb/.fbx with external resources). The client loads this URL
             // directly; names absent from the map use the base + "<name>.<ext>".
             'modelurls' => $this->model_urls(),
+            // Map of model base name => the URL of its uploaded "-lite" copy, which
+            // headsets, phones and slow connections load instead of the full model.
+            'litemodels' => model_variants::lite_urls(),
             // Optional site-wide assets, each resolving to an admin-set URL, then
             // an uploaded file, then null (the client keeps its bundled look).
             // See resolve_asset_url().
@@ -1060,7 +1064,7 @@ class scene implements renderable, templatable {
         }
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^(.*)\.(glb|fbx|zip)$/i', $file->get_filename(), $m)) {
+            if (preg_match('/^(.*)\.(glb|fbx|zip)$/i', $file->get_filename(), $m) && !model_variants::is_lite($m[1])) {
                 $names[] = $m[1];
             }
         }
@@ -1084,7 +1088,7 @@ class scene implements renderable, templatable {
         foreach (['assetpack', 'vehicleassets', 'buildingassets'] as $filearea) {
             $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
             foreach ($files as $file) {
-                if (preg_match('/^(.*)\.(fbx)$/i', $file->get_filename(), $m)) {
+                if (preg_match('/^(.*)\.(fbx)$/i', $file->get_filename(), $m) && !model_variants::is_lite($m[1])) {
                     $out[$m[1]] = strtolower($m[2]);
                 }
             }
@@ -1111,7 +1115,7 @@ class scene implements renderable, templatable {
         foreach (['assetpack', 'vehicleassets', 'buildingassets'] as $filearea) {
             $files = $fs->get_area_files($context->id, 'format_mnemo', $filearea, 0, 'filename', false);
             foreach ($files as $file) {
-                if (preg_match('/^(.*)\.zip$/i', $file->get_filename(), $m)) {
+                if (preg_match('/^(.*)\.zip$/i', $file->get_filename(), $m) && !model_variants::is_lite($m[1])) {
                     $url = \format_mnemo\local\model_bundle::entry_url($file);
                     if ($url !== null) {
                         $out[$m[1]] = $url;
@@ -1365,7 +1369,8 @@ class scene implements renderable, templatable {
         $files = $fs->get_area_files($context->id, 'format_mnemo', 'buildingassets', 0, 'filename', false);
         $names = [];
         foreach ($files as $file) {
-            if (preg_match('/^building-(.+)\.(glb|fbx|zip)$/i', $file->get_filename(), $m)) {
+            $islite = model_variants::is_lite_file($file->get_filename());
+            if (!$islite && preg_match('/^building-(.+)\.(glb|fbx|zip)$/i', $file->get_filename(), $m)) {
                 $names[] = $m[1];
             }
         }

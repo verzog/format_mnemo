@@ -27,17 +27,25 @@ namespace format_mnemo\local;
 /**
  * Size budgets for uploaded 3D models, and checks against them.
  *
- * The budgets are headset-safe limits (Quest-class standalone headsets as well
- * as desktop browsers), matching the model spec sheet: the largest model in
- * each category, so a model over them will slow loading or rendering. Going
- * over is a warning, never a refusal - the upload still works.
+ * Two tiers. A full model is what desktops on a fast connection load; a lite
+ * copy (see {@see model_variants}) is what headsets, phones and slow
+ * connections load, so it has the tighter, headset-safe budget. A model with no
+ * lite copy is loaded everywhere, so it is also flagged when it is over the
+ * lite budget. Going over is a warning, never a refusal - the upload still works.
  */
 class model_budget {
-    /** @var array[] Category => [maximum triangles, maximum file size in bytes]. */
+    /** @var array[] Tier => category => [maximum triangles, maximum file size in bytes]. */
     const BUDGETS = [
-        'prop' => [3000, 1048576],
-        'vehicle' => [5000, 1048576],
-        'building' => [20000, 3145728],
+        'full' => [
+            'prop' => [10000, 3145728],
+            'vehicle' => [15000, 3145728],
+            'building' => [100000, 10485760],
+        ],
+        'lite' => [
+            'prop' => [3000, 1048576],
+            'vehicle' => [5000, 1048576],
+            'building' => [20000, 3145728],
+        ],
     ];
 
     /** @var string[] Upload file area => the model category it holds. */
@@ -48,11 +56,28 @@ class model_budget {
     ];
 
     /**
+     * The budget category of a model uploaded to a file area. The prop pack
+     * may also replace the flying car ("av"), which gets the vehicle budget.
+     *
+     * @param string $filearea The upload file area.
+     * @param string $name The model base name (a lite copy's full model name).
+     * @return string|null The category, or null for an unknown area.
+     */
+    public static function category(string $filearea, string $name): ?string {
+        if ($filearea === 'assetpack' && $name === 'av') {
+            return 'vehicle';
+        }
+        return self::AREAS[$filearea] ?? null;
+    }
+
+    /**
      * Count the triangles a glTF document draws, from its JSON alone.
      *
      * Uses each primitive's index (or vertex) count, so it works for Draco and
-     * meshopt compressed models without decoding them. A mesh used by several
-     * nodes is counted once per node, and GPU-instanced nodes once per instance.
+     * meshopt compressed models without decoding them. Only the nodes of the
+     * scene the loader shows are counted (a mesh used by several of them once per
+     * node, and GPU-instanced nodes once per instance), so alternate scenes and
+     * unused meshes are left out.
      *
      * @param array $gltf The decoded glTF JSON.
      * @return int|null The triangle count, or null if the document has no meshes.
@@ -77,8 +102,22 @@ class model_budget {
                 }
             }
         }
-        $uses = [];
-        foreach (($gltf['nodes'] ?? []) as $node) {
+        $nodes = is_array($gltf['nodes'] ?? null) ? $gltf['nodes'] : [];
+        $total = 0;
+        // Walk the node tree from the scene the loader shows. A visited set
+        // guards against a malformed file whose nodes form a loop.
+        $stack = self::root_nodes($gltf, $nodes);
+        $visited = [];
+        while ($stack) {
+            $index = array_pop($stack);
+            if (isset($visited[$index]) || !is_array($nodes[$index] ?? null)) {
+                continue;
+            }
+            $visited[$index] = true;
+            $node = $nodes[$index];
+            foreach (($node['children'] ?? []) as $child) {
+                $stack[] = $child;
+            }
             if (!isset($node['mesh']) || !isset($permesh[$node['mesh']])) {
                 continue;
             }
@@ -88,14 +127,32 @@ class model_budget {
                 $acc = reset($inst);
                 $copies = max(1, (int)($accessors[$acc]['count'] ?? 1));
             }
-            $uses[$node['mesh']] = ($uses[$node['mesh']] ?? 0) + $copies;
-        }
-        $total = 0;
-        foreach ($permesh as $i => $tris) {
-            // A mesh no node uses is still counted once, as a loader may show it.
-            $total += $tris * ($uses[$i] ?? 1);
+            $total += $permesh[$node['mesh']] * $copies;
         }
         return $total;
+    }
+
+    /**
+     * The root nodes of the scene a glTF loader shows: the document's default
+     * scene (or its first), else every node that is no other node's child.
+     *
+     * @param array $gltf The decoded glTF JSON.
+     * @param array $nodes The document's nodes.
+     * @return int[] The root node indexes.
+     */
+    protected static function root_nodes(array $gltf, array $nodes): array {
+        $scenes = $gltf['scenes'] ?? null;
+        if (is_array($scenes) && $scenes) {
+            $scene = $scenes[$gltf['scene'] ?? 0] ?? reset($scenes);
+            return array_values(array_filter((array)($scene['nodes'] ?? []), 'is_int'));
+        }
+        $children = [];
+        foreach ($nodes as $node) {
+            foreach ((array)($node['children'] ?? []) as $child) {
+                $children[$child] = true;
+            }
+        }
+        return array_values(array_diff(array_keys($nodes), array_keys($children)));
     }
 
     /**
@@ -104,13 +161,14 @@ class model_budget {
      * @param string $category The model category (prop, vehicle or building).
      * @param int|null $filesize The file size in bytes, or null if unknown.
      * @param int|null $triangles The triangle count, or null if unknown.
+     * @param string $tier The budget tier: full, or lite for a lite copy.
      * @return string[] The warnings (empty when within budget or no budget applies).
      */
-    public static function warnings(string $category, ?int $filesize, ?int $triangles): array {
-        if (!isset(self::BUDGETS[$category])) {
+    public static function warnings(string $category, ?int $filesize, ?int $triangles, string $tier = 'full'): array {
+        if (!isset(self::BUDGETS[$tier][$category])) {
             return [];
         }
-        [$maxtris, $maxbytes] = self::BUDGETS[$category];
+        [$maxtris, $maxbytes] = self::BUDGETS[$tier][$category];
         $out = [];
         if ($triangles !== null && $triangles > $maxtris) {
             $out[] = get_string('budget_triangles', 'format_mnemo', (object)[
@@ -122,6 +180,38 @@ class model_budget {
             $out[] = get_string('budget_filesize', 'format_mnemo', (object)[
                 'size' => display_size($filesize),
                 'max' => display_size($maxbytes),
+            ]);
+        }
+        return $out;
+    }
+
+    /**
+     * All the warnings for a full model: its own full-budget warnings, plus a
+     * lite-copy suggestion when it has no lite copy and is over the lite budget
+     * (so headsets, phones and slow connections would load it as it is).
+     *
+     * @param string $category The model category (prop, vehicle or building).
+     * @param string $name The model base name.
+     * @param int|null $filesize The file size in bytes, or null if unknown.
+     * @param int|null $triangles The triangle count, or null if unknown.
+     * @param bool $haslite Whether a lite copy is uploaded for it.
+     * @return string[] The warnings.
+     */
+    public static function model_warnings(
+        string $category,
+        string $name,
+        ?int $filesize,
+        ?int $triangles,
+        bool $haslite
+    ): array {
+        $out = self::warnings($category, $filesize, $triangles);
+        $overlite = (bool)self::warnings($category, $filesize, $triangles, 'lite');
+        if (!$haslite && $overlite) {
+            [$maxtris, $maxbytes] = self::BUDGETS['lite'][$category];
+            $out[] = get_string('budget_nolite', 'format_mnemo', (object)[
+                'name' => $name . model_variants::SUFFIX . '.glb',
+                'max' => number_format($maxtris),
+                'size' => display_size($maxbytes),
             ]);
         }
         return $out;
@@ -162,18 +252,29 @@ class model_budget {
      * Queue a warning for each over-budget model among some uploaded files.
      *
      * Called by the model upload settings after a save, with the files that
-     * save added or replaced; the warnings show on the next page.
+     * save added or replaced; the warnings show on the next page. A lite copy
+     * is checked against the lite budget, and a full model against the full
+     * one (and the lite one too when it has no lite copy).
      *
      * @param string $filearea The upload file area the files are in.
      * @param \stored_file[] $files The uploaded files to check.
      */
     public static function notify_uploads(string $filearea, array $files): void {
-        $category = self::AREAS[$filearea] ?? null;
-        if ($category === null) {
+        if (!isset(self::AREAS[$filearea])) {
             return;
         }
+        $lites = model_variants::lite_files($filearea);
         foreach ($files as $file) {
-            $warnings = self::warnings($category, (int)$file->get_filesize(), self::file_triangles($file));
+            $name = preg_replace('/\.(glb|fbx|zip)$/i', '', $file->get_filename());
+            $size = (int)$file->get_filesize();
+            $tris = self::file_triangles($file);
+            if (model_variants::is_lite($name)) {
+                $category = self::category($filearea, model_variants::full_name($name));
+                $warnings = self::warnings($category, $size, $tris, 'lite');
+            } else {
+                $category = self::category($filearea, $name);
+                $warnings = self::model_warnings($category, $name, $size, $tris, isset($lites[$name]));
+            }
             if (!$warnings) {
                 continue;
             }

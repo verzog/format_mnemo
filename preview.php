@@ -400,6 +400,22 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
     foreach ($model['warnings'] ?? [] as $warning) {
         $body .= html_writer::div(s($warning), 'format-mnemo-preview__budget alert alert-warning', ['role' => 'note']);
     }
+    // The lite copy that headsets, phones and slow connections load instead.
+    if (!empty($model['lite'])) {
+        $lite = $model['lite'];
+        $size = [s($lite['filename'])];
+        if (isset($lite['triangles'])) {
+            $size[] = get_string('preview_triangles', 'format_mnemo', number_format($lite['triangles']));
+        }
+        $size[] = display_size($lite['filesize']);
+        $body .= html_writer::div(
+            get_string('preview_lite', 'format_mnemo', implode(' · ', $size)),
+            'format-mnemo-preview__use text-muted'
+        );
+        foreach ($lite['warnings'] as $warning) {
+            $body .= html_writer::div(s($warning), 'format-mnemo-preview__budget alert alert-warning', ['role' => 'note']);
+        }
+    }
     // Per-model settings panel: environments, facing, scale and behaviour
     // (including "animate"), saved to model_config. Offered for every
     // configurable model - props, vehicles and buildings - but not the

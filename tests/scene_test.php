@@ -957,6 +957,9 @@ final class scene_test extends \advanced_testcase {
         ];
         $fs->create_file_from_string(['filearea' => 'vehicleassets', 'filename' => 'hovercar.glb'] + $base, 'x');
         $fs->create_file_from_string(['filearea' => 'buildingassets', 'filename' => 'building-forum.glb'] + $base, 'x');
+        // Lite copies are never models of their own: they only appear in litemodels.
+        $fs->create_file_from_string(['filearea' => 'vehicleassets', 'filename' => 'hovercar-lite.glb'] + $base, 'x');
+        $fs->create_file_from_string(['filearea' => 'buildingassets', 'filename' => 'building-forum-lite.fbx'] + $base, 'x');
 
         // A car type may now reference the uploaded vehicle by base name.
         set_config('cartypes', 'hovercar | avenue | 10 | 20 | none', 'format_mnemo');
@@ -967,6 +970,12 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame(['hovercar'], $config['vehiclepack']);
         // The uploaded building pack drives the offered building models.
         $this->assertSame(['forum'], $config['buildingmodels']);
+        $this->assertEqualsCanonicalizing(['building-forum', 'hovercar'], array_keys($config['litemodels']));
+        $this->assertStringContainsString('/vehicleassets/', $config['litemodels']['hovercar']);
+        $this->assertStringEndsWith('/hovercar-lite.glb', $config['litemodels']['hovercar']);
+        $this->assertStringContainsString('/buildingassets/', $config['litemodels']['building-forum']);
+        $this->assertStringEndsWith('/building-forum-lite.fbx', $config['litemodels']['building-forum']);
+        $this->assertArrayNotHasKey('building-forum-lite', $config['modelexts']);
         // The car type naming the uploaded vehicle is accepted.
         $this->assertCount(1, $config['cartypes']);
         $this->assertSame('hovercar', $config['cartypes'][0]['model']);

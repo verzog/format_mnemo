@@ -373,25 +373,78 @@ final class asset_gallery_test extends \advanced_testcase {
         $this->assertGreaterThan(0, $quiz['filesize']);
         $this->assertSame([], $quiz['warnings']);
 
-        // An uploaded prop over the prop triangle budget gets one warning.
+        // An uploaded prop over the full prop budget, with no lite copy, gets a
+        // full-budget warning and a lite-copy suggestion.
+        $this->make_prop_glb('statue.glb', 10001);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame(10001, $bykey['statue']['triangles']);
+        $this->assertNull($bykey['statue']['lite']);
+        $this->assertCount(2, $bykey['statue']['warnings']);
+        $this->assertStringContainsString('10,001', $bykey['statue']['warnings'][0]);
+        $this->assertStringContainsString('statue-lite.glb', $bykey['statue']['warnings'][1]);
+
+        // With a lite copy, the lite copy is shown on the statue's card (not as
+        // a card of its own) and the suggestion goes away.
+        $this->make_prop_glb('statue-lite.glb', 1000);
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertArrayNotHasKey('statue-lite', $bykey);
+        $this->assertCount(1, $bykey['statue']['warnings']);
+        $this->assertSame('statue-lite.glb', $bykey['statue']['lite']['filename']);
+        $this->assertSame(1000, $bykey['statue']['lite']['triangles']);
+        $this->assertSame([], $bykey['statue']['lite']['warnings']);
+        $this->assertNotContains('statue-lite', asset_gallery::placer_prop_names());
+    }
+
+    /**
+     * An uploaded model whose JSON chunk is over 1 MB still has its triangles
+     * counted (the whole chunk is read for local files).
+     */
+    public function test_model_budgets_large_json(): void {
+        $this->resetAfterTest();
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'buildingassets',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'building-forum.glb',
+        ], $this->make_glb(['version' => '2.0', 'extras' => ['notes' => str_repeat('x', 1200000)]], [
+            'accessors' => [['count' => 75000]],
+            'meshes' => [['primitives' => [['attributes' => ['POSITION' => 0]]]]],
+            'nodes' => [['mesh' => 0]],
+        ]));
+        $bykey = [];
+        foreach (asset_gallery::models() as $model) {
+            $bykey[$model['key']] = $model;
+        }
+        $this->assertSame(25000, $bykey['building-forum']['triangles']);
+    }
+
+    /**
+     * Store a .glb with one non-indexed mesh in the asset-pack file area.
+     *
+     * @param string $filename The .glb file name.
+     * @param int $triangles The mesh's triangle count.
+     */
+    protected function make_prop_glb(string $filename, int $triangles): void {
         get_file_storage()->create_file_from_string([
             'contextid' => \context_system::instance()->id,
             'component' => 'format_mnemo',
             'filearea' => 'assetpack',
             'itemid' => 0,
             'filepath' => '/',
-            'filename' => 'statue.glb',
+            'filename' => $filename,
         ], $this->make_glb(['version' => '2.0'], [
-            'accessors' => [['count' => 30000]],
+            'accessors' => [['count' => $triangles * 3]],
             'meshes' => [['primitives' => [['attributes' => ['POSITION' => 0]]]]],
+            'nodes' => [['mesh' => 0]],
         ]));
-        $bykey = [];
-        foreach (asset_gallery::models() as $model) {
-            $bykey[$model['key']] = $model;
-        }
-        $this->assertSame(10000, $bykey['statue']['triangles']);
-        $this->assertCount(1, $bykey['statue']['warnings']);
-        $this->assertStringContainsString('10,000', $bykey['statue']['warnings'][0]);
     }
 
     /**
