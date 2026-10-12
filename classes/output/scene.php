@@ -21,6 +21,7 @@ use context_course;
 use context_module;
 use core_courseformat\base as course_format;
 use format_mnemo\local\model_config;
+use format_mnemo\local\model_slots;
 use format_mnemo\local\model_variants;
 use moodle_url;
 use renderable;
@@ -804,6 +805,10 @@ class scene implements renderable, templatable {
             // Map of model base name => the URL of its uploaded "-lite" copy, which
             // headsets, phones and slow connections load instead of the full model.
             'litemodels' => model_variants::lite_urls(),
+            // Map of slot name => the uploaded model an admin pointed it at in the
+            // asset viewer (a building type, a street prop or the default flying
+            // car), which the 3D view loads and configures in the slot's place.
+            'modelaliases' => (object)model_slots::aliases(),
             // Map of building model name => its size (w, h, d in its own units)
             // and storeys, so the 3D view can scale it to the procedural
             // buildings' storey height and give it a wide-enough plot.
@@ -1351,15 +1356,22 @@ class scene implements renderable, templatable {
      *
      * Matched to buildings_base_url()'s precedence: an uploaded building pack if
      * present (enumerated exactly), otherwise the bundled building models.
+     * Then the asset viewer's slots apply: a type pointed at an uploaded
+     * building is added, and a type set to the procedural building removed.
      *
      * @return array List of modname strings.
      */
     protected function building_models(): array {
         $uploaded = $this->uploaded_building_modnames();
-        if (!empty($uploaded)) {
-            return $uploaded;
+        $names = !empty($uploaded) ? $uploaded : $this->bundled_building_modnames();
+        // The asset viewer's slots: a type pointed at an uploaded building has
+        // one; a type set to the procedural building has none.
+        foreach (array_keys(model_slots::aliases()) as $slot) {
+            if (strpos($slot, 'building-') === 0) {
+                $names[] = substr($slot, 9);
+            }
         }
-        return $this->bundled_building_modnames();
+        return array_values(array_diff(array_unique($names), model_slots::procedural_types()));
     }
 
     /**

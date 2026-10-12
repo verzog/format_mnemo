@@ -471,6 +471,15 @@ their **Storeys** sets their height, but their plot keeps its usual width. A
 building a teacher has moved in the 3D editor keeps its place when an earlier
 plot widens. Each building card says how it is sized.
 
+**Which model each slot uses.** Each section of the asset viewer has a **Which
+model each slot uses** list: one dropdown per activity type under Buildings, per
+street prop (street lamp, kiosk, barrier) under Props, and for the default flying
+car under Vehicles. Point a slot at any model uploaded to that section without
+renaming the file, set a building type to the **Procedural building**, or leave
+it on **Default** (the model named for the slot, uploaded or bundled). The chosen
+model's own settings (orientation, scale, storeys, credit and lite copy) come with
+it. If the chosen model is deleted, the slot goes back to its default.
+
 **Use this view.** Instead of typing angles, turn a model with the arrow buttons
 until it stands the way it should, then press **Use this view**: it fills in the
 model's facing, pitch and roll under **Model settings**, ready to **Save**.

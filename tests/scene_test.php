@@ -972,6 +972,17 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame(['hovercar'], $config['vehiclepack']);
         // The uploaded building pack drives the offered building models.
         $this->assertSame(['forum'], $config['buildingmodels']);
+        // Slots: a type pointed at an uploaded building gets one (and the 3D view
+        // the alias); a type set to the procedural building loses its own.
+        \format_mnemo\local\model_slots::save([
+            'building-page' => 'building-forum',
+            'building-forum' => \format_mnemo\local\model_slots::NONE,
+            'av' => 'hovercar',
+        ]);
+        $slotted = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame(['page'], $slotted['buildingmodels']);
+        $this->assertEquals(['building-page' => 'building-forum', 'av' => 'hovercar'], (array)$slotted['modelaliases']);
+        \format_mnemo\local\model_slots::save(['building-page' => 'default', 'building-forum' => 'default', 'av' => 'default']);
         $this->assertEqualsCanonicalizing(['building-forum', 'hovercar'], array_keys($config['litemodels']));
         $this->assertStringContainsString('/vehicleassets/', $config['litemodels']['hovercar']);
         $this->assertStringEndsWith('/hovercar-lite.glb', $config['litemodels']['hovercar']);

@@ -572,6 +572,16 @@ final class asset_gallery_test extends \advanced_testcase {
         $modnames = array_column(asset_gallery::building_placeholders(asset_gallery::models()), 'modname');
         $this->assertNotContains('forum', $modnames);
         $this->assertNotContains('page', $modnames);
+        // A type pointed at an uploaded building has no placeholder; a type set
+        // to the procedural building has one, even with its model uploaded.
+        $DB->set_field('modules', 'visible', 1, ['name' => 'page']);
+        \format_mnemo\local\model_slots::save([
+            'building-page' => 'building-forum',
+            'building-forum' => \format_mnemo\local\model_slots::NONE,
+        ]);
+        $modnames = array_column(asset_gallery::building_placeholders(asset_gallery::models()), 'modname');
+        $this->assertNotContains('page', $modnames);
+        $this->assertContains('forum', $modnames);
     }
 
     /**

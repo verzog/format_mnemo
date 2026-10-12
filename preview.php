@@ -30,6 +30,7 @@ require_once($CFG->libdir . '/adminlib.php');
 use format_mnemo\output\asset_gallery;
 use format_mnemo\local\model_config;
 use format_mnemo\local\model_licence;
+use format_mnemo\local\model_slots;
 use format_mnemo\local\model_store;
 
 admin_externalpage_setup('format_mnemo_preview');
@@ -96,6 +97,78 @@ if ($savemodel !== '' && confirm_sesskey()) {
         );
     }
     redirect($PAGE->url);
+}
+
+// Save a section's slot choices: which uploaded model each slot (a building
+// type, a street prop, the default flying car) uses. model_slots::save()
+// accepts only the default, the procedural building, or a model uploaded to
+// the slot's own section.
+$saveslots = optional_param('saveslots', '', PARAM_ALPHA);
+if ($saveslots !== '' && confirm_sesskey()) {
+    $values = [];
+    foreach (array_keys(model_slots::slots($saveslots)) as $slot) {
+        $raw = optional_param('slot_' . $slot, model_slots::DEFAULT, PARAM_RAW_TRIMMED);
+        $values[$slot] = strpos($raw, 'model:') === 0 ? substr($raw, 6) : $raw;
+    }
+    model_slots::save($values);
+    redirect(
+        $PAGE->url,
+        get_string('slots_saved', 'format_mnemo'),
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
+
+/**
+ * A section's slot form: one dropdown per slot, listing the default, the
+ * procedural building (for building types) and every model uploaded to the
+ * section.
+ *
+ * @param string $category prop, vehicle or building.
+ * @param moodle_url $url This page's URL (the form target).
+ * @return string HTML for the form, or '' when the category has no slots.
+ */
+function mnemo_slot_form(string $category, moodle_url $url): string {
+    $slots = model_slots::slots($category);
+    if (!$slots) {
+        return '';
+    }
+    $choices = model_slots::choices($category);
+    $rows = '';
+    foreach ($slots as $slot => $label) {
+        $current = model_slots::get($slot);
+        $options = [model_slots::DEFAULT => get_string('slot_default', 'format_mnemo', $slot)];
+        if ($category === 'building') {
+            $options[model_slots::NONE] = get_string('slot_none', 'format_mnemo');
+        }
+        foreach ($choices as $choice) {
+            $options['model:' . $choice] = $choice;
+        }
+        $selected = ($current === model_slots::DEFAULT || $current === model_slots::NONE) ? $current : 'model:' . $current;
+        $id = 'slot_' . $category . '_' . $slot;
+        $rows .= html_writer::tag(
+            'tr',
+            html_writer::tag('th', html_writer::label($label, $id), ['scope' => 'row']) .
+            html_writer::tag('td', html_writer::select($options, 'slot_' . $slot, $selected, false, [
+                'id' => $id,
+                'class' => 'custom-select',
+            ]))
+        );
+    }
+    $form = html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'saveslots', 'value' => $category]) .
+        html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]) .
+        html_writer::tag('table', html_writer::tag('tbody', $rows), ['class' => 'generaltable format-mnemo-preview__slots']) .
+        html_writer::tag('button', get_string('slots_save', 'format_mnemo'), [
+            'type' => 'submit',
+            'class' => 'btn btn-secondary btn-sm',
+        ]);
+    return html_writer::tag(
+        'details',
+        html_writer::tag('summary', get_string('slots_heading', 'format_mnemo')) .
+        html_writer::tag('p', get_string('slots_help', 'format_mnemo'), ['class' => 'text-muted']) .
+        html_writer::tag('form', $form, ['method' => 'post', 'action' => $url->out(false)]),
+        ['class' => 'format-mnemo-preview__slotform', 'open' => 'open']
+    );
 }
 
 // Delete an uploaded model: the card's Delete link asks first on a confirm
@@ -663,7 +736,8 @@ foreach ($modelcats as $cat => $catlabel) {
     if ($cat === 'building') {
         $cards .= $placeholders;
     }
-    if ($cards === '') {
+    $slotform = mnemo_slot_form($cat, $PAGE->url);
+    if ($cards === '' && $slotform === '') {
         continue;
     }
     echo $OUTPUT->heading($catlabel, 4);
@@ -671,6 +745,7 @@ foreach ($modelcats as $cat => $catlabel) {
     if (get_string_manager()->string_exists('preview_cat_' . $cat . '_help', 'format_mnemo')) {
         echo html_writer::tag('p', get_string('preview_cat_' . $cat . '_help', 'format_mnemo'), ['class' => 'text-muted']);
     }
+    echo $slotform;
     echo html_writer::div($cards, 'format-mnemo-preview__grid');
 }
 
