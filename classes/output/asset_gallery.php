@@ -675,11 +675,14 @@ class asset_gallery {
      *
      * @param array|null $bounds The model's box from its file, or null.
      * @param array $cfg The model's stored settings.
-     * @return array|null The w, h, d and storeys, or null.
+     * @return array|null The w, h, d, storeys and typed (only storeys and typed
+     *     when the size is unknown), or null.
      */
     public static function building_size(?array $bounds, array $cfg): ?array {
         if ($bounds === null) {
-            return null;
+            // The size cannot be read (an .fbx or .zip): a typed storey count
+            // still sets the model's height, though its plot cannot widen.
+            return isset($cfg['storeys']) ? ['storeys' => $cfg['storeys'], 'typed' => true] : null;
         }
         $box = model_bounds::orient($bounds, $cfg['pitch'] ?? 0.0, $cfg['yaw'] ?? 0.0, $cfg['roll'] ?? 0.0);
         $w = $box[3] - $box[0];

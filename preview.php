@@ -551,8 +551,9 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
     // How a building is sized in the city: by its storeys, or fitted to its plot.
     if (($model['category'] ?? '') === 'building') {
         if (!empty($model['size'])) {
+            $typedkey = empty($model['size']['w']) ? 'preview_size_typed_heightonly' : 'preview_size_typed';
             $sizing = $model['size']['typed']
-                ? get_string('preview_size_typed', 'format_mnemo', $model['size']['storeys'])
+                ? get_string($typedkey, 'format_mnemo', $model['size']['storeys'])
                 : get_string('preview_size_storeys', 'format_mnemo', (object)[
                     'storeys' => $model['size']['storeys'],
                     'height' => format_float($model['size']['h'], 1),

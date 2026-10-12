@@ -96,6 +96,23 @@ final class model_bounds_test extends \advanced_testcase {
     }
 
     /**
+     * A malformed file (lists or strings where indexes or numbers belong) is
+     * read as far as it is valid, never raising an error.
+     */
+    public function test_bounds_malformed(): void {
+        $doc = self::doc([
+            ['mesh' => 0, 'children' => [[1], 'x', -1, 1], 'translation' => ['a', 0, 0]],
+            ['mesh' => [0]],
+        ], [['nodes' => [[0], 0]]]);
+        $doc['scene'] = [0];
+        $doc['meshes'][] = ['primitives' => [['attributes' => ['POSITION' => [0]]], 'junk']];
+        $this->assert_box([-1, -2, -3, 1, 2, 3], model_bounds::bounds($doc));
+        $doc['accessors'][0]['min'] = ['a', 0, 0];
+        $this->assertNull(model_bounds::bounds($doc));
+        $this->assertNull(model_bounds::bounds(['nodes' => 'x', 'scenes' => [['nodes' => 'y']], 'meshes' => 5]));
+    }
+
+    /**
      * Turning a box by pitch, yaw and roll swaps its extents as the 3D view
      * would turn the model.
      */

@@ -58,7 +58,7 @@ class model_bounds {
         // Walk the shown scene's node tree with each node's world matrix. A
         // visited set guards against a malformed file whose nodes form a loop.
         $stack = [];
-        foreach (self::roots($gltf, $nodes) as $root) {
+        foreach (model_budget::root_nodes($gltf, $nodes) as $root) {
             $stack[] = [$root, self::identity()];
         }
         $visited = [];
@@ -70,16 +70,20 @@ class model_bounds {
             $visited[$index] = true;
             $node = $nodes[$index];
             $world = self::multiply($parent, self::local_matrix($node));
-            foreach ((array)($node['children'] ?? []) as $child) {
+            foreach (model_budget::indexes($node['children'] ?? null) as $child) {
                 $stack[] = [$child, $world];
             }
-            $mesh = $meshes[$node['mesh'] ?? -1] ?? null;
-            foreach ((array)($mesh['primitives'] ?? []) as $prim) {
-                $acc = $accessors[$prim['attributes']['POSITION'] ?? -1] ?? null;
-                if (!is_array($acc['min'] ?? null) || !is_array($acc['max'] ?? null) || count($acc['min']) < 3) {
+            $meshindex = model_budget::index($node['mesh'] ?? null);
+            $mesh = $meshindex === null ? null : ($meshes[$meshindex] ?? null);
+            foreach (model_budget::items(is_array($mesh) ? ($mesh['primitives'] ?? null) : null) as $prim) {
+                $accindex = is_array($prim) ? model_budget::index($prim['attributes']['POSITION'] ?? null) : null;
+                $acc = $accindex === null ? null : ($accessors[$accindex] ?? null);
+                $min = self::vector(is_array($acc) ? ($acc['min'] ?? null) : null, 3);
+                $max = self::vector(is_array($acc) ? ($acc['max'] ?? null) : null, 3);
+                if ($min === null || $max === null) {
                     continue;
                 }
-                foreach (self::corners($acc['min'], $acc['max']) as $corner) {
+                foreach (self::corners($min, $max) as $corner) {
                     $box = self::grow($box, self::transform($world, $corner));
                 }
             }
@@ -125,40 +129,19 @@ class model_bounds {
     }
 
     /**
-     * The root nodes of the scene a glTF loader shows (see model_budget).
-     *
-     * @param array $gltf The decoded glTF JSON.
-     * @param array $nodes The document's nodes.
-     * @return int[] The root node indexes.
-     */
-    protected static function roots(array $gltf, array $nodes): array {
-        $scenes = $gltf['scenes'] ?? null;
-        if (is_array($scenes) && $scenes) {
-            $scene = $scenes[$gltf['scene'] ?? 0] ?? reset($scenes);
-            return array_values(array_filter((array)($scene['nodes'] ?? []), 'is_int'));
-        }
-        $children = [];
-        foreach ($nodes as $node) {
-            foreach ((array)($node['children'] ?? []) as $child) {
-                $children[$child] = true;
-            }
-        }
-        return array_values(array_diff(array_keys($nodes), array_keys($children)));
-    }
-
-    /**
      * A node's local matrix: its matrix, or translation x rotation x scale.
      *
      * @param array $node The glTF node.
      * @return float[] The column-major 4x4 matrix.
      */
     protected static function local_matrix(array $node): array {
-        if (is_array($node['matrix'] ?? null) && count($node['matrix']) === 16) {
-            return array_map('floatval', array_values($node['matrix']));
+        $matrix = self::vector($node['matrix'] ?? null, 16);
+        if ($matrix !== null) {
+            return $matrix;
         }
-        $t = array_map('floatval', array_values((array)($node['translation'] ?? [0, 0, 0]))) + [0, 0, 0];
-        $q = array_map('floatval', array_values((array)($node['rotation'] ?? [0, 0, 0, 1]))) + [0, 0, 0, 1];
-        $s = array_map('floatval', array_values((array)($node['scale'] ?? [1, 1, 1]))) + [1, 1, 1];
+        $t = self::vector($node['translation'] ?? null, 3) ?? [0.0, 0.0, 0.0];
+        $q = self::vector($node['rotation'] ?? null, 4) ?? [0.0, 0.0, 0.0, 1.0];
+        $s = self::vector($node['scale'] ?? null, 3) ?? [1.0, 1.0, 1.0];
         [$x, $y, $z, $w] = $q;
         return [
             (1 - 2 * ($y * $y + $z * $z)) * $s[0], (2 * ($x * $y + $z * $w)) * $s[0], (2 * ($x * $z - $y * $w)) * $s[0], 0,
@@ -166,6 +149,28 @@ class model_bounds {
             (2 * ($x * $z + $y * $w)) * $s[2], (2 * ($y * $z - $x * $w)) * $s[2], (1 - 2 * ($x * $x + $y * $y)) * $s[2], 0,
             $t[0], $t[1], $t[2], 1,
         ];
+    }
+
+    /**
+     * A list of exactly the given number of finite numbers, as floats, or null
+     * when the value is anything else (so a malformed file is ignored).
+     *
+     * @param mixed $value The raw value.
+     * @param int $size The number of entries wanted.
+     * @return float[]|null The numbers, or null.
+     */
+    protected static function vector($value, int $size): ?array {
+        if (!is_array($value) || count($value) !== $size) {
+            return null;
+        }
+        $out = [];
+        foreach (array_values($value) as $number) {
+            if ((!is_int($number) && !is_float($number)) || !is_finite((float)$number)) {
+                return null;
+            }
+            $out[] = (float)$number;
+        }
+        return $out;
     }
 
     /**

@@ -458,9 +458,11 @@ widens to fit them (later buildings move along). The storey count is the model's
 height in metres divided by 3 (the model spec asks for metres), or the number
 typed in the model's **Storeys** setting. A model whose height gives fewer than 1
 or more than 30 storeys is taken as not being in metres and is fitted to a
-standard plot instead, as are `.fbx` and `.zip` models, whose size cannot be read
-on the server; type its **Storeys** to size it. Each building card says which
-applies.
+standard plot instead; type its **Storeys** to size it. `.fbx` and `.zip` models,
+whose size cannot be read on the server, are fitted to a standard plot too; typing
+their **Storeys** sets their height, but their plot keeps its usual width. A
+building a teacher has moved in the 3D editor keeps its place when an earlier
+plot widens. Each building card says how it is sized.
 
 **Use this view.** Instead of typing angles, turn a model with the arrow buttons
 until it stands the way it should, then press **Use this view**: it fills in the

@@ -84,16 +84,19 @@ class model_budget {
      */
     public static function count_triangles(array $gltf): ?int {
         $meshes = $gltf['meshes'] ?? null;
-        $accessors = $gltf['accessors'] ?? [];
-        if (!is_array($meshes) || !$meshes || !is_array($accessors)) {
+        $accessors = is_array($gltf['accessors'] ?? null) ? $gltf['accessors'] : [];
+        if (!is_array($meshes) || !$meshes) {
             return null;
         }
         $permesh = [];
         foreach ($meshes as $i => $mesh) {
             $permesh[$i] = 0;
-            foreach (($mesh['primitives'] ?? []) as $prim) {
-                $acc = $prim['indices'] ?? ($prim['attributes']['POSITION'] ?? null);
-                $count = (int)($accessors[$acc]['count'] ?? 0);
+            foreach (self::items($mesh['primitives'] ?? null) as $prim) {
+                if (!is_array($prim)) {
+                    continue;
+                }
+                $acc = self::index($prim['indices'] ?? null) ?? self::index($prim['attributes']['POSITION'] ?? null);
+                $count = $acc === null ? 0 : (int)($accessors[$acc]['count'] ?? 0);
                 $mode = (int)($prim['mode'] ?? 4);
                 if ($mode === 4) {
                     $permesh[$i] += intdiv($count, 3);
@@ -115,19 +118,18 @@ class model_budget {
             }
             $visited[$index] = true;
             $node = $nodes[$index];
-            foreach (($node['children'] ?? []) as $child) {
-                $stack[] = $child;
-            }
-            if (!isset($node['mesh']) || !isset($permesh[$node['mesh']])) {
+            $stack = array_merge($stack, self::indexes($node['children'] ?? null));
+            $mesh = self::index($node['mesh'] ?? null);
+            if ($mesh === null || !isset($permesh[$mesh])) {
                 continue;
             }
             $copies = 1;
             $inst = $node['extensions']['EXT_mesh_gpu_instancing']['attributes'] ?? null;
             if (is_array($inst) && $inst) {
-                $acc = reset($inst);
-                $copies = max(1, (int)($accessors[$acc]['count'] ?? 1));
+                $acc = self::index(reset($inst));
+                $copies = $acc === null ? 1 : max(1, (int)($accessors[$acc]['count'] ?? 1));
             }
-            $total += $permesh[$node['mesh']] * $copies;
+            $total += $permesh[$mesh] * $copies;
         }
         return $total;
     }
@@ -140,19 +142,55 @@ class model_budget {
      * @param array $nodes The document's nodes.
      * @return int[] The root node indexes.
      */
-    protected static function root_nodes(array $gltf, array $nodes): array {
+    public static function root_nodes(array $gltf, array $nodes): array {
         $scenes = $gltf['scenes'] ?? null;
         if (is_array($scenes) && $scenes) {
-            $scene = $scenes[$gltf['scene'] ?? 0] ?? reset($scenes);
-            return array_values(array_filter((array)($scene['nodes'] ?? []), 'is_int'));
+            $chosen = self::index($gltf['scene'] ?? 0);
+            $scene = ($chosen !== null ? ($scenes[$chosen] ?? null) : null) ?? reset($scenes);
+            return is_array($scene) ? self::indexes($scene['nodes'] ?? null) : [];
         }
         $children = [];
         foreach ($nodes as $node) {
-            foreach ((array)($node['children'] ?? []) as $child) {
-                $children[$child] = true;
+            if (is_array($node)) {
+                foreach (self::indexes($node['children'] ?? null) as $child) {
+                    $children[$child] = true;
+                }
             }
         }
         return array_values(array_diff(array_keys($nodes), array_keys($children)));
+    }
+
+    /**
+     * A glTF index (a node, mesh or accessor number), or null when the value
+     * is not one, so a malformed file can never use an array or string as a key.
+     *
+     * @param mixed $value The raw value.
+     * @return int|null The index, or null.
+     */
+    public static function index($value): ?int {
+        return is_int($value) && $value >= 0 ? $value : null;
+    }
+
+    /**
+     * The valid indexes in a glTF index list (dropping anything else).
+     *
+     * @param mixed $list The raw list.
+     * @return int[] The indexes.
+     */
+    public static function indexes($list): array {
+        return array_values(array_filter(self::items($list), function ($value) {
+            return self::index($value) !== null;
+        }));
+    }
+
+    /**
+     * A glTF list, or an empty one when the value is not a list.
+     *
+     * @param mixed $list The raw value.
+     * @return array The list.
+     */
+    public static function items($list): array {
+        return is_array($list) ? $list : [];
     }
 
     /**

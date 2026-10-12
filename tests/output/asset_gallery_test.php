@@ -523,6 +523,19 @@ final class asset_gallery_test extends \advanced_testcase {
         // The bundled quiz tower is in metres too.
         $this->assertGreaterThan(5, asset_gallery::building_sizes()['building-quiz']['storeys'] ?? 0);
 
+        // An .fbx's size cannot be read: only a typed count sizes it (its height).
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'buildingassets',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'building-book.fbx',
+        ], 'Kaydara FBX Binary');
+        $this->assertArrayNotHasKey('building-book', asset_gallery::building_sizes());
+        \format_mnemo\local\model_config::set('building-book', ['storeys' => 6]);
+        $this->assertSame(['storeys' => 6, 'typed' => true], asset_gallery::building_sizes()['building-book']);
+
         // A typed count wins, and covers the model that is not in metres.
         \format_mnemo\local\model_config::set('building-url', ['storeys' => 4]);
         $sizes = asset_gallery::building_sizes();

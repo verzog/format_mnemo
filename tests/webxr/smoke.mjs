@@ -705,14 +705,21 @@ const scenarios = [
             const style = window.__mnemoModule._sizedStyle({form: 'tower', footprint: [3, 3], height: [15, 24]},
                 {w: 5, d: 4, h: 18});
             const styled = style.form === 'tower' && style.footprint.join() === '5,4' && style.height.join() === '18,18';
-            return {pass: sized && none && styled, detail: JSON.stringify({size, none, styled})};
+            // A typed count with no known size (an .fbx): height only, footprint kept.
+            self.config.buildingsizes['building-page'] = {storeys: 4, typed: true};
+            const tall = CS.prototype.buildingSize.call(self, {modname: 'page'});
+            const heightOnly = !!tall && tall.heightOnly === true && near(tall.h, 4 * pitch) && tall.w === undefined;
+            const hstyle = window.__mnemoModule._sizedStyle({footprint: [3, 3], height: [15, 24]}, tall);
+            const keptFoot = hstyle.footprint.join() === '3,3' && near(hstyle.height[0], 4 * pitch);
+            const pass = sized && none && styled && heightOnly && keptFoot;
+            return {pass, detail: JSON.stringify({size, none, styled, tall, keptFoot})};
         }
     },
     {
         name: 'storeys: a wide sized building widens its slot and pushes later slots along',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
-            const sizes = {quiz: {w: 20, d: 6, h: 18}};
+            const sizes = {quiz: {w: 20, d: 6, h: 18}, book: {h: 18, heightOnly: true}};
             const self = {buildingSize: (act) => sizes[act.modname] || null};
             const acts = (names) => ({activities: names.map((modname) => ({modname}))});
             const plain = CS.prototype.streetSlots.call(self, acts(['page', 'forum', 'url', 'book']));
