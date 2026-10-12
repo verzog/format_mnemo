@@ -44,42 +44,50 @@ if ($savemodel !== '' && confirm_sesskey()) {
     // Only accept a name that is a real, configurable model (props, vehicles
     // and buildings — every viewer model bar the celestials).
     $known = asset_gallery::configurable_model_names();
-    if (in_array($savemodel, $known, true)) {
-        $envs = [];
-        foreach (model_config::ENVIRONMENTS as $env) {
-            if (optional_param('env_' . $env, 0, PARAM_BOOL)) {
-                $envs[] = $env;
-            }
+    // The card's category decides which settings its form showed; only those
+    // are taken from the form, so saving one card never resets settings it
+    // does not show (an "av" prop card leaves the "av" car's movement alone).
+    $category = optional_param('category', '', PARAM_ALPHA);
+    $categories = [];
+    foreach (asset_gallery::models() as $model) {
+        if ((string)$model['key'] === $savemodel) {
+            $categories[] = $model['category'] ?? 'prop';
         }
-        $yawraw = optional_param('yaw', '', PARAM_RAW_TRIMMED);
-        $pitchraw = optional_param('pitch', '', PARAM_RAW_TRIMMED);
-        $rollraw = optional_param('roll', '', PARAM_RAW_TRIMMED);
-        $scaleraw = optional_param('scale', '', PARAM_RAW_TRIMMED);
+    }
+    if (in_array($savemodel, $known, true) && in_array($category, $categories, true)) {
+        $fields = model_config::category_fields($category);
         $numornull = function (string $raw): ?float {
             return ($raw === '' || !is_numeric($raw)) ? null : (float)$raw;
         };
-        // Behaviour checkboxes: read every known flag (an unchecked box does not
-        // post), so the saved state matches the form. The store drops any flag
-        // left at its engine default.
-        $behaviour = [];
-        foreach (array_keys(model_config::BEHAVIOUR_DEFAULTS) as $flag) {
-            $behaviour[$flag] = (bool)optional_param('beh_' . $flag, 0, PARAM_BOOL);
+        $cfg = model_config::get($savemodel);
+        if (in_array('envs', $fields, true)) {
+            $cfg['envs'] = [];
+            foreach (model_config::ENVIRONMENTS as $env) {
+                if (optional_param('env_' . $env, 0, PARAM_BOOL)) {
+                    $cfg['envs'][] = $env;
+                }
+            }
         }
-        model_config::set($savemodel, [
-            'envs' => $envs,
-            'yaw' => $numornull($yawraw),
-            'pitch' => $numornull($pitchraw),
-            'roll' => $numornull($rollraw),
-            'scale' => $numornull($scaleraw),
-            'behaviour' => $behaviour,
-            'storeys' => $numornull(optional_param('storeys', '', PARAM_RAW_TRIMMED)),
-            'credit' => [
-                'title' => optional_param('credit_title', '', PARAM_TEXT),
-                'author' => optional_param('credit_author', '', PARAM_TEXT),
-                'licence' => optional_param('credit_licence', '', PARAM_TEXT),
-                'source' => optional_param('credit_source', '', PARAM_URL),
-            ],
-        ]);
+        foreach (['yaw', 'pitch', 'roll', 'scale', 'storeys'] as $field) {
+            if (in_array($field, $fields, true)) {
+                $cfg[$field] = $numornull(optional_param($field, '', PARAM_RAW_TRIMMED));
+            }
+        }
+        // Behaviour checkboxes: an unchecked box does not post, so each shown
+        // flag is read as off unless ticked. The store drops any flag left at
+        // its engine default.
+        foreach (array_keys(model_config::BEHAVIOUR_DEFAULTS) as $flag) {
+            if (in_array('beh_' . $flag, $fields, true)) {
+                $cfg['behaviour'][$flag] = (bool)optional_param('beh_' . $flag, 0, PARAM_BOOL);
+            }
+        }
+        $cfg['credit'] = [
+            'title' => optional_param('credit_title', '', PARAM_TEXT),
+            'author' => optional_param('credit_author', '', PARAM_TEXT),
+            'licence' => optional_param('credit_licence', '', PARAM_TEXT),
+            'source' => optional_param('credit_source', '', PARAM_URL),
+        ];
+        model_config::set($savemodel, $cfg);
         redirect(
             $PAGE->url,
             get_string('preview_saved', 'format_mnemo', s($savemodel)),
@@ -145,35 +153,40 @@ $rootid = 'mnemo-preview-' . uniqid();
  * @param array $cfg The model's current normalised config.
  * @param moodle_url $url This page's URL (the form target).
  * @param string $canvasid The model card's canvas id, so "Use this view" can find the form.
- * @param bool $building Whether the model is a building (which gets a Storeys field).
+ * @param string $category The model category (prop, vehicle or building): only
+ *     the settings that apply to it are shown (see model_config::category_fields()).
  * @return string HTML for the panel.
  */
-function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, string $canvasid, bool $building): string {
+function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, string $canvasid, string $category): string {
     $rows = '';
+    $fields = model_config::category_fields($category);
 
-    // Environment checkboxes (empty = every environment).
-    $boxes = '';
-    foreach (model_config::ENVIRONMENTS as $env) {
-        $id = 'env_' . $name . '_' . $env;
-        $attrs = ['type' => 'checkbox', 'name' => 'env_' . $env, 'value' => 1, 'id' => $id];
-        if (in_array($env, $cfg['envs'], true)) {
-            $attrs['checked'] = 'checked';
+    // Environment checkboxes (empty = every environment): props and flying
+    // cars only, as buildings are always shown.
+    if (in_array('envs', $fields, true)) {
+        $boxes = '';
+        foreach (model_config::ENVIRONMENTS as $env) {
+            $id = 'env_' . $name . '_' . $env;
+            $attrs = ['type' => 'checkbox', 'name' => 'env_' . $env, 'value' => 1, 'id' => $id];
+            if (in_array($env, $cfg['envs'], true)) {
+                $attrs['checked'] = 'checked';
+            }
+            $boxes .= html_writer::tag(
+                'label',
+                html_writer::empty_tag('input', $attrs) . ' ' .
+                get_string('environment_' . $env, 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__check']
+            );
         }
-        $boxes .= html_writer::tag(
-            'label',
-            html_writer::empty_tag('input', $attrs) . ' ' .
-            get_string('environment_' . $env, 'format_mnemo'),
-            ['class' => 'format-mnemo-preview__check']
+        $rows .= html_writer::div(
+            html_writer::tag(
+                'span',
+                get_string('preview_environments', 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__field-label']
+            ) . $boxes,
+            'format-mnemo-preview__field'
         );
     }
-    $rows .= html_writer::div(
-        html_writer::tag(
-            'span',
-            get_string('preview_environments', 'format_mnemo'),
-            ['class' => 'format-mnemo-preview__field-label']
-        ) . $boxes,
-        'format-mnemo-preview__field'
-    );
 
     // Facing radios: Auto, or a cardinal preset (degrees). A stored non-cardinal
     // facing (e.g. a hand-edited 45) is kept as its own checked option so saving
@@ -230,26 +243,29 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, s
     $rows .= $anglefield('pitch', 'preview_pitch');
     $rows .= $anglefield('roll', 'preview_roll');
 
-    // Scale (blank = model default).
-    $rows .= html_writer::div(
-        html_writer::tag(
-            'label',
-            get_string('preview_scale', 'format_mnemo'),
-            ['class' => 'format-mnemo-preview__field-label', 'for' => 'scale_' . $name]
-        ) .
-        html_writer::empty_tag('input', [
-            'type' => 'number', 'name' => 'scale', 'id' => 'scale_' . $name,
-            // A step of "any" so an already-stored value like 1.25 is not
-            // rejected by the browser's step constraint (the store accepts any
-            // finite scale).
-            'min' => '0.1', 'max' => '10', 'step' => 'any', 'class' => 'format-mnemo-preview__scale',
-            'value' => $cfg['scale'] === null ? '' : rtrim(rtrim(sprintf('%.2f', $cfg['scale']), '0'), '.'),
-        ]),
-        'format-mnemo-preview__field'
-    );
+    // Scale (blank = model default): props and flying cars only, as a building
+    // is sized by its plot or storeys.
+    if (in_array('scale', $fields, true)) {
+        $rows .= html_writer::div(
+            html_writer::tag(
+                'label',
+                get_string('preview_scale', 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__field-label', 'for' => 'scale_' . $name]
+            ) .
+            html_writer::empty_tag('input', [
+                'type' => 'number', 'name' => 'scale', 'id' => 'scale_' . $name,
+                // A step of "any" so an already-stored value like 1.25 is not
+                // rejected by the browser's step constraint (the store accepts any
+                // finite scale).
+                'min' => '0.1', 'max' => '10', 'step' => 'any', 'class' => 'format-mnemo-preview__scale',
+                'value' => $cfg['scale'] === null ? '' : rtrim(rtrim(sprintf('%.2f', $cfg['scale']), '0'), '.'),
+            ]),
+            'format-mnemo-preview__field'
+        );
+    }
 
     // Storeys (buildings only; blank = work it out from the height in metres).
-    if ($building) {
+    if (in_array('storeys', $fields, true)) {
         $rows .= html_writer::div(
             html_writer::tag(
                 'label',
@@ -275,6 +291,10 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, s
     // is stored on save.
     $behboxes = '';
     foreach (model_config::BEHAVIOUR_DEFAULTS as $flag => $default) {
+        // Movement flags apply to flying cars only; animation to every model.
+        if (!in_array('beh_' . $flag, $fields, true)) {
+            continue;
+        }
         $id = 'beh_' . $name . '_' . $flag;
         $attrs = ['type' => 'checkbox', 'name' => 'beh_' . $flag, 'value' => 1, 'id' => $id];
         $on = array_key_exists($flag, $cfg['behaviour']) ? $cfg['behaviour'][$flag] : $default;
@@ -338,6 +358,7 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, s
     $form = html_writer::tag(
         'form',
         html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'savemodel', 'value' => $name]) .
+        html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'category', 'value' => $category]) .
         html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]) .
         $rows .
         html_writer::tag(
@@ -594,7 +615,7 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
             model_config::get($model['key']),
             $PAGE->url,
             $canvasid,
-            ($model['category'] ?? '') === 'building'
+            $model['category'] ?? 'prop'
         );
     }
     return html_writer::div(
@@ -611,6 +632,27 @@ $modelcats = [
     'building' => get_string('preview_cat_buildings', 'format_mnemo'),
     'celestial' => get_string('preview_cat_celestial', 'format_mnemo'),
 ];
+// Every activity type with no building model gets a placeholder card under
+// Buildings, naming the model file to upload to replace its procedural building.
+$uploadurl = new moodle_url('/admin/settings.php', ['section' => 'formatsettingmnemo'], 'admin-buildingassets');
+$placeholders = '';
+foreach (asset_gallery::building_placeholders($models) as $placeholder) {
+    $body = html_writer::div(s($placeholder['label']), 'format-mnemo-preview__name') .
+        $sourcebadge('none') .
+        html_writer::div(
+            get_string('preview_building_placeholder', 'format_mnemo', s($placeholder['filename'])),
+            'format-mnemo-preview__use text-muted'
+        ) .
+        html_writer::link($uploadurl, get_string('preview_building_upload', 'format_mnemo'), [
+            'class' => 'format-mnemo-preview__use',
+        ]);
+    $placeholders .= html_writer::div(
+        html_writer::div(get_string('preview_procedural', 'format_mnemo'), 'format-mnemo-preview__placeholder') .
+        html_writer::div($body, 'format-mnemo-preview__meta'),
+        'format-mnemo-preview__card'
+    );
+}
+
 foreach ($modelcats as $cat => $catlabel) {
     $cards = '';
     foreach ($models as $i => $model) {
@@ -618,10 +660,17 @@ foreach ($modelcats as $cat => $catlabel) {
             $cards .= $rendermodelcard($i, $model);
         }
     }
+    if ($cat === 'building') {
+        $cards .= $placeholders;
+    }
     if ($cards === '') {
         continue;
     }
     echo $OUTPUT->heading($catlabel, 4);
+    // What belongs in each category, and which uploader it comes from.
+    if (get_string_manager()->string_exists('preview_cat_' . $cat . '_help', 'format_mnemo')) {
+        echo html_writer::tag('p', get_string('preview_cat_' . $cat . '_help', 'format_mnemo'), ['class' => 'text-muted']);
+    }
     echo html_writer::div($cards, 'format-mnemo-preview__grid');
 }
 

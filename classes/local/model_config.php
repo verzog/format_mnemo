@@ -49,6 +49,37 @@ class model_config {
         'animate' => false,
     ];
 
+    /** @var string[] Behaviour flags only a flying car uses (traffic movement). */
+    const VEHICLE_BEHAVIOURS = ['grounded', 'takeoffland', 'avoid', 'face'];
+
+    /**
+     * The settings that apply to a model category, as the asset viewer's form
+     * field keys: environments and scale for props and flying cars (buildings
+     * are sized by their plot or storeys, and always shown), the movement
+     * behaviours for flying cars only, storeys for buildings only, and facing,
+     * pitch, roll, credit and animation for every model.
+     *
+     * @param string $category The model category (prop, vehicle or building).
+     * @return string[] The field keys: envs, yaw, pitch, roll, scale, storeys,
+     *     credit, and beh_<flag> for each behaviour flag.
+     */
+    public static function category_fields(string $category): array {
+        $fields = ['yaw', 'pitch', 'roll', 'credit', 'beh_animate'];
+        if ($category === 'prop' || $category === 'vehicle') {
+            $fields[] = 'envs';
+            $fields[] = 'scale';
+        }
+        if ($category === 'vehicle') {
+            foreach (self::VEHICLE_BEHAVIOURS as $flag) {
+                $fields[] = 'beh_' . $flag;
+            }
+        }
+        if ($category === 'building') {
+            $fields[] = 'storeys';
+        }
+        return $fields;
+    }
+
     /**
      * Every stored model config, keyed by model name, each already normalised.
      *

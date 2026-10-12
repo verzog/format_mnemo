@@ -440,7 +440,14 @@ your Moodle). Keep the archive tidy (the model plus only the files it references
 there is no need to include `.blend`, `.max` or other source files.
 
 **Per-model settings (asset viewer).** Open **Preview site assets** from the
-plugin settings to see every model rendered, and set per model:
+plugin settings to see every model rendered, grouped as **Props** (stationary
+street items, from the prop asset pack uploader), **Vehicles** (flying cars, from
+the vehicle uploader) and **Buildings** (one per activity type; any enabled
+activity type without a building model shows a placeholder card naming the file
+to upload). Each card offers only the settings that apply to its kind: the
+movement options are for vehicles only, **Environments** and **Scale** for props
+and vehicles, **Storeys** for buildings only; facing, pitch, roll, credit and
+built-in animation apply to all. Per model you can set:
 
 - **Facing / Pitch / Roll** — degree corrections for a model authored lying
   down, upside down or pointing the wrong way (e.g. Pitch 90 to stand up a flat
