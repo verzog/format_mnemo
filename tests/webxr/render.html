@@ -70,6 +70,9 @@ var config = {
     hour: parseFloat(q('hour', '13')),
     modelsbaseurl: '../../models/',
     buildingmodels: q('buildings', '') ? q('buildings').split(',') : [],
+    // Dev only: building model sizes as JSON (see scene.php buildingsizes),
+    // e.g. ?sizes={"building-quiz":{"w":12.2,"h":33.4,"d":13.2,"storeys":11}}.
+    buildingsizes: JSON.parse(q('sizes', '{}')),
     strings: strings,
     sections: sections(parseInt(q('n', '5'), 10))
 };

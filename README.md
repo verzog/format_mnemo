@@ -452,6 +452,16 @@ plugin settings to see every model rendered, and set per model:
   node transforms; a flashing light is most reliable as a small mesh that
   scales/moves rather than an animated material colour.
 
+**Building size by storeys.** Building models are scaled so their storeys line
+up with the window rows of the city's own buildings, and their plot on the street
+widens to fit them (later buildings move along). The storey count is the model's
+height in metres divided by 3 (the model spec asks for metres), or the number
+typed in the model's **Storeys** setting. A model whose height gives fewer than 1
+or more than 30 storeys is taken as not being in metres and is fitted to a
+standard plot instead, as are `.fbx` and `.zip` models, whose size cannot be read
+on the server; type its **Storeys** to size it. Each building card says which
+applies.
+
 **Use this view.** Instead of typing angles, turn a model with the arrow buttons
 until it stands the way it should, then press **Use this view**: it fills in the
 model's facing, pitch and roll under **Model settings**, ready to **Save**.

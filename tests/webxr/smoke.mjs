@@ -688,6 +688,46 @@ const scenarios = [
         }
     },
     {
+        name: 'storeys: a sized building model is storeys x the storey height, in proportion',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {config: {buildingsbaseurl: 'm/', buildingmodels: ['quiz', 'page'],
+                buildingsizes: {'building-quiz': {w: 12, h: 30, d: 8, storeys: 10}}},
+                joinBase: CS.prototype.joinBase, modelExt: CS.prototype.modelExt,
+                buildingModelUrl: CS.prototype.buildingModelUrl, buildingModelName: CS.prototype.buildingModelName};
+            const pitch = 11 / 6;
+            const size = CS.prototype.buildingSize.call(self, {modname: 'quiz'});
+            const near = (a, b) => Math.abs(a - b) < 1e-9;
+            const sized = !!size && near(size.h, 10 * pitch) && near(size.w, 12 * pitch / 3) && near(size.d, 8 * pitch / 3);
+            // No size for a model the server did not size, or an activity with no model.
+            const none = CS.prototype.buildingSize.call(self, {modname: 'page'}) === null &&
+                CS.prototype.buildingSize.call(self, {modname: 'forum'}) === null;
+            const style = window.__mnemoModule._sizedStyle({form: 'tower', footprint: [3, 3], height: [15, 24]},
+                {w: 5, d: 4, h: 18});
+            const styled = style.form === 'tower' && style.footprint.join() === '5,4' && style.height.join() === '18,18';
+            return {pass: sized && none && styled, detail: JSON.stringify({size, none, styled})};
+        }
+    },
+    {
+        name: 'storeys: a wide sized building widens its slot and pushes later slots along',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const sizes = {quiz: {w: 20, d: 6, h: 18}};
+            const self = {buildingSize: (act) => sizes[act.modname] || null};
+            const acts = (names) => ({activities: names.map((modname) => ({modname}))});
+            const plain = CS.prototype.streetSlots.call(self, acts(['page', 'forum', 'url', 'book']));
+            const wide = CS.prototype.streetSlots.call(self, acts(['page', 'quiz', 'url', 'book']));
+            const empty = CS.prototype.streetSlots.call(self, acts([]));
+            // Standard slots: centres 5.5 and 13, length 5.5 + 2 x 7.5 + 3.
+            const std = plain.xs.join() === '5.5,13' && plain.len === 23.5 && empty.len === 16;
+            // The quiz (slot 0, far kerb) is 20 wide: slot 0 becomes 22.3, so
+            // its centre is 1.75 + 11.15 and slot 1 starts at 24.05.
+            const near = (a, b) => Math.abs(a - b) < 1e-9;
+            const widened = near(wide.xs[0], 12.9) && near(wide.xs[1], 27.8) && near(wide.len, 38.3);
+            return {pass: std && widened, detail: JSON.stringify({plain, wide, empty})};
+        }
+    },
+    {
         name: 'credits: entries stay hidden until their model loads, then show with the list',
         fn: () => {
             const M = window.__mnemoModule;
@@ -824,6 +864,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                buildingModelName: CS.prototype.buildingModelName, buildingSize: () => null,
                 loadModel: () => Promise.resolve(tpl)
             };
             await CS.prototype.applyBuildingModel.call(self, {modname: 'forum'}, built);
@@ -1036,6 +1077,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                buildingModelName: CS.prototype.buildingModelName, buildingSize: () => null,
                 loadModel: () => Promise.resolve(new THREE.Group()) // Empty template.
             };
             await CS.prototype.applyBuildingModel.call(self, {}, built);
@@ -1062,6 +1104,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                buildingModelName: CS.prototype.buildingModelName, buildingSize: () => null,
                 wetMaterials: [], scheduleWetCapture: CS.prototype.scheduleWetCapture,
                 loadModel: () => Promise.resolve(tpl)
             };

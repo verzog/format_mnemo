@@ -946,6 +946,8 @@ final class scene_test extends \advanced_testcase {
         $this->assertNull($config['vehiclepack']);
         // Bundled building models are offered (building-quiz.glb ships with the plugin).
         $this->assertContains('quiz', $config['buildingmodels']);
+        // The bundled quiz tower is sized by its storeys.
+        $this->assertGreaterThan(0, $config['buildingsizes']['building-quiz']['storeys']);
 
         // Upload a vehicle and a building into their own areas.
         $fs = get_file_storage();

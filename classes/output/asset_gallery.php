@@ -25,6 +25,7 @@
 
 namespace format_mnemo\output;
 
+use format_mnemo\local\model_bounds;
 use format_mnemo\local\model_budget;
 use format_mnemo\local\model_config;
 use format_mnemo\local\model_licence;
@@ -361,6 +362,8 @@ class asset_gallery {
                 'licenceflags' => model_licence::flags($credit),
                 // Where an uploaded model lives, so the viewer can offer to delete it.
                 'filearea' => $source === 'uploaded' ? $filearea : null,
+                'bounds' => $meta['bounds'],
+                'size' => $category === 'building' ? self::building_size($meta['bounds'], $configs[$name] ?? []) : null,
             ];
         }
         return $out;
@@ -413,8 +416,8 @@ class asset_gallery {
         $cache = \cache::make('format_mnemo', 'modelmeta');
         $cachekey = sha1($source . '|' . $url);
         $cached = $cache->get($cachekey);
-        // Entries cached before triangle counts and credits were added are re-read.
-        if (is_array($cached) && array_key_exists('credit', $cached)) {
+        // Entries cached before triangle counts, credits and bounds were added are re-read.
+        if (is_array($cached) && array_key_exists('bounds', $cached)) {
             return $cached;
         }
         // Without remote reads (the course page), a remote model not yet in the
@@ -523,10 +526,10 @@ class asset_gallery {
      * returns nulls rather than raising.
      *
      * @param string $bytes The leading bytes of a GLB (header + JSON chunk).
-     * @return array The copyright, generator, triangles and credit.
+     * @return array The copyright, generator, triangles, credit and bounds.
      */
     protected static function parse_glb_asset(string $bytes): array {
-        $none = ['copyright' => null, 'generator' => null, 'triangles' => null, 'credit' => []];
+        $none = ['copyright' => null, 'generator' => null, 'triangles' => null, 'credit' => [], 'bounds' => null];
         // 12-byte GLB header (magic, version, length) + 8-byte chunk header.
         if (strlen($bytes) < 20 || substr($bytes, 0, 4) !== 'glTF') {
             return $none;
@@ -544,8 +547,9 @@ class asset_gallery {
             return $none;
         }
         $triangles = model_budget::count_triangles($data);
+        $bounds = model_bounds::bounds($data);
         if (!isset($data['asset']) || !is_array($data['asset'])) {
-            return ['triangles' => $triangles] + $none;
+            return ['triangles' => $triangles, 'bounds' => $bounds] + $none;
         }
         $asset = $data['asset'];
         $clean = function ($value): ?string {
@@ -565,6 +569,7 @@ class asset_gallery {
             'generator' => $clean($asset['generator'] ?? null),
             'triangles' => $triangles,
             'credit' => model_licence::from_asset($asset),
+            'bounds' => $bounds,
         ];
     }
 
@@ -645,25 +650,77 @@ class asset_gallery {
      * may share a name (an "av" prop and an "av" vehicle), so each keeps its
      * own entry.
      *
-     * Building the list reads every model's metadata, so it is cached until a
-     * model, a model setting or the language changes. Remote packs are never
-     * fetched here (the course page must not wait on them): when a remote
-     * model's metadata is not cached yet, a background task fetches it and the
-     * list is rebuilt on a later page view.
-     *
      * @return array[] Each credit: name (the model's base name) and html, sorted by name.
      */
     public static function credits(): array {
+        return self::scene_assets()['credits'];
+    }
+
+    /**
+     * The storey sizing of each building model whose size is known (see
+     * building_size()), for the 3D view to scale it and give it a wide-enough
+     * plot.
+     *
+     * @return array[] Model name => w, h, d (the model's own units, after its
+     *     orientation) and storeys.
+     */
+    public static function building_sizes(): array {
+        return self::scene_assets()['buildings'];
+    }
+
+    /**
+     * A building model's storey sizing: its box after its saved orientation
+     * and the storeys that box (or a typed count) gives, or null when the size
+     * is unknown or does not look like metres (the model is fitted to its plot).
+     *
+     * @param array|null $bounds The model's box from its file, or null.
+     * @param array $cfg The model's stored settings.
+     * @return array|null The w, h, d and storeys, or null.
+     */
+    public static function building_size(?array $bounds, array $cfg): ?array {
+        if ($bounds === null) {
+            return null;
+        }
+        $box = model_bounds::orient($bounds, $cfg['pitch'] ?? 0.0, $cfg['yaw'] ?? 0.0, $cfg['roll'] ?? 0.0);
+        $w = $box[3] - $box[0];
+        $h = $box[4] - $box[1];
+        $d = $box[5] - $box[2];
+        if (!($w > 0) || !($h > 0) || !($d > 0)) {
+            return null;
+        }
+        $storeys = model_bounds::storeys($h, $cfg['storeys'] ?? null);
+        if ($storeys === null) {
+            return null;
+        }
+        return ['w' => round($w, 4), 'h' => round($h, 4), 'd' => round($d, 4), 'storeys' => $storeys,
+            'typed' => isset($cfg['storeys'])];
+    }
+
+    /**
+     * What the course page needs from the models: the credits list and the
+     * building sizes. Building it reads every model's metadata, so it is
+     * cached until a model, a model setting or the language changes. Remote
+     * packs are never fetched here (the course page must not wait on them):
+     * when a remote model's metadata is not cached yet, a background task
+     * fetches it and the result is rebuilt on a later page view.
+     *
+     * @return array The credits and buildings.
+     */
+    protected static function scene_assets(): array {
         $cache = \cache::make('format_mnemo', 'modelcredits');
         $key = self::credits_revision();
         $cached = $cache->get($key);
-        if (is_array($cached)) {
+        if (is_array($cached) && isset($cached['credits'], $cached['buildings'])) {
             return $cached;
         }
         self::$remotemissed = false;
-        $out = [];
+        $credits = [];
+        $buildings = [];
         $seen = [];
         foreach (self::models(false) as $model) {
+            if (!empty($model['size'])) {
+                $buildings[(string)$model['key']] = $model['size'];
+            }
             if (empty($model['credit']) || !model_licence::is_creditable($model['credit'])) {
                 continue;
             }
@@ -671,12 +728,13 @@ class asset_gallery {
             $html = model_licence::credit_html($model['credit'], (string)$model['label']);
             if (!isset($seen[$name . '|' . $html])) {
                 $seen[$name . '|' . $html] = true;
-                $out[] = ['name' => $name, 'html' => $html];
+                $credits[] = ['name' => $name, 'html' => $html];
             }
         }
-        usort($out, function ($a, $b) {
+        usort($credits, function ($a, $b) {
             return strcmp($a['name'], $b['name']);
         });
+        $out = ['credits' => $credits, 'buildings' => $buildings];
         if (self::$remotemissed) {
             \core\task\manager::queue_adhoc_task(new \format_mnemo\task\fetch_model_metadata(), true);
         } else {

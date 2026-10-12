@@ -804,6 +804,10 @@ class scene implements renderable, templatable {
             // Map of model base name => the URL of its uploaded "-lite" copy, which
             // headsets, phones and slow connections load instead of the full model.
             'litemodels' => model_variants::lite_urls(),
+            // Map of building model name => its size (w, h, d in its own units)
+            // and storeys, so the 3D view can scale it to the procedural
+            // buildings' storey height and give it a wide-enough plot.
+            'buildingsizes' => asset_gallery::building_sizes(),
             // Optional site-wide assets, each resolving to an admin-set URL, then
             // an uploaded file, then null (the client keeps its bundled look).
             // See resolve_asset_url().

@@ -220,4 +220,17 @@ final class model_config_test extends \advanced_testcase {
         model_config::set('statue', ['credit' => ['title' => '']]);
         $this->assertArrayNotHasKey('statue', model_config::all());
     }
+
+    /**
+     * A typed storey count is a whole number from 1 to 60; blank or junk is null.
+     */
+    public function test_storeys(): void {
+        $this->resetAfterTest();
+        model_config::set('building-quiz', ['storeys' => '12']);
+        $this->assertSame(12, model_config::get('building-quiz')['storeys']);
+        model_config::set('building-quiz', ['storeys' => 500]);
+        $this->assertSame(60, model_config::get('building-quiz')['storeys']);
+        model_config::set('building-quiz', ['storeys' => 'lots']);
+        $this->assertArrayNotHasKey('building-quiz', model_config::all());
+    }
 }

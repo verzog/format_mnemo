@@ -141,7 +141,7 @@ class model_config {
      * bad value falls back to its default rather than reaching the client.
      *
      * @param array $cfg The raw config.
-     * @return array The envs, yaw, pitch, roll, scale, behaviour and credit.
+     * @return array The envs, yaw, pitch, roll, scale, behaviour, credit and storeys.
      */
     protected static function normalise(array $cfg): array {
         $envs = [];
@@ -199,8 +199,14 @@ class model_config {
                 }
             }
         }
+        // Storeys a building model has, typed by an admin (null = work it out
+        // from the model's height in metres).
+        $storeys = null;
+        if (isset($cfg['storeys']) && is_numeric($cfg['storeys']) && is_finite((float)$cfg['storeys'])) {
+            $storeys = max(1, min(model_bounds::MAX_STOREYS, (int)round((float)$cfg['storeys'])));
+        }
         return ['envs' => $envs, 'yaw' => $yaw, 'pitch' => $pitch, 'roll' => $roll,
-            'scale' => $scale, 'behaviour' => $behaviour, 'credit' => $credit];
+            'scale' => $scale, 'behaviour' => $behaviour, 'credit' => $credit, 'storeys' => $storeys];
     }
 
     /**
@@ -231,6 +237,6 @@ class model_config {
     protected static function is_default(array $cfg): bool {
         return empty($cfg['envs']) && $cfg['yaw'] === null && $cfg['pitch'] === null &&
             $cfg['roll'] === null && $cfg['scale'] === null && empty($cfg['behaviour']) &&
-            empty($cfg['credit']);
+            empty($cfg['credit']) && $cfg['storeys'] === null;
     }
 }
