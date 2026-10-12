@@ -970,18 +970,27 @@ final class scene_test extends \advanced_testcase {
         $this->assertStringContainsString('/format_mnemo/vehicleassets/', $config['vehiclesbaseurl']);
         $this->assertStringContainsString('/format_mnemo/buildingassets/', $config['buildingsbaseurl']);
         $this->assertSame(['hovercar'], $config['vehiclepack']);
-        // The uploaded building pack drives the offered building models.
-        $this->assertSame(['forum'], $config['buildingmodels']);
+        // The uploaded building pack adds its models; a bundled building with no
+        // upload of its own (quiz) stays, at its bundled URL.
+        $this->assertEqualsCanonicalizing(['forum', 'quiz'], $config['buildingmodels']);
+        $this->assertStringEndsWith('/course/format/mnemo/models/building-quiz.glb', $config['modelurls']['building-quiz']);
         // Slots: a type pointed at an uploaded building gets one (and the 3D view
         // the alias); a type set to the procedural building loses its own.
         \format_mnemo\local\model_slots::save([
-            'building-page' => 'building-forum',
+            'building-page' => \format_mnemo\local\model_slots::MODEL . 'building-forum',
             'building-forum' => \format_mnemo\local\model_slots::NONE,
-            'av' => 'hovercar',
+            'av' => \format_mnemo\local\model_slots::MODEL . 'hovercar',
         ]);
         $slotted = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
-        $this->assertSame(['page'], $slotted['buildingmodels']);
-        $this->assertEquals(['building-page' => 'building-forum', 'av' => 'hovercar'], (array)$slotted['modelaliases']);
+        $this->assertEqualsCanonicalizing(['page', 'quiz'], $slotted['buildingmodels']);
+        // The car slot is not a 3D-view alias (a placed "av" prop keeps its
+        // model): it is the default car, and stands in for "av" in car types.
+        $this->assertEquals(['building-page' => 'building-forum'], (array)$slotted['modelaliases']);
+        $this->assertSame('hovercar', $slotted['defaultcar']);
+        set_config('cartypes', 'av | avenue | 10 | 20 | none', 'format_mnemo');
+        $slotted = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $this->assertSame('hovercar', $slotted['cartypes'][0]['model']);
+        set_config('cartypes', 'hovercar | avenue | 10 | 20 | none', 'format_mnemo');
         \format_mnemo\local\model_slots::save(['building-page' => 'default', 'building-forum' => 'default', 'av' => 'default']);
         $this->assertEqualsCanonicalizing(['building-forum', 'hovercar'], array_keys($config['litemodels']));
         $this->assertStringContainsString('/vehicleassets/', $config['litemodels']['hovercar']);

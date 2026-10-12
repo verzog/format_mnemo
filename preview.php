@@ -107,8 +107,7 @@ $saveslots = optional_param('saveslots', '', PARAM_ALPHA);
 if ($saveslots !== '' && confirm_sesskey()) {
     $values = [];
     foreach (array_keys(model_slots::slots($saveslots)) as $slot) {
-        $raw = optional_param('slot_' . $slot, model_slots::DEFAULT, PARAM_RAW_TRIMMED);
-        $values[$slot] = strpos($raw, 'model:') === 0 ? substr($raw, 6) : $raw;
+        $values[$slot] = optional_param('slot_' . $slot, model_slots::DEFAULT, PARAM_RAW_TRIMMED);
     }
     model_slots::save($values);
     redirect(
@@ -142,9 +141,10 @@ function mnemo_slot_form(string $category, moodle_url $url): string {
             $options[model_slots::NONE] = get_string('slot_none', 'format_mnemo');
         }
         foreach ($choices as $choice) {
-            $options['model:' . $choice] = $choice;
+            $options[model_slots::MODEL . $choice] = $choice;
         }
-        $selected = ($current === model_slots::DEFAULT || $current === model_slots::NONE) ? $current : 'model:' . $current;
+        // A choice whose model has since been deleted shows as the default.
+        $selected = isset($options[$current]) ? $current : model_slots::DEFAULT;
         $id = 'slot_' . $category . '_' . $slot;
         $rows .= html_writer::tag(
             'tr',

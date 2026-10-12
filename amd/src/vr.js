@@ -4015,12 +4015,16 @@ define('format_mnemo/vr', [], function() {
      * viewer for a model name, or null when none is stored.
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already the model to use (not
+     *     a slot), so it is not resolved through the slot aliases again.
      * @return {Object|null} {envs, yaw, scale} or null.
      */
-    Cyberspace.prototype.modelCfg = function(name) {
+    Cyberspace.prototype.modelCfg = function(name, exact) {
         var mc = this.config && this.config.modelconfig;
         // A slot pointed at another model takes that model's settings.
-        name = aliasOf(this.config, name);
+        if (!exact) {
+            name = aliasOf(this.config, name);
+        }
         return (mc && name && mc[name]) ? mc[name] : null;
     };
 
@@ -4042,10 +4046,11 @@ define('format_mnemo/vr', [], function() {
      * unconfigured model keeps the original behaviour.
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      * @return {Object} The stored behaviour map (possibly empty).
      */
-    Cyberspace.prototype.modelBehaviour = function(name) {
-        var mc = this.modelCfg(name);
+    Cyberspace.prototype.modelBehaviour = function(name, exact) {
+        var mc = this.modelCfg(name, exact);
         return (mc && mc.behaviour && typeof mc.behaviour === 'object') ? mc.behaviour : {};
     };
 
@@ -4130,10 +4135,11 @@ define('format_mnemo/vr', [], function() {
      * exported from other tools).
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      * @return {Object|null} {pitch, yaw, roll} in radians, or null.
      */
-    Cyberspace.prototype.modelOrientation = function(name) {
-        var mc = this.modelCfg(name);
+    Cyberspace.prototype.modelOrientation = function(name, exact) {
+        var mc = this.modelCfg(name, exact);
         if (!mc) {
             return null;
         }
@@ -4168,9 +4174,10 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} clone The placed clone to orient.
      * @param {String} name The model name (its orientation config is read).
      * @param {Boolean} [bakeyaw] false to skip the yaw (Y) part (vehicles).
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      */
-    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw) {
-        var o = this.modelOrientation(name);
+    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw, exact) {
+        var o = this.modelOrientation(name, exact);
         if (!clone || !o) {
             return;
         }
@@ -4637,7 +4644,7 @@ define('format_mnemo/vr', [], function() {
             this.config.cartypes : [{
                 // The default fleet (no config) keeps the original per-car
                 // random speed/altitude variation, not a rigid formation.
-                model: 'av', path: 'avenue', land: 'none', jitter: true,
+                model: this.config.defaultcar || 'av', path: 'avenue', land: 'none', jitter: true,
                 count: this.config.environment === 'void' ? 6 : 10
             }];
         // Allocate the global car cap across types up front, in order, so the
@@ -6060,7 +6067,10 @@ define('format_mnemo/vr', [], function() {
             // .zip bundle (whose entry URL is an arbitrary extracted file name)
             // still keys its config correctly.
             var name = self.buildingModelName(act);
-            tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
+            // The name is already resolved through the slot, so it is read
+            // exactly: a slot pointed at "building-forum" takes that model's
+            // own settings, not those of the model forum's slot points at.
+            tpl.mnemoAnimate = !!self.modelBehaviour(name, true).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
             // Box3 (infinite bounds -> NaN placement); keep the procedural
@@ -6070,7 +6080,7 @@ define('format_mnemo/vr', [], function() {
             }
             // Orient (facing included) and animate only the clone we keep, before
             // fitting so the fit measures the corrected model.
-            self.orientClone(model, name, true);
+            self.orientClone(model, name, true, true);
             self.animateClone(tpl, model);
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close

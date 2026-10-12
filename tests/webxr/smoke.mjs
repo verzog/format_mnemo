@@ -762,8 +762,14 @@ const scenarios = [
             const url = CS.prototype.buildingModelUrl.call(self, {modname: 'page'});
             const name = CS.prototype.buildingModelName.call(self, {modname: 'page'});
             const plain = aliasOf(config, 'kiosk') === 'kiosk' && aliasOf(null, 'lamp') === 'lamp';
-            const pass = loaded && scale && url === 'b/tower-a.fbx' && name === 'tower-a' && plain;
-            return {pass, detail: JSON.stringify({calls, scale, url, name, plain})};
+            // A resolved name is read exactly: a slot pointed at another slot's
+            // model name takes that model's settings, not a second hop's.
+            const chain = {modelaliases: {'building-page': 'building-forum', 'building-forum': 'tower-a'},
+                modelconfig: {'building-forum': {behaviour: {animate: true}}, 'tower-a': {behaviour: {}}}};
+            const exact = !!CS.prototype.modelBehaviour.call({config: chain, modelCfg: CS.prototype.modelCfg},
+                'building-forum', true).animate;
+            const pass = loaded && scale && url === 'b/tower-a.fbx' && name === 'tower-a' && plain && exact;
+            return {pass, detail: JSON.stringify({calls, scale, url, name, plain, exact})};
         }
     },
     {

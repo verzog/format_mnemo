@@ -576,7 +576,7 @@ final class asset_gallery_test extends \advanced_testcase {
         // to the procedural building has one, even with its model uploaded.
         $DB->set_field('modules', 'visible', 1, ['name' => 'page']);
         \format_mnemo\local\model_slots::save([
-            'building-page' => 'building-forum',
+            'building-page' => \format_mnemo\local\model_slots::MODEL . 'building-forum',
             'building-forum' => \format_mnemo\local\model_slots::NONE,
         ]);
         $modnames = array_column(asset_gallery::building_placeholders(asset_gallery::models()), 'modname');

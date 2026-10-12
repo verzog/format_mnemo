@@ -81,26 +81,46 @@ final class model_slots_test extends \advanced_testcase {
         $this->store('buildingassets', 'tower-a.zip');
         $this->assertSame(['neon-lamp'], model_slots::choices('prop'));
 
+        $m = model_slots::MODEL;
         model_slots::save([
-            'lamp' => 'neon-lamp',
-            'kiosk' => 'hovercar',
+            'lamp' => $m . 'neon-lamp',
+            'kiosk' => $m . 'hovercar',
             'barrier' => model_slots::NONE,
-            'av' => 'hovercar',
-            'building-forum' => 'tower-a',
+            'av' => $m . 'hovercar',
+            'building-forum' => $m . 'tower-a',
             'building-page' => model_slots::NONE,
-            'building-quiz' => 'neon-lamp',
-            'statue' => 'neon-lamp',
+            'building-quiz' => $m . 'neon-lamp',
+            'building-book' => 'tower-a',
+            'statue' => $m . 'neon-lamp',
         ]);
         $this->assertSame([
             'av' => 'hovercar',
             'building-forum' => 'tower-a',
-            'building-page' => model_slots::NONE,
+            'building-page' => '',
             'lamp' => 'neon-lamp',
         ], model_slots::stored());
         $this->assertSame(model_slots::DEFAULT, model_slots::get('kiosk'));
+        $this->assertSame(model_slots::NONE, model_slots::get('building-page'));
+        $this->assertSame($m . 'tower-a', model_slots::get('building-forum'));
         // The procedural building type is not an alias.
         $this->assertEquals(['av' => 'hovercar', 'building-forum' => 'tower-a', 'lamp' => 'neon-lamp'], model_slots::aliases());
         $this->assertSame(['page'], model_slots::procedural_types());
+
+        $this->assertEquals(['lamp' => 'neon-lamp'], model_slots::aliases(['prop']));
+
+        // Models named like the form's choices can still be picked.
+        $this->store('buildingassets', 'none.glb');
+        $this->store('buildingassets', 'default.glb');
+        model_slots::save(['building-book' => $m . 'none', 'building-url' => $m . 'default']);
+        $this->assertSame('none', model_slots::stored()['building-book']);
+        $this->assertSame('default', model_slots::stored()['building-url']);
+        $this->assertSame(['page'], model_slots::procedural_types());
+
+        // With an external asset pack, uploaded props cannot be used.
+        set_config('assetbaseurl', 'https://pack.example.com/', 'format_mnemo');
+        $this->assertSame([], model_slots::choices('prop'));
+        $this->assertArrayNotHasKey('lamp', model_slots::aliases());
+        set_config('assetbaseurl', '', 'format_mnemo');
 
         // Default clears a slot; a deleted model drops out of the aliases.
         model_slots::save(['lamp' => model_slots::DEFAULT]);

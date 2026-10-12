@@ -349,6 +349,9 @@ class scene implements renderable, templatable {
             return [];
         }
         $paths = ['avenue' => true, 'cross' => true, 'diagonal' => true];
+        // The default flying car slot, when pointed at an uploaded vehicle,
+        // stands in for "av" in every car type.
+        $defaultcar = model_slots::aliases(['vehicle'])['av'] ?? null;
         $lands = ['none' => true, 'ground' => true, 'rooftop' => true];
         $models = array_flip($this->vehicle_model_names());
         $out = [];
@@ -362,6 +365,9 @@ class scene implements renderable, templatable {
                 continue;
             }
             [$model, $path, $speed, $height, $land] = $parts;
+            if ($model === 'av' && $defaultcar !== null) {
+                $model = $defaultcar;
+            }
             if (!isset($models[$model]) || !isset($paths[$path]) || !isset($lands[$land])) {
                 continue;
             }
@@ -808,7 +814,12 @@ class scene implements renderable, templatable {
             // Map of slot name => the uploaded model an admin pointed it at in the
             // asset viewer (a building type, a street prop or the default flying
             // car), which the 3D view loads and configures in the slot's place.
-            'modelaliases' => (object)model_slots::aliases(),
+            'modelaliases' => (object)model_slots::aliases(['prop', 'building']),
+            // The model the default flying car slot is set to, or null for the
+            // bundled "av": the default fleet uses it, and car types naming "av"
+            // are rewritten to it (see car_types()), so a placed "av" prop is
+            // never affected.
+            'defaultcar' => model_slots::aliases(['vehicle'])['av'] ?? null,
             // Map of building model name => its size (w, h, d in its own units)
             // and storeys, so the 3D view can scale it to the procedural
             // buildings' storey height and give it a wide-enough plot.
@@ -1132,6 +1143,18 @@ class scene implements renderable, templatable {
                 }
             }
         }
+        // Once any building is uploaded the buildings base is the upload area, so
+        // a bundled building with no upload of its own (a slot left on Default)
+        // gets its bundled URL here.
+        $uploaded = $this->uploaded_building_modnames();
+        if ($uploaded) {
+            foreach (array_diff($this->bundled_building_modnames(), $uploaded) as $modname) {
+                $name = 'building-' . $modname;
+                if (!isset($out[$name])) {
+                    $out[$name] = (new moodle_url('/course/format/mnemo/models/' . $name . '.glb'))->out(false);
+                }
+            }
+        }
         return $out;
     }
 
@@ -1362,8 +1385,10 @@ class scene implements renderable, templatable {
      * @return array List of modname strings.
      */
     protected function building_models(): array {
-        $uploaded = $this->uploaded_building_modnames();
-        $names = !empty($uploaded) ? $uploaded : $this->bundled_building_modnames();
+        // Uploaded buildings, plus the bundled ones not replaced by an upload
+        // (model_urls() gives those their bundled URL once uploads move the
+        // buildings base to the upload area).
+        $names = array_merge($this->uploaded_building_modnames(), $this->bundled_building_modnames());
         // The asset viewer's slots: a type pointed at an uploaded building has
         // one; a type set to the procedural building has none.
         foreach (array_keys(model_slots::aliases()) as $slot) {
