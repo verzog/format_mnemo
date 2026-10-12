@@ -784,7 +784,8 @@ const scenarios = [
                 '<input type="hidden" name="sesskey" value="k">' +
                 '<input type="radio" name="yaw" value=""' + (yaw === '' ? ' checked' : '') + '>' +
                 '<input type="radio" name="yaw" value="90"' + (yaw === '90' ? ' checked' : '') + '>' +
-                '<input type="number" name="storeys" value="">' +
+                '<input type="number" name="storeys" value="" min="1">' +
+                '<input type="checkbox" name="beh_animate" value="1">' +
                 '<button type="submit">Save</button></form></details>';
             root.innerHTML = card('building-quiz', 'building', '') + card('lamp', 'prop', '90') +
                 '<form data-mnemo-savebar hidden><input type="hidden" name="saveall" value="">' +
@@ -810,9 +811,17 @@ const scenarios = [
             const two = bar.textContent.indexOf('2 changed') !== -1;
             // A card's own Save with another card changed saves both.
             forms[1].dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+            // Each entry lists only its changed fields, and an unticked box is sent.
             const both = posted && posted.length === 2 && posted[0].model === 'building-quiz' &&
                 posted[0].values.storeys === '7' && posted[1].model === 'lamp' && posted[1].values.yaw === '' &&
-                posted[0].values.sesskey === undefined;
+                posted[0].values.sesskey === undefined && posted[0].values.beh_animate === '' &&
+                posted[0].changed.join() === 'storeys' && posted[1].changed.join() === 'yaw';
+            // A card whose value its own form would refuse stops Save all.
+            posted = null;
+            forms[0].querySelector('[name="storeys"]').value = '0';
+            bar.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+            const refused = posted === null && root.querySelector('details').open;
+            forms[0].querySelector('[name="storeys"]').value = '7';
             // Changing a card back to how it loaded is not a change.
             forms[1].querySelector('[name="yaw"][value="90"]').checked = true;
             api.refresh();
@@ -826,8 +835,8 @@ const scenarios = [
             const discarded = bar.hidden && hooked && forms[0].querySelector('[name="storeys"]').value === '' &&
                 !root.querySelector('.format-mnemo-preview__unsaved');
             root.remove();
-            const pass = hiddenAtStart && one && two && both && back && discarded;
-            return {pass, detail: JSON.stringify({hiddenAtStart, one, two, both, back, discarded, posted})};
+            const pass = hiddenAtStart && one && two && both && refused && back && discarded;
+            return {pass, detail: JSON.stringify({hiddenAtStart, one, two, both, refused, back, discarded, posted})};
         }
     },
     {

@@ -80,13 +80,26 @@ class model_form {
      * @param string $category The card's category (prop, vehicle or building).
      * @param array $values The posted form values, by field name (uncleaned).
      * @param array|null $categories model_categories(), when already worked out.
+     * @param string[]|null $changed The fields the card changed, to save only
+     *     those (two cards may share a model, such as an "av" prop and car, so
+     *     one card's untouched values must not undo the other's edits); null
+     *     to save every field the card shows.
      * @return bool Whether the model was saved (false for an unknown model or category).
      */
-    public static function save(string $name, string $category, array $values, ?array $categories = null): bool {
+    public static function save(
+        string $name,
+        string $category,
+        array $values,
+        ?array $categories = null,
+        ?array $changed = null
+    ): bool {
         $categories = $categories ?? self::model_categories();
         if (!in_array($category, $categories[$name] ?? [], true)) {
             return false;
         }
+        $wants = function (string $field) use ($changed): bool {
+            return $changed === null || in_array($field, $changed, true);
+        };
         $params = self::params();
         $value = function (string $field) use ($values, $params) {
             $raw = $values[$field] ?? '';
@@ -97,7 +110,11 @@ class model_form {
         };
         $fields = model_config::category_fields($category);
         $cfg = model_config::get($name);
-        if (in_array('envs', $fields, true)) {
+        $envschanged = false;
+        foreach (model_config::ENVIRONMENTS as $env) {
+            $envschanged = $envschanged || $wants('env_' . $env);
+        }
+        if (in_array('envs', $fields, true) && $envschanged) {
             $cfg['envs'] = [];
             foreach (model_config::ENVIRONMENTS as $env) {
                 if ($value('env_' . $env)) {
@@ -106,26 +123,31 @@ class model_form {
             }
         }
         foreach (['yaw', 'pitch', 'roll', 'scale', 'storeys'] as $field) {
-            if (in_array($field, $fields, true)) {
+            if (in_array($field, $fields, true) && $wants($field)) {
                 $cfg[$field] = $numornull($value($field));
             }
         }
         foreach (array_keys(model_config::BEHAVIOUR_DEFAULTS) as $flag) {
-            if (in_array('beh_' . $flag, $fields, true)) {
+            if (in_array('beh_' . $flag, $fields, true) && $wants('beh_' . $flag)) {
                 $cfg['behaviour'][$flag] = (bool)$value('beh_' . $flag);
             }
         }
-        $cfg['credit'] = [];
+        $credit = $changed === null ? [] : ($cfg['credit'] ?? []);
         foreach (model_licence::FIELDS as $field) {
-            $cfg['credit'][$field] = $value('credit_' . $field);
+            if ($wants('credit_' . $field)) {
+                $credit[$field] = $value('credit_' . $field);
+            }
         }
+        $cfg['credit'] = $credit;
         model_config::set($name, $cfg);
         return true;
     }
 
     /**
      * Save every changed card at once, from the "Save all" bar's JSON list of
-     * {model, category, values} entries. Entries for unknown models are skipped.
+     * {model, category, values, changed} entries, where changed lists the
+     * fields the card changed (only those are saved). Entries for unknown
+     * models are skipped.
      *
      * @param string $json The posted JSON list.
      * @return string[] The names of the models saved.
@@ -142,7 +164,8 @@ class model_form {
                 continue;
             }
             $values = is_array($entry['values'] ?? null) ? $entry['values'] : [];
-            if (self::save($entry['model'], $entry['category'], $values, $categories)) {
+            $changed = is_array($entry['changed'] ?? null) ? array_filter($entry['changed'], 'is_string') : null;
+            if (self::save($entry['model'], $entry['category'], $values, $categories, $changed)) {
                 $saved[] = $entry['model'];
             }
         }

@@ -80,6 +80,29 @@ final class model_form_test extends \advanced_testcase {
         $this->assertEquals(1.5, model_config::get('lamp')['scale']);
         $this->assertEquals(90, model_config::get('lamp')['roll']);
 
+        // Two cards for one model (an "av" uploaded as a prop, and the flying
+        // car): each saves only the fields it changed, so neither undoes the
+        // other's edit.
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'assetpack',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'av.glb',
+        ], 'x');
+        $this->assertSame(['prop', 'vehicle'], model_form::model_categories()['av']);
+        model_form::save_batch(json_encode([
+            ['model' => 'av', 'category' => 'prop', 'values' => ['roll' => '90', 'credit_author' => 'Ann'],
+                'changed' => ['credit_author']],
+            ['model' => 'av', 'category' => 'vehicle', 'values' => ['roll' => '180', 'credit_author' => '', 'beh_avoid' => ''],
+                'changed' => ['beh_avoid']],
+        ]));
+        $cfg = model_config::get('av');
+        $this->assertSame('Ann', $cfg['credit']['author']);
+        $this->assertFalse($cfg['behaviour']['avoid']);
+        $this->assertNull($cfg['roll']);
+
         // Rubbish posts save nothing.
         $this->assertSame([], model_form::save_batch('not json'));
         $this->assertSame([], model_form::save_batch('"a string"'));

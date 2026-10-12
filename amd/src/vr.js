@@ -14751,7 +14751,8 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Element} root The preview root element.
      * @param {Object} strings The page strings (changedone, changedmany, unsaved).
-     * @return {Object|null} {refresh, onDiscard(fn), dirty()}, or null when the page has no bar.
+     * @return {Object|null} {refresh, onDiscard(fn), beforeSave(fn), dirty()}, or null when the
+     *     page has no bar.
      */
     function initSaveBar(root, strings) {
         var bar = root && root.querySelector('[data-mnemo-savebar]');
@@ -14761,36 +14762,74 @@ define('format_mnemo/vr', [], function() {
         var forms = Array.prototype.slice.call(root.querySelectorAll('form[data-mnemo-settings-for]'));
         var count = bar.querySelector('.format-mnemo-preview__savebar-count');
         var discardHooks = [];
+        var saveHooks = [];
         var leaving = false;
-        // A form's values as one comparable string (the sesskey aside).
-        var snapshot = function(form) {
-            var parts = [];
-            new window.FormData(form).forEach(function(value, name) {
-                if (name !== 'sesskey') {
-                    parts.push(name + '=' + value);
-                }
-            });
-            return parts.join('&');
-        };
-        var initial = forms.map(snapshot);
-        var dirtyForms = function() {
-            return forms.filter(function(form, i) {
-                return snapshot(form) !== initial[i];
-            });
-        };
-        // A changed form's values, as the server's batch save reads them.
-        var entry = function(form) {
+        // A form's settings by field name: a checkbox is '1' or '' (so an
+        // unticked box is still sent), a radio group its ticked value.
+        var valuesOf = function(form) {
             var values = {};
-            new window.FormData(form).forEach(function(value, name) {
-                if (name !== 'sesskey' && name !== 'savemodel' && name !== 'category') {
-                    values[name] = value;
+            Array.prototype.forEach.call(form.elements, function(el) {
+                var name = el.name;
+                if (!name || name === 'sesskey' || name === 'savemodel' || name === 'category' || el.type === 'submit') {
+                    return;
+                }
+                if (el.type === 'checkbox') {
+                    values[name] = el.checked ? '1' : '';
+                } else if (el.type === 'radio') {
+                    if (el.checked || !(name in values)) {
+                        values[name] = el.checked ? el.value : '';
+                    }
+                } else {
+                    values[name] = el.value;
                 }
             });
+            return values;
+        };
+        var initial = forms.map(valuesOf);
+        // The fields of a form that differ from how the page loaded.
+        var changedFields = function(form) {
+            var now = valuesOf(form);
+            var before = initial[forms.indexOf(form)];
+            return Object.keys(now).filter(function(name) {
+                return now[name] !== before[name];
+            });
+        };
+        var dirtyForms = function() {
+            return forms.filter(function(form) {
+                return changedFields(form).length > 0;
+            });
+        };
+        // A changed form, as the server's batch save reads it: only its changed
+        // fields are saved, so two cards for one model (an "av" prop and car)
+        // cannot undo each other's edits.
+        var entry = function(form) {
             return {
                 model: form.querySelector('[name="savemodel"]').value,
                 category: form.querySelector('[name="category"]').value,
-                values: values
+                values: valuesOf(form),
+                changed: changedFields(form)
             };
+        };
+        // Copy any turn still playing into its form before a save reads it.
+        var flush = function() {
+            saveHooks.forEach(function(fn) {
+                fn();
+            });
+        };
+        // Check every form about to be saved, as its own Save button would;
+        // show the first problem (opening its settings) and stop.
+        var valid = function(list) {
+            for (var i = 0; i < list.length; i++) {
+                if (!list[i].checkValidity()) {
+                    var details = list[i].closest('details');
+                    if (details) {
+                        details.open = true;
+                    }
+                    list[i].reportValidity();
+                    return false;
+                }
+            }
+            return true;
         };
         var refresh = function() {
             var dirty = dirtyForms();
@@ -14817,9 +14856,14 @@ define('format_mnemo/vr', [], function() {
             return dirty;
         };
         var saveAll = function(extra) {
+            flush();
             var dirty = dirtyForms();
             if (extra && dirty.indexOf(extra) === -1) {
                 dirty.push(extra);
+            }
+            if (!valid(dirty)) {
+                refresh();
+                return;
             }
             bar.querySelector('[name="saveall"]').value = JSON.stringify(dirty.map(entry));
             leaving = true;
@@ -14837,6 +14881,8 @@ define('format_mnemo/vr', [], function() {
                 leaving = true;
                 return;
             }
+            // A turn still playing belongs in what is saved.
+            flush();
             // Other cards changed too: save them with this one.
             var others = dirtyForms().filter(function(f) {
                 return f !== form;
@@ -14867,6 +14913,9 @@ define('format_mnemo/vr', [], function() {
             refresh: refresh,
             onDiscard: function(fn) {
                 discardHooks.push(fn);
+            },
+            beforeSave: function(fn) {
+                saveHooks.push(fn);
             },
             dirty: dirtyForms
         };
@@ -15017,6 +15066,14 @@ define('format_mnemo/vr', [], function() {
             }
         };
         if (savebar) {
+            // A save while a card is still turning saves where the turn ends.
+            savebar.beforeSave(function() {
+                entries.forEach(function(e) {
+                    if (e.model && !e.discarding && (e.t < 1 || e.queue.length)) {
+                        useView(e, true);
+                    }
+                });
+            });
             // Discard also turns every turned card back to its saved view.
             savebar.onDiscard(function() {
                 entries.forEach(function(e) {
