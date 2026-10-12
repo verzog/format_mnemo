@@ -130,4 +130,19 @@ final class model_store_test extends \advanced_testcase {
         model_store::delete('assetpack', 'statue');
         $this->assertSame([sha1('same zip') . '/scene.gltf'], $this->left('modelcache'));
     }
+
+    /**
+     * Deleting one of two same-named models in different areas keeps the
+     * settings the other still uses; deleting the last clears them.
+     */
+    public function test_delete_keeps_settings_for_same_name_elsewhere(): void {
+        $this->resetAfterTest();
+        $this->store('assetpack', 'av.glb');
+        $this->store('vehicleassets', 'av.glb');
+        model_config::set('av', ['scale' => 2]);
+        model_store::delete('assetpack', 'av');
+        $this->assertSame(2.0, model_config::get('av')['scale']);
+        model_store::delete('vehicleassets', 'av');
+        $this->assertArrayNotHasKey('av', model_config::all());
+    }
 }

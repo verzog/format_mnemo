@@ -29,8 +29,9 @@ namespace format_mnemo\local;
  *
  * Deleting a model removes every upload of it in its file area (its .glb,
  * .fbx or .zip, and its "-lite" copy), the unpacked contents of any .zip no
- * other upload shares, and its model settings. A bundled model with the same
- * name is then used again.
+ * other upload shares, and its model settings (unless another upload area
+ * still has a model of that name). A bundled model with the same name is then
+ * used again.
  */
 class model_store {
     /**
@@ -60,6 +61,8 @@ class model_store {
                 $out[$file->get_filename()] = $file;
             }
         }
+        // The database's collation orders names its own way; keep a fixed order.
+        ksort($out, SORT_STRING);
         return $out;
     }
 
@@ -101,7 +104,15 @@ class model_store {
                 }
             }
         }
-        model_config::set($name, []);
+        // The settings are keyed by name, so keep them while another upload
+        // area still has a model of this name (an "av" prop and an "av" car).
+        $elsewhere = false;
+        foreach (model_variants::AREAS as $other) {
+            $elsewhere = $elsewhere || ($other !== $filearea && self::files($other, $name));
+        }
+        if (!$elsewhere) {
+            model_config::set($name, []);
+        }
         return array_keys($files);
     }
 }

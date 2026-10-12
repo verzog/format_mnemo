@@ -14563,6 +14563,22 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * The exact Euler angles of a rotation, in degrees, in the given order
+     * (unlike previewEulerDegrees, nothing is rounded).
+     *
+     * @param {Object} THREE The Three.js namespace.
+     * @param {Object} q The rotation quaternion.
+     * @param {String} order The Euler order: XYZ (as models are corrected) or
+     *     YXZ (a flying car's heading outside its pitch and roll).
+     * @return {Object} Degrees: {pitch, yaw, roll}.
+     */
+    function previewExactDegrees(THREE, q, order) {
+        var e = new THREE.Euler().setFromQuaternion(q, order);
+        var d = 180 / Math.PI;
+        return {pitch: e.x * d, yaw: e.y * d, roll: e.z * d};
+    }
+
+    /**
      * Wrap an angle into [0, 360) degrees, to one decimal place.
      *
      * @param {Number} deg The angle in degrees.
@@ -14570,7 +14586,9 @@ define('format_mnemo/vr', [], function() {
      */
     function previewWrapDegrees(deg) {
         var d = Math.round(deg * 10) / 10 % 360;
-        return d < 0 ? d + 360 : d;
+        d = d < 0 ? d + 360 : d;
+        // A turn of a hair under 360 rounds to 360, which is 0; never return -0.
+        return d === 360 || d === 0 ? 0 : d;
     }
 
     /**
@@ -14614,7 +14632,7 @@ define('format_mnemo/vr', [], function() {
             var cam = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
             var entry = {
                 ctx: canvas.getContext('2d'), scene: scene, cam: cam, model: null, base: null,
-                id: m.canvasid, from: null, to: null, t: 1, queue: []
+                id: m.canvasid, from: null, to: null, t: 1, queue: [], category: m.category || 'prop'
             };
             entries.push(entry);
             load(m.url).then(function(object) {
@@ -14763,8 +14781,25 @@ define('format_mnemo/vr', [], function() {
          * @return {Object} Degrees: {pitch, yaw, roll}.
          */
         function viewDegrees(e) {
-            var turned = e.t < 1 && e.to ? e.to : e.model.quaternion;
-            return previewEulerDegrees(THREE, turned.clone().multiply(e.base || new THREE.Quaternion()));
+            // Where the card will end up: the turn in progress finished, then
+            // every queued press played.
+            var q = (e.t < 1 && e.to ? e.to : e.model.quaternion).clone();
+            e.queue.forEach(function(turn) {
+                q = previewTurnQuaternion(THREE, q, turn);
+            });
+            q.multiply(e.base || new THREE.Quaternion());
+            // A flying car is turned to its travel heading outside its pitch and
+            // roll correction (heading x pitch x roll), so split it in that order.
+            if (e.category === 'vehicle') {
+                return previewExactDegrees(THREE, q, 'YXZ');
+            }
+            // Right angles get their simplest spelling; anything else keeps its
+            // exact angles (a saved 12.5 stays 12.5).
+            var snapped = previewEulerDegrees(THREE, q);
+            if (snapped.pitch % 90 === 0 && snapped.yaw % 90 === 0 && snapped.roll % 90 === 0) {
+                return snapped;
+            }
+            return previewExactDegrees(THREE, q, 'XYZ');
         }
 
         /**
@@ -14783,12 +14818,22 @@ define('format_mnemo/vr', [], function() {
             var setAngle = function(field, value) {
                 var input = form.querySelector('[name="' + field + '"]');
                 if (input) {
-                    input.value = value === 0 ? '' : String(previewWrapDegrees(value));
+                    var wrapped = previewWrapDegrees(value);
+                    input.value = wrapped === 0 ? '' : String(wrapped);
                 }
             };
             setAngle('pitch', d.pitch);
             setAngle('roll', d.roll);
-            setFacing(form, d.yaw);
+            if (e.category === 'vehicle') {
+                // A car's preview leaves out its saved facing, so a turn adds to
+                // it, and no turn leaves it as it is.
+                var current = form.querySelector('[name="yaw"]:checked');
+                if (previewWrapDegrees(d.yaw) !== 0) {
+                    setFacing(form, (current && current.value !== '' ? parseFloat(current.value) : 0) + d.yaw);
+                }
+            } else {
+                setFacing(form, d.yaw);
+            }
             var details = form.closest('details');
             if (details) {
                 details.open = true;
@@ -14810,10 +14855,10 @@ define('format_mnemo/vr', [], function() {
         function setFacing(form, yaw) {
             var radios = form.querySelectorAll('[name="yaw"]');
             var current = form.querySelector('[name="yaw"]:checked');
-            if (yaw === 0 && current && current.value === '') {
+            var value = String(previewWrapDegrees(yaw));
+            if (value === '0' && current && current.value === '') {
                 return;
             }
-            var value = String(previewWrapDegrees(yaw));
             for (var i = 0; i < radios.length; i++) {
                 if (radios[i].value === value) {
                     radios[i].checked = true;
@@ -14871,6 +14916,7 @@ define('format_mnemo/vr', [], function() {
         _previewTurnQuaternion: previewTurnQuaternion,
         _previewEulerDegrees: previewEulerDegrees,
         _previewWrapDegrees: previewWrapDegrees,
+        _previewExactDegrees: previewExactDegrees,
         _wantsLiteModels: wantsLiteModels,
         _initCredits: initCredits,
         _showCredit: showCredit,

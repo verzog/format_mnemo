@@ -340,7 +340,7 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, s
 // keyed by their card's canvas id, plus the Three.js bootstrap URLs.
 $modelconfig = [];
 foreach ($models as $i => $model) {
-    $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url']];
+    $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url'], 'category' => $model['category'] ?? 'prop'];
     // Reflect a configurable model's orientation correction in its preview, so
     // an admin sees the effect of the pitch/yaw/roll they set (celestials have
     // no model-config entry). A vehicle's yaw is its travel-facing in the scene,
