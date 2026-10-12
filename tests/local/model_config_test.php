@@ -233,4 +233,22 @@ final class model_config_test extends \advanced_testcase {
         model_config::set('building-quiz', ['storeys' => 'lots']);
         $this->assertArrayNotHasKey('building-quiz', model_config::all());
     }
+
+    /**
+     * Each category gets only the settings that apply to it: movement for
+     * flying cars, storeys for buildings, environments and scale for props
+     * and cars, and facing, pitch, roll, credit and animation for all.
+     */
+    public function test_category_fields(): void {
+        $common = ['yaw', 'pitch', 'roll', 'credit', 'beh_animate'];
+        $this->assertEqualsCanonicalizing(array_merge($common, ['envs', 'scale']), model_config::category_fields('prop'));
+        $this->assertEqualsCanonicalizing(
+            array_merge($common, ['envs', 'scale', 'beh_grounded', 'beh_takeoffland', 'beh_avoid', 'beh_face']),
+            model_config::category_fields('vehicle')
+        );
+        $this->assertEqualsCanonicalizing(array_merge($common, ['storeys']), model_config::category_fields('building'));
+        foreach (model_config::VEHICLE_BEHAVIOURS as $flag) {
+            $this->assertArrayHasKey($flag, model_config::BEHAVIOUR_DEFAULTS);
+        }
+    }
 }

@@ -544,6 +544,37 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * Every enabled activity type without a building model gets a placeholder
+     * (never labels); a bundled or uploaded building, or a hidden module, has none.
+     */
+    public function test_building_placeholders(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $modnames = array_column(asset_gallery::building_placeholders(asset_gallery::models()), 'modname');
+        $this->assertContains('forum', $modnames);
+        $this->assertNotContains('quiz', $modnames);
+        $this->assertNotContains('label', $modnames);
+
+        $place = asset_gallery::building_placeholders(asset_gallery::models());
+        $forum = $place[array_search('forum', array_column($place, 'modname'))];
+        $this->assertSame('building-forum', $forum['filename']);
+        $this->assertSame(get_string('pluginname', 'mod_forum'), $forum['label']);
+
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'buildingassets',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'building-forum.glb',
+        ], 'x');
+        $DB->set_field('modules', 'visible', 0, ['name' => 'page']);
+        $modnames = array_column(asset_gallery::building_placeholders(asset_gallery::models()), 'modname');
+        $this->assertNotContains('forum', $modnames);
+        $this->assertNotContains('page', $modnames);
+    }
+
+    /**
      * An uploaded model whose JSON chunk is over 1 MB still has its triangles
      * counted (the whole chunk is read for local files).
      */

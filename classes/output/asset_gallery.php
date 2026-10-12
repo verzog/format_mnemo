@@ -624,6 +624,40 @@ class asset_gallery {
     }
 
     /**
+     * The activity types enabled on the site that have no building model
+     * (uploaded or bundled) and so use the procedural building, for the asset
+     * viewer's placeholder cards. Labels are left out: they are not buildings.
+     *
+     * @param array[] $models The model entries (see models()).
+     * @return array[] Each placeholder: modname, label (the activity type's
+     *     name) and filename (the building model name to upload), sorted by label.
+     */
+    public static function building_placeholders(array $models): array {
+        global $DB;
+        $have = [];
+        foreach ($models as $model) {
+            if (($model['category'] ?? '') === 'building') {
+                $have[(string)$model['key']] = true;
+            }
+        }
+        $out = [];
+        foreach ($DB->get_fieldset_select('modules', 'name', 'visible = 1') as $modname) {
+            $name = 'building-' . $modname;
+            if ($modname === 'label' || isset($have[$name])) {
+                continue;
+            }
+            $label = get_string_manager()->string_exists('pluginname', 'mod_' . $modname)
+                ? get_string('pluginname', 'mod_' . $modname)
+                : $modname;
+            $out[] = ['modname' => $modname, 'label' => $label, 'filename' => $name];
+        }
+        usort($out, function ($a, $b) {
+            return strcmp(\core_text::strtolower($a['label']), \core_text::strtolower($b['label']));
+        });
+        return $out;
+    }
+
+    /**
      * The model names whose per-model settings (environments, facing, scale and
      * behaviour flags such as "animate") may be edited in the asset viewer: every
      * model card the viewer shows except the sun/moon celestials, which carry
