@@ -14563,6 +14563,17 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Wrap an angle into [0, 360) degrees, to one decimal place.
+     *
+     * @param {Number} deg The angle in degrees.
+     * @return {Number} The wrapped angle.
+     */
+    function previewWrapDegrees(deg) {
+        var d = Math.round(deg * 10) / 10 % 360;
+        return d < 0 ? d + 360 : d;
+    }
+
+    /**
      * Render the admin asset viewer's model previews: load each model, frame it
      * with axis markers over a floor grid, and draw it through a single shared
      * WebGL renderer whose output is copied into each card's 2D canvas (so the
@@ -14699,6 +14710,16 @@ define('format_mnemo/vr', [], function() {
         };
         if (root) {
             root.addEventListener('click', function(ev) {
+                var use = ev.target.closest('[data-mnemo-useview]');
+                var userow = use && use.closest('[data-mnemo-turn-for]');
+                if (userow) {
+                    entries.forEach(function(e) {
+                        if (e.id === userow.getAttribute('data-mnemo-turn-for') && e.model) {
+                            useView(e);
+                        }
+                    });
+                    return;
+                }
                 var btn = ev.target.closest('[data-mnemo-turn]');
                 var row = btn && btn.closest('[data-mnemo-turn-for]');
                 if (!row) {
@@ -14735,6 +14756,86 @@ define('format_mnemo/vr', [], function() {
         }
 
         /**
+         * The pitch/yaw/roll a card shows (the turn plus any saved orientation
+         * correction), taking a turn still in progress as finished.
+         *
+         * @param {Object} e The preview entry.
+         * @return {Object} Degrees: {pitch, yaw, roll}.
+         */
+        function viewDegrees(e) {
+            var turned = e.t < 1 && e.to ? e.to : e.model.quaternion;
+            return previewEulerDegrees(THREE, turned.clone().multiply(e.base || new THREE.Quaternion()));
+        }
+
+        /**
+         * Copy a card's current view into its model settings form (pitch, roll
+         * and the facing radios), open the form and focus its save button, so
+         * the admin only has to press Save.
+         *
+         * @param {Object} e The preview entry.
+         */
+        function useView(e) {
+            var form = document.querySelector('[data-mnemo-settings-for="' + e.id + '"]');
+            if (!form) {
+                return;
+            }
+            var d = viewDegrees(e);
+            var setAngle = function(field, value) {
+                var input = form.querySelector('[name="' + field + '"]');
+                if (input) {
+                    input.value = value === 0 ? '' : String(previewWrapDegrees(value));
+                }
+            };
+            setAngle('pitch', d.pitch);
+            setAngle('roll', d.roll);
+            setFacing(form, d.yaw);
+            var details = form.closest('details');
+            if (details) {
+                details.open = true;
+            }
+            var save = form.querySelector('[type="submit"]');
+            if (save) {
+                save.focus();
+            }
+        }
+
+        /**
+         * Tick the facing radio for a yaw, adding an option for an angle that is
+         * not one of the presets. A yaw of 0 keeps "Auto" when Auto is chosen,
+         * since the preview shows an automatic facing as 0.
+         *
+         * @param {Element} form The model settings form.
+         * @param {Number} yaw The yaw in degrees.
+         */
+        function setFacing(form, yaw) {
+            var radios = form.querySelectorAll('[name="yaw"]');
+            var current = form.querySelector('[name="yaw"]:checked');
+            if (yaw === 0 && current && current.value === '') {
+                return;
+            }
+            var value = String(previewWrapDegrees(yaw));
+            for (var i = 0; i < radios.length; i++) {
+                if (radios[i].value === value) {
+                    radios[i].checked = true;
+                    return;
+                }
+            }
+            if (!radios.length) {
+                return;
+            }
+            var label = document.createElement('label');
+            label.className = radios[0].parentNode.className;
+            var radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'yaw';
+            radio.value = value;
+            radio.checked = true;
+            label.appendChild(radio);
+            label.appendChild(document.createTextNode(' ' + value + '°'));
+            radios[radios.length - 1].parentNode.after(label);
+        }
+
+        /**
          * Write a card's current pitch/yaw/roll (the turn plus any saved
          * orientation correction) into its readout line.
          *
@@ -14745,8 +14846,7 @@ define('format_mnemo/vr', [], function() {
             if (!out || !e.model) {
                 return;
             }
-            var q = e.model.quaternion.clone().multiply(e.base || new THREE.Quaternion());
-            var d = previewEulerDegrees(THREE, q);
+            var d = previewEulerDegrees(THREE, e.model.quaternion.clone().multiply(e.base || new THREE.Quaternion()));
             var tpl = strings.orientation || 'Pitch {pitch}° · yaw {yaw}° · roll {roll}°';
             out.textContent = tpl.replace('{pitch}', d.pitch).replace('{yaw}', d.yaw).replace('{roll}', d.roll);
         }
@@ -14770,6 +14870,7 @@ define('format_mnemo/vr', [], function() {
         _previewAxes: previewAxes,
         _previewTurnQuaternion: previewTurnQuaternion,
         _previewEulerDegrees: previewEulerDegrees,
+        _previewWrapDegrees: previewWrapDegrees,
         _wantsLiteModels: wantsLiteModels,
         _initCredits: initCredits,
         _showCredit: showCredit,

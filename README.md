@@ -452,6 +452,15 @@ plugin settings to see every model rendered, and set per model:
   node transforms; a flashing light is most reliable as a small mesh that
   scales/moves rather than an animated material colour.
 
+**Use this view.** Instead of typing angles, turn a model with the arrow buttons
+until it stands the way it should, then press **Use this view**: it fills in the
+model's facing, pitch and roll under **Model settings**, ready to **Save**.
+
+**Delete.** An uploaded model's card has a **Delete** button. After you confirm,
+it removes the model's file, its `-lite` copy and its model settings from the
+site (the deletion is recorded under Reports → Config changes). A bundled model
+with the same name is then used again. Bundled models cannot be deleted.
+
 **If a preview card is blank**, it now says why: **"Could not load"** (the file
 failed to load — a corrupt/unsupported feature, a 404, or a decoder the site
 can't reach) or **"No visible geometry"** (it loaded but has an empty bounding

@@ -372,6 +372,8 @@ final class asset_gallery_test extends \advanced_testcase {
         $this->assertGreaterThan(0, $quiz['triangles']);
         $this->assertGreaterThan(0, $quiz['filesize']);
         $this->assertSame([], $quiz['warnings']);
+        // Only an uploaded model names its file area (so it can be deleted).
+        $this->assertNull($quiz['filearea']);
 
         // An uploaded prop over the full prop budget, with no lite copy, gets a
         // full-budget warning and a lite-copy suggestion.
@@ -381,6 +383,7 @@ final class asset_gallery_test extends \advanced_testcase {
             $bykey[$model['key']] = $model;
         }
         $this->assertSame(10001, $bykey['statue']['triangles']);
+        $this->assertSame('assetpack', $bykey['statue']['filearea']);
         $this->assertNull($bykey['statue']['lite']);
         $this->assertCount(2, $bykey['statue']['warnings']);
         $this->assertStringContainsString('10,001', $bykey['statue']['warnings'][0]);
