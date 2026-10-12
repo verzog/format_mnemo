@@ -29,6 +29,7 @@ use format_mnemo\local\model_bounds;
 use format_mnemo\local\model_budget;
 use format_mnemo\local\model_config;
 use format_mnemo\local\model_licence;
+use format_mnemo\local\model_slots;
 use format_mnemo\local\model_variants;
 use moodle_url;
 
@@ -633,27 +634,25 @@ class asset_gallery {
      *     name) and filename (the building model name to upload), sorted by label.
      */
     public static function building_placeholders(array $models): array {
-        global $DB;
         $have = [];
         foreach ($models as $model) {
             if (($model['category'] ?? '') === 'building') {
                 $have[(string)$model['key']] = true;
             }
         }
-        $out = [];
-        foreach ($DB->get_fieldset_select('modules', 'name', 'visible = 1') as $modname) {
-            $name = 'building-' . $modname;
-            if ($modname === 'label' || isset($have[$name])) {
-                continue;
-            }
-            $label = get_string_manager()->string_exists('pluginname', 'mod_' . $modname)
-                ? get_string('pluginname', 'mod_' . $modname)
-                : $modname;
-            $out[] = ['modname' => $modname, 'label' => $label, 'filename' => $name];
+        // A type whose slot points at an uploaded building has one; a type set
+        // to the procedural building has none, whatever is uploaded.
+        $have = array_merge($have, array_fill_keys(array_keys(model_slots::aliases()), true));
+        foreach (model_slots::procedural_types() as $modname) {
+            unset($have['building-' . $modname]);
         }
-        usort($out, function ($a, $b) {
-            return strcmp(\core_text::strtolower($a['label']), \core_text::strtolower($b['label']));
-        });
+        $out = [];
+        foreach (model_slots::activity_types() as $modname => $label) {
+            $name = 'building-' . $modname;
+            if (!isset($have[$name])) {
+                $out[] = ['modname' => $modname, 'label' => $label, 'filename' => $name];
+            }
+        }
         return $out;
     }
 

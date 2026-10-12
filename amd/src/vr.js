@@ -4015,10 +4015,16 @@ define('format_mnemo/vr', [], function() {
      * viewer for a model name, or null when none is stored.
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already the model to use (not
+     *     a slot), so it is not resolved through the slot aliases again.
      * @return {Object|null} {envs, yaw, scale} or null.
      */
-    Cyberspace.prototype.modelCfg = function(name) {
+    Cyberspace.prototype.modelCfg = function(name, exact) {
         var mc = this.config && this.config.modelconfig;
+        // A slot pointed at another model takes that model's settings.
+        if (!exact) {
+            name = aliasOf(this.config, name);
+        }
         return (mc && name && mc[name]) ? mc[name] : null;
     };
 
@@ -4040,10 +4046,11 @@ define('format_mnemo/vr', [], function() {
      * unconfigured model keeps the original behaviour.
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      * @return {Object} The stored behaviour map (possibly empty).
      */
-    Cyberspace.prototype.modelBehaviour = function(name) {
-        var mc = this.modelCfg(name);
+    Cyberspace.prototype.modelBehaviour = function(name, exact) {
+        var mc = this.modelCfg(name, exact);
         return (mc && mc.behaviour && typeof mc.behaviour === 'object') ? mc.behaviour : {};
     };
 
@@ -4128,10 +4135,11 @@ define('format_mnemo/vr', [], function() {
      * exported from other tools).
      *
      * @param {String} name The model name.
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      * @return {Object|null} {pitch, yaw, roll} in radians, or null.
      */
-    Cyberspace.prototype.modelOrientation = function(name) {
-        var mc = this.modelCfg(name);
+    Cyberspace.prototype.modelOrientation = function(name, exact) {
+        var mc = this.modelCfg(name, exact);
         if (!mc) {
             return null;
         }
@@ -4166,9 +4174,10 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} clone The placed clone to orient.
      * @param {String} name The model name (its orientation config is read).
      * @param {Boolean} [bakeyaw] false to skip the yaw (Y) part (vehicles).
+     * @param {Boolean} [exact] True when name is already resolved (see modelCfg).
      */
-    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw) {
-        var o = this.modelOrientation(name);
+    Cyberspace.prototype.orientClone = function(clone, name, bakeyaw, exact) {
+        var o = this.modelOrientation(name, exact);
         if (!clone || !o) {
             return;
         }
@@ -4228,13 +4237,17 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.loadNamedModel = function(name, base, pack, full) {
         var self = this;
+        // The model an asset-viewer slot points this name at (a street lamp slot
+        // set to "neon-lamp"), else the name itself. The upload is looked up by
+        // that model; the bundled fallback stays the slot's own model.
+        var model = aliasOf(this.config, name);
         // The uploaded model's real extension (glb unless the server flagged this
         // name as an .fbx upload). The bundled fallback is always .glb.
-        var ext = this.modelExt(name);
+        var ext = this.modelExt(model);
         // A multi-file .zip bundle resolves to an explicit entry URL (its parts
         // are served together from the extracted modelcache area), bypassing the
         // "<name>.<ext>" convention since the entry file name is fixed by the zip.
-        var explicit = (this.config.modelurls && this.config.modelurls[name]) || null;
+        var explicit = (this.config.modelurls && this.config.modelurls[model]) || null;
         // Environment gate: a model tagged to specific environments only loads
         // in those; an untagged model loads everywhere. A gated-out model
         // rejects, so every caller falls back exactly as for a missing model.
@@ -4252,11 +4265,11 @@ define('format_mnemo/vr', [], function() {
         var animate = !!this.modelBehaviour(name).animate;
         // On a headset, phone or slow connection, an uploaded "-lite" copy loads
         // in place of the full model; if it fails, the full model is used.
-        var lite = !full && this.useLite && (this.config.litemodels || {})[name];
+        var lite = !full && this.useLite && (this.config.litemodels || {})[model];
         if (lite) {
             return this.loadModel(lite).then(function(tpl) {
                 tpl.mnemoAnimate = animate;
-                showCredit(self.credits, name);
+                showCredit(self.credits, model);
                 return tpl;
             }, function() {
                 return self.loadNamedModel(name, base, pack, true);
@@ -4269,10 +4282,10 @@ define('format_mnemo/vr', [], function() {
         // pack is null (an external, unenumerable pack) every name is still probed
         // against the base and falls back to bundled, as before. A bundle always
         // has an explicit URL, so it skips the probe branch.
-        if (!explicit && fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(name) === -1) {
+        if (!explicit && fallback && fallback !== base && Array.isArray(pack) && pack.indexOf(model) === -1) {
             p = this.loadModel(this.joinBase(fallback, name + '.glb'));
         } else {
-            p = this.loadModel(explicit || this.joinBase(base, name + '.' + ext));
+            p = this.loadModel(explicit || this.joinBase(base, model + '.' + ext));
             if (fallback && fallback !== base) {
                 p = p.catch(function() {
                     return self.loadModel(self.joinBase(fallback, name + '.glb'));
@@ -4282,7 +4295,7 @@ define('format_mnemo/vr', [], function() {
         return p.then(function(tpl) {
             if (tpl) {
                 tpl.mnemoAnimate = animate;
-                showCredit(self.credits, name);
+                showCredit(self.credits, model);
             }
             return tpl;
         });
@@ -4631,7 +4644,7 @@ define('format_mnemo/vr', [], function() {
             this.config.cartypes : [{
                 // The default fleet (no config) keeps the original per-car
                 // random speed/altitude variation, not a rigid formation.
-                model: 'av', path: 'avenue', land: 'none', jitter: true,
+                model: this.config.defaultcar || 'av', path: 'avenue', land: 'none', jitter: true,
                 count: this.config.environment === 'void' ? 6 : 10
             }];
         // Allocate the global car cap across types up front, in order, so the
@@ -4756,7 +4769,7 @@ define('format_mnemo/vr', [], function() {
         // axis, not the front, so these are pinned): av's front is -X, which a
         // bare axis correction would send tail-first.
         var known = {av: Math.PI / 2};
-        if (ct && Object.prototype.hasOwnProperty.call(known, ct.model)) {
+        if (ct && Object.prototype.hasOwnProperty.call(known, ct.model) && aliasOf(this.config, ct.model) === ct.model) {
             return known[ct.model];
         }
         var THREE = this.THREE;
@@ -5079,7 +5092,8 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * The model name an activity's building model is keyed by: a per-activity
-     * override's base name, else "building-<modname>".
+     * override's base name, else the model the activity type's slot is set to
+     * in the asset viewer, else "building-<modname>".
      *
      * @param {Object} act The activity node (modname, building).
      * @return {String} The model name.
@@ -5087,7 +5101,7 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildingModelName = function(act) {
         return act.building
             ? act.building.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx|zip)$/i, '')
-            : ('building-' + act.modname);
+            : aliasOf(this.config, 'building-' + act.modname);
     };
 
     /**
@@ -5998,7 +6012,8 @@ define('format_mnemo/vr', [], function() {
         }
         var list = this.config.buildingmodels || [];
         if (base && act.modname && list.indexOf(act.modname) !== -1) {
-            var name = 'building-' + act.modname;
+            // The activity type's slot may point at any uploaded building.
+            var name = aliasOf(this.config, 'building-' + act.modname);
             if (lm[name]) {
                 return lm[name];
             }
@@ -6052,7 +6067,10 @@ define('format_mnemo/vr', [], function() {
             // .zip bundle (whose entry URL is an arbitrary extracted file name)
             // still keys its config correctly.
             var name = self.buildingModelName(act);
-            tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
+            // The name is already resolved through the slot, so it is read
+            // exactly: a slot pointed at "building-forum" takes that model's
+            // own settings, not those of the model forum's slot points at.
+            tpl.mnemoAnimate = !!self.modelBehaviour(name, true).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
             // Box3 (infinite bounds -> NaN placement); keep the procedural
@@ -6062,7 +6080,7 @@ define('format_mnemo/vr', [], function() {
             }
             // Orient (facing included) and animate only the clone we keep, before
             // fitting so the fit measures the corrected model.
-            self.orientClone(model, name, true);
+            self.orientClone(model, name, true, true);
             self.animateClone(tpl, model);
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close
@@ -7644,6 +7662,21 @@ define('format_mnemo/vr', [], function() {
         }
         out.height = [size.h, size.h];
         return out;
+    }
+
+    /**
+     * The model an asset-viewer slot points a name at (config.modelaliases, for
+     * example the street lamp slot set to an uploaded "neon-lamp"), or the name
+     * itself when its slot keeps the default.
+     *
+     * @param {Object} config The scene configuration.
+     * @param {String} name The model or slot name.
+     * @return {String} The model name to load and to take settings from.
+     */
+    function aliasOf(config, name) {
+        var aliases = config && config.modelaliases;
+        return (aliases && name && Object.prototype.hasOwnProperty.call(aliases, name) && aliases[name])
+            ? aliases[name] : name;
     }
 
     /**
@@ -15035,6 +15068,7 @@ define('format_mnemo/vr', [], function() {
         _previewExactDegrees: previewExactDegrees,
         _wantsLiteModels: wantsLiteModels,
         _sizedStyle: sizedStyle,
+        _aliasOf: aliasOf,
         _initCredits: initCredits,
         _showCredit: showCredit,
 

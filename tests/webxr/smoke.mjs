@@ -735,6 +735,44 @@ const scenarios = [
         }
     },
     {
+        name: 'slots: a slot loads the uploaded model it points at, with that model\'s settings',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const aliasOf = window.__mnemoModule._aliasOf;
+            const config = {modelsbaseurl: 'pack/', modelsfallbackurl: 'bundled/', packmodels: ['neon-lamp'],
+                buildingsbaseurl: 'b/', buildingmodels: ['page'],
+                modelaliases: {lamp: 'neon-lamp', 'building-page': 'tower-a'},
+                modelexts: {'tower-a': 'fbx'},
+                modelconfig: {'neon-lamp': {scale: 2, envs: [], behaviour: {}}}};
+            const calls = [];
+            const self = {
+                config,
+                joinBase: CS.prototype.joinBase, modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour, modelExt: CS.prototype.modelExt,
+                loadNamedModel: CS.prototype.loadNamedModel,
+                loadModel: (url) => {
+                    calls.push(url);
+                    return url.indexOf('pack/') === 0 ? Promise.reject(new Error('gone')) : Promise.resolve({url});
+                }
+            };
+            await CS.prototype.loadProp.call(self, 'lamp');
+            // The upload is the slot's model; the bundled fallback stays the slot's own.
+            const loaded = calls.join() === 'pack/neon-lamp.glb,bundled/lamp.glb';
+            const scale = CS.prototype.modelScale.call(self, 'lamp') === 2;
+            const url = CS.prototype.buildingModelUrl.call(self, {modname: 'page'});
+            const name = CS.prototype.buildingModelName.call(self, {modname: 'page'});
+            const plain = aliasOf(config, 'kiosk') === 'kiosk' && aliasOf(null, 'lamp') === 'lamp';
+            // A resolved name is read exactly: a slot pointed at another slot's
+            // model name takes that model's settings, not a second hop's.
+            const chain = {modelaliases: {'building-page': 'building-forum', 'building-forum': 'tower-a'},
+                modelconfig: {'building-forum': {behaviour: {animate: true}}, 'tower-a': {behaviour: {}}}};
+            const exact = !!CS.prototype.modelBehaviour.call({config: chain, modelCfg: CS.prototype.modelCfg},
+                'building-forum', true).animate;
+            const pass = loaded && scale && url === 'b/tower-a.fbx' && name === 'tower-a' && plain && exact;
+            return {pass, detail: JSON.stringify({calls, scale, url, name, plain, exact})};
+        }
+    },
+    {
         name: 'credits: entries stay hidden until their model loads, then show with the list',
         fn: () => {
             const M = window.__mnemoModule;
