@@ -72,6 +72,7 @@ if ($savemodel !== '' && confirm_sesskey()) {
             'roll' => $numornull($rollraw),
             'scale' => $numornull($scaleraw),
             'behaviour' => $behaviour,
+            'storeys' => $numornull(optional_param('storeys', '', PARAM_RAW_TRIMMED)),
             'credit' => [
                 'title' => optional_param('credit_title', '', PARAM_TEXT),
                 'author' => optional_param('credit_author', '', PARAM_TEXT),
@@ -144,9 +145,10 @@ $rootid = 'mnemo-preview-' . uniqid();
  * @param array $cfg The model's current normalised config.
  * @param moodle_url $url This page's URL (the form target).
  * @param string $canvasid The model card's canvas id, so "Use this view" can find the form.
+ * @param bool $building Whether the model is a building (which gets a Storeys field).
  * @return string HTML for the panel.
  */
-function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, string $canvasid): string {
+function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, string $canvasid, bool $building): string {
     $rows = '';
 
     // Environment checkboxes (empty = every environment).
@@ -245,6 +247,28 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, s
         ]),
         'format-mnemo-preview__field'
     );
+
+    // Storeys (buildings only; blank = work it out from the height in metres).
+    if ($building) {
+        $rows .= html_writer::div(
+            html_writer::tag(
+                'label',
+                get_string('preview_storeys', 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__field-label', 'for' => 'storeys_' . $name]
+            ) .
+            html_writer::empty_tag('input', [
+                'type' => 'number', 'name' => 'storeys', 'id' => 'storeys_' . $name,
+                'min' => '1', 'max' => (string)\format_mnemo\local\model_bounds::MAX_STOREYS, 'step' => '1',
+                'class' => 'format-mnemo-preview__scale', 'value' => $cfg['storeys'] === null ? '' : (string)$cfg['storeys'],
+            ]) .
+            html_writer::tag(
+                'small',
+                get_string('preview_storeys_help', 'format_mnemo'),
+                ['class' => 'format-mnemo-preview__hint']
+            ),
+            'format-mnemo-preview__field'
+        );
+    }
 
     // Behaviour checkboxes: each shows the model's effective flag (its stored
     // value, or the engine default when unset). Only a change from the default
@@ -524,6 +548,23 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
     if ($size) {
         $body .= html_writer::div(implode(' · ', $size), 'format-mnemo-preview__use text-muted');
     }
+    // How a building is sized in the city: by its storeys, or fitted to its plot.
+    if (($model['category'] ?? '') === 'building') {
+        if (!empty($model['size'])) {
+            $typedkey = empty($model['size']['w']) ? 'preview_size_typed_heightonly' : 'preview_size_typed';
+            $sizing = $model['size']['typed']
+                ? get_string($typedkey, 'format_mnemo', $model['size']['storeys'])
+                : get_string('preview_size_storeys', 'format_mnemo', (object)[
+                    'storeys' => $model['size']['storeys'],
+                    'height' => format_float($model['size']['h'], 1),
+                ]);
+        } else if (!empty($model['bounds'])) {
+            $sizing = get_string('preview_size_fitted', 'format_mnemo');
+        } else {
+            $sizing = get_string('preview_size_unknown', 'format_mnemo');
+        }
+        $body .= html_writer::div($sizing, 'format-mnemo-preview__use text-muted');
+    }
     foreach ($model['warnings'] ?? [] as $warning) {
         $body .= html_writer::div(s($warning), 'format-mnemo-preview__budget alert alert-warning', ['role' => 'note']);
     }
@@ -548,7 +589,13 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
     // configurable model - props, vehicles and buildings - but not the
     // celestials, which carry their own URL config.
     if (in_array($model['key'], $configurable, true)) {
-        $body .= mnemo_model_settings_panel($model['key'], model_config::get($model['key']), $PAGE->url, $canvasid);
+        $body .= mnemo_model_settings_panel(
+            $model['key'],
+            model_config::get($model['key']),
+            $PAGE->url,
+            $canvasid,
+            ($model['category'] ?? '') === 'building'
+        );
     }
     return html_writer::div(
         $canvas . html_writer::div($body, 'format-mnemo-preview__meta'),

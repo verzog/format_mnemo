@@ -100,6 +100,13 @@ define('format_mnemo/vr', [], function() {
     // levels align (which also gives the flying traffic clean bands to clear).
     var FLOORS_PER_MODULE = 6;
 
+    // The standard side-street layout: the first building slot's centre (past
+    // the street mouth) and the slot width. Slots widen for a building model
+    // sized by its storeys, but a teacher-positioned activity keeps its base
+    // here, since its stored offset was made from it.
+    var LEGACY_SLOT_FIRST = 5.5;
+    var LEGACY_SLOT_STEP = 7.5;
+
     // Per-planet size, distance from the scene centre and elevation for the
     // Void's planets, plus ring/band. Their azimuth is spread evenly around the
     // full sky by planet index at build time (see buildPlanets), so only two or
@@ -5004,12 +5011,12 @@ define('format_mnemo/vr', [], function() {
         // Every side street is built to one uniform length (sized to the topic
         // with the most activities) so the city reads as a regular grid rather
         // than a ragged mix of long and short branches.
-        var slotStep = 7.5; // X-spacing between building slots (see buildSideStreet).
-        var maxSlots = 1;
+        // Each street's length comes from its building slots, which widen for a
+        // building model sized by its storeys (see streetSlots).
+        var uniformStreetLen = 0;
         sections.forEach(function(section) {
-            maxSlots = Math.max(maxSlots, Math.ceil((section.activities || []).length / 2));
+            uniformStreetLen = Math.max(uniformStreetLen, self.streetSlots(section).len);
         });
-        var uniformStreetLen = 5.5 + maxSlots * slotStep + 3;
 
         // Road corridors for movement: the avenue, plus each side street (filled
         // in by buildSideStreet). On foot the player is kept within these; only
@@ -5071,6 +5078,76 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The model name an activity's building model is keyed by: a per-activity
+     * override's base name, else "building-<modname>".
+     *
+     * @param {Object} act The activity node (modname, building).
+     * @return {String} The model name.
+     */
+    Cyberspace.prototype.buildingModelName = function(act) {
+        return act.building
+            ? act.building.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx|zip)$/i, '')
+            : ('building-' + act.modname);
+    };
+
+    /**
+     * The scene size of an activity's building model when it is sized by its
+     * storeys: storeys x the procedural storey height tall, with its width and
+     * depth in proportion. Null when the activity has no building model or the
+     * server could not size it (it is then fitted to the usual plot). A model
+     * with a typed storey count but no known size gets its height only.
+     *
+     * @param {Object} act The activity node.
+     * @return {Object|null} {w, d, h} in world units, {h, heightOnly}, or null.
+     */
+    Cyberspace.prototype.buildingSize = function(act) {
+        var s = (this.config.buildingsizes || {})[this.buildingModelName(act)];
+        if (!s || !(s.storeys > 0) || !this.buildingModelUrl(act)) {
+            return null;
+        }
+        var h = s.storeys * MODULE_H / FLOORS_PER_MODULE;
+        // A typed storey count for a model whose size the server cannot read
+        // (an .fbx or .zip) sets only its height: its plot keeps the usual width.
+        if (!(s.h > 0) || !(s.w > 0) || !(s.d > 0)) {
+            return {h: h, heightOnly: true};
+        }
+        var k = h / s.h;
+        return {w: s.w * k, d: s.d * k, h: h};
+    };
+
+    /**
+     * The building slot centres down a side street (distances past the mouth)
+     * and the street length. Activities pair up on the near and far kerbs, one
+     * pair per slot; a slot is the standard width, or wider to fit a building
+     * model sized by its storeys plus a gap, pushing later slots along.
+     *
+     * @param {Object} section The section node (activities).
+     * @return {Object} {xs: slot centre per pair, len: street length}.
+     */
+    Cyberspace.prototype.streetSlots = function(section) {
+        var self = this;
+        var first = LEGACY_SLOT_FIRST;
+        var step = LEGACY_SLOT_STEP;
+        var gap = 2.3; // Space kept between a sized building and its neighbours.
+        var widths = [];
+        (section.activities || []).forEach(function(act, k) {
+            var along = Math.floor(k / 2);
+            var size = act.video ? null : self.buildingSize(act);
+            widths[along] = Math.max(widths[along] || step, size && size.w ? size.w + gap : step);
+        });
+        if (!widths.length) {
+            widths.push(step);
+        }
+        var xs = [];
+        var cursor = first - step / 2;
+        widths.forEach(function(w) {
+            xs.push(cursor + w / 2);
+            cursor += w;
+        });
+        return {xs: xs, len: cursor + step / 2 + 3};
+    };
+
+    /**
      * Build one topic as a side street branching off the avenue.
      *
      * @param {Object} section The section node (name, current, image, activities).
@@ -5084,11 +5161,11 @@ define('format_mnemo/vr', [], function() {
         var self = this;
         var activities = section.activities || [];
         var streetHalf = 4.5; // Half-width of the side street (along z).
-        var first = 5.5; // X-offset (past the mouth) of the first building.
-        var step = 7.5; // X-spacing between building slots down the street.
-        var slots = Math.ceil(activities.length / 2);
+        // Building slot centres down the street (wider for a building model
+        // sized by its storeys).
+        var slots = this.streetSlots(section);
         if (!(streetLen > 0)) {
-            streetLen = first + Math.max(1, slots) * step + 3;
+            streetLen = slots.len;
         }
         var mouthX = side * roadHalf;
         var midX = mouthX + side * streetLen / 2;
@@ -5122,13 +5199,23 @@ define('format_mnemo/vr', [], function() {
         activities.forEach(function(act, k) {
             var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
             var along = Math.floor(k / 2);
-            var style = STYLES[MOD_STYLE[act.modname] || 'entropism'];
-            var depth = style.footprint[1];
+            var basestyle = STYLES[MOD_STYLE[act.modname] || 'entropism'];
+            var style = basestyle;
+            // A building model sized by its storeys gets a plot its own size.
+            var size = act.video ? null : self.buildingSize(act);
+            if (size) {
+                style = sizedStyle(style, size);
+            }
+            // A teacher-positioned activity's stored offset is from the base of
+            // the standard layout (standard slots and depth), so keep that base
+            // for it rather than move it when an earlier plot widens.
+            var depth = act.transform ? basestyle.footprint[1] : style.footprint[1];
+            var slotx = act.transform ? LEGACY_SLOT_FIRST + along * LEGACY_SLOT_STEP : slots.xs[along];
             // Snap the default placement to the layout grid so buildings line
             // up from the start (the editor and placer share this grid). An
             // object a teacher already positioned keeps its original base, so a
             // stored offset is not re-applied from a shifted origin on upgrade.
-            var bx = self.snapBase(mouthX + side * (first + along * step), act.transform);
+            var bx = self.snapBase(mouthX + side * slotx, act.transform);
             var bz = self.snapBase(z + zside * (streetHalf + depth / 2 + 0.4), act.transform);
             // A video activity is a large screen instead of a building.
             if (act.video) {
@@ -5964,9 +6051,7 @@ define('format_mnemo/vr', [], function() {
             // keys a building card. Derived from the activity, not the URL, so a
             // .zip bundle (whose entry URL is an arbitrary extracted file name)
             // still keys its config correctly.
-            var name = act.building
-                ? act.building.replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(glb|fbx|zip)$/i, '')
-                : ('building-' + act.modname);
+            var name = self.buildingModelName(act);
             tpl.mnemoAnimate = !!self.modelBehaviour(name).animate;
             var model = tpl.clone();
             // A model that parses but has no renderable geometry gives an empty
@@ -5982,7 +6067,16 @@ define('format_mnemo/vr', [], function() {
             // Fit within 90% of the footprint so a solid imported building keeps
             // a gap to its neighbours (procedural footprints are placed close
             // together) rather than appearing to merge with them.
-            self.fitModel(model, built.w * 0.9, built.d * 0.9, built.h);
+            // A model sized by its storeys already has a plot its own size (with
+            // its gap to the neighbours in the slot), so it fills it.
+            var sized = self.buildingSize(act);
+            if (sized && sized.heightOnly) {
+                // Only its storeys are known: scale it to that height.
+                self.fitModel(model, Infinity, Infinity, built.h);
+            } else {
+                var fill = sized ? 1 : 0.9;
+                self.fitModel(model, built.w * fill, built.d * fill, built.h);
+            }
             self.setShadow(model, true);
             // Measure the fitted model (still parentless, so its box is local)
             // and move the retained activity sign clear of its front face, so
@@ -7529,6 +7623,28 @@ define('format_mnemo/vr', [], function() {
         ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
         Enter: 'Enter', Tab: 'Tab', Backquote: '`', Escape: 'Esc'
     };
+
+    /**
+     * A copy of a building style with its footprint and height set to a sized
+     * building model's, so the (hidden) procedural mass, its sign and its
+     * recorded footprint match the model.
+     *
+     * @param {Object} style One of the STYLES recipes.
+     * @param {Object} size {w, d, h} in world units, or {h, heightOnly} to set
+     *     only the height.
+     * @return {Object} The sized copy.
+     */
+    function sizedStyle(style, size) {
+        var out = {};
+        Object.keys(style).forEach(function(key) {
+            out[key] = style[key];
+        });
+        if (!size.heightOnly) {
+            out.footprint = [size.w, size.d];
+        }
+        out.height = [size.h, size.h];
+        return out;
+    }
 
     /**
      * Find the model credits list next to a scene and hide every entry, so only
@@ -14918,6 +15034,7 @@ define('format_mnemo/vr', [], function() {
         _previewWrapDegrees: previewWrapDegrees,
         _previewExactDegrees: previewExactDegrees,
         _wantsLiteModels: wantsLiteModels,
+        _sizedStyle: sizedStyle,
         _initCredits: initCredits,
         _showCredit: showCredit,
 

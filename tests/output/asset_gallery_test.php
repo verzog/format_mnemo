@@ -487,6 +487,63 @@ final class asset_gallery_test extends \advanced_testcase {
     }
 
     /**
+     * A building model in metres is sized by its storeys (after its saved
+     * orientation); a typed count wins; a model not in metres is fitted.
+     */
+    public function test_building_sizes(): void {
+        $this->resetAfterTest();
+        $store = function (string $filename, array $min, array $max): void {
+            get_file_storage()->create_file_from_string([
+                'contextid' => \context_system::instance()->id,
+                'component' => 'format_mnemo',
+                'filearea' => 'buildingassets',
+                'itemid' => 0,
+                'filepath' => '/',
+                'filename' => $filename,
+            ], $this->make_glb(['version' => '2.0'], [
+                'accessors' => [['count' => 3, 'min' => $min, 'max' => $max]],
+                'meshes' => [['primitives' => [['attributes' => ['POSITION' => 0]]]]],
+                'nodes' => [['mesh' => 0]],
+            ]));
+        };
+        // 12 m wide, 30 m tall, 8 m deep: 10 storeys.
+        $store('building-forum.glb', [-6, 0, -4], [6, 30, 4]);
+        // Lying on its side (30 m along Z): stood up by a pitch of 270.
+        $store('building-page.glb', [-6, -4, 0], [6, 4, 30]);
+        // 500 units tall: not metres, so fitted to its plot.
+        $store('building-url.glb', [0, 0, 0], [100, 500, 100]);
+        \format_mnemo\local\model_config::set('building-page', ['pitch' => 270]);
+
+        $sizes = asset_gallery::building_sizes();
+        $forum = ['w' => 12.0, 'h' => 30.0, 'd' => 8.0, 'storeys' => 10, 'typed' => false];
+        $this->assertSame($forum, $sizes['building-forum']);
+        $this->assertEqualsWithDelta(30.0, $sizes['building-page']['h'], 1e-6);
+        $this->assertSame(10, $sizes['building-page']['storeys']);
+        $this->assertArrayNotHasKey('building-url', $sizes);
+        // The bundled quiz tower is in metres too.
+        $this->assertGreaterThan(5, asset_gallery::building_sizes()['building-quiz']['storeys'] ?? 0);
+
+        // An .fbx's size cannot be read: only a typed count sizes it (its height).
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'buildingassets',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'building-book.fbx',
+        ], 'Kaydara FBX Binary');
+        $this->assertArrayNotHasKey('building-book', asset_gallery::building_sizes());
+        \format_mnemo\local\model_config::set('building-book', ['storeys' => 6]);
+        $this->assertSame(['storeys' => 6, 'typed' => true], asset_gallery::building_sizes()['building-book']);
+
+        // A typed count wins, and covers the model that is not in metres.
+        \format_mnemo\local\model_config::set('building-url', ['storeys' => 4]);
+        $sizes = asset_gallery::building_sizes();
+        $this->assertSame(4, $sizes['building-url']['storeys']);
+        $this->assertTrue($sizes['building-url']['typed']);
+    }
+
+    /**
      * An uploaded model whose JSON chunk is over 1 MB still has its triangles
      * counted (the whole chunk is read for local files).
      */

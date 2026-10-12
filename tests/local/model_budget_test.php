@@ -127,6 +127,16 @@ final class model_budget_test extends \advanced_testcase {
             'a node loop is counted once' => [[
                 'nodes' => [['mesh' => 0, 'children' => [1]], ['mesh' => 0, 'children' => [0]]],
             ] + self::one_mesh(10), 20],
+            'malformed indexes are skipped' => [[
+                'accessors' => [['count' => 30], ['count' => 30]],
+                'meshes' => [
+                    ['primitives' => [['attributes' => ['POSITION' => 1], 'indices' => [0]], 'junk']],
+                    'not a mesh',
+                ],
+                'nodes' => [['mesh' => 0, 'children' => [[1], 'x', 1]], ['mesh' => [0]]],
+                'scenes' => [['nodes' => [[0], 0]]],
+                'scene' => [0],
+            ], 10],
             'no meshes' => [['asset' => ['version' => '2.0']], null],
         ];
     }
