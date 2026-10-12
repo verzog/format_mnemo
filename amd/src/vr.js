@@ -14741,6 +14741,187 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * The asset viewer's "Save all" bar. Each model card's settings form is
+     * compared with how it was when the page loaded; once any differ, the bar
+     * shows how many cards changed, marks each changed card "Unsaved", and its
+     * Save all button posts every changed card's values in one go (one JSON
+     * list in the bar's saveall field). A card's own Save button does the same
+     * when other cards have changed too, so no change is lost; Discard puts
+     * every form back. Leaving the page with unsaved changes asks first.
+     *
+     * @param {Element} root The preview root element.
+     * @param {Object} strings The page strings (changedone, changedmany, unsaved).
+     * @return {Object|null} {refresh, onDiscard(fn), beforeSave(fn), dirty()}, or null when the
+     *     page has no bar.
+     */
+    function initSaveBar(root, strings) {
+        var bar = root && root.querySelector('[data-mnemo-savebar]');
+        if (!bar) {
+            return null;
+        }
+        var forms = Array.prototype.slice.call(root.querySelectorAll('form[data-mnemo-settings-for]'));
+        var count = bar.querySelector('.format-mnemo-preview__savebar-count');
+        var discardHooks = [];
+        var saveHooks = [];
+        var leaving = false;
+        // A form's settings by field name: a checkbox is '1' or '' (so an
+        // unticked box is still sent), a radio group its ticked value.
+        var valuesOf = function(form) {
+            var values = {};
+            Array.prototype.forEach.call(form.elements, function(el) {
+                var name = el.name;
+                if (!name || name === 'sesskey' || name === 'savemodel' || name === 'category' || el.type === 'submit') {
+                    return;
+                }
+                if (el.type === 'checkbox') {
+                    values[name] = el.checked ? '1' : '';
+                } else if (el.type === 'radio') {
+                    if (el.checked || !(name in values)) {
+                        values[name] = el.checked ? el.value : '';
+                    }
+                } else {
+                    values[name] = el.value;
+                }
+            });
+            return values;
+        };
+        var initial = forms.map(valuesOf);
+        // The fields of a form that differ from how the page loaded.
+        var changedFields = function(form) {
+            var now = valuesOf(form);
+            var before = initial[forms.indexOf(form)];
+            return Object.keys(now).filter(function(name) {
+                return now[name] !== before[name];
+            });
+        };
+        var dirtyForms = function() {
+            return forms.filter(function(form) {
+                return changedFields(form).length > 0;
+            });
+        };
+        // A changed form, as the server's batch save reads it: only its changed
+        // fields are saved, so two cards for one model (an "av" prop and car)
+        // cannot undo each other's edits.
+        var entry = function(form) {
+            return {
+                model: form.querySelector('[name="savemodel"]').value,
+                category: form.querySelector('[name="category"]').value,
+                values: valuesOf(form),
+                changed: changedFields(form)
+            };
+        };
+        // Copy any turn still playing into its form before a save reads it.
+        var flush = function() {
+            saveHooks.forEach(function(fn) {
+                fn();
+            });
+        };
+        // Check every form about to be saved, as its own Save button would;
+        // show the first problem (opening its settings) and stop.
+        var valid = function(list) {
+            for (var i = 0; i < list.length; i++) {
+                if (!list[i].checkValidity()) {
+                    var details = list[i].closest('details');
+                    if (details) {
+                        details.open = true;
+                    }
+                    list[i].reportValidity();
+                    return false;
+                }
+            }
+            return true;
+        };
+        var refresh = function() {
+            var dirty = dirtyForms();
+            forms.forEach(function(form) {
+                var summary = form.closest('details') && form.closest('details').querySelector('summary');
+                var badge = summary && summary.querySelector('.format-mnemo-preview__unsaved');
+                var on = dirty.indexOf(form) !== -1;
+                if (on && summary && !badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'badge badge-warning format-mnemo-preview__unsaved';
+                    badge.textContent = strings.unsaved || 'Unsaved';
+                    summary.appendChild(document.createTextNode(' '));
+                    summary.appendChild(badge);
+                } else if (!on && badge) {
+                    badge.remove();
+                }
+            });
+            bar.hidden = !dirty.length;
+            if (count) {
+                count.textContent = dirty.length === 1
+                    ? (strings.changedone || '1 model changed')
+                    : (strings.changedmany || '{n} models changed').replace('{n}', dirty.length);
+            }
+            return dirty;
+        };
+        var saveAll = function(extra) {
+            flush();
+            var dirty = dirtyForms();
+            if (extra && dirty.indexOf(extra) === -1) {
+                dirty.push(extra);
+            }
+            if (!valid(dirty)) {
+                refresh();
+                return;
+            }
+            bar.querySelector('[name="saveall"]').value = JSON.stringify(dirty.map(entry));
+            leaving = true;
+            bar.submit();
+        };
+        root.addEventListener('input', refresh);
+        root.addEventListener('change', refresh);
+        bar.addEventListener('submit', function(ev) {
+            ev.preventDefault();
+            saveAll(null);
+        });
+        root.addEventListener('submit', function(ev) {
+            var form = ev.target;
+            if (forms.indexOf(form) === -1) {
+                leaving = true;
+                return;
+            }
+            // A turn still playing belongs in what is saved.
+            flush();
+            // Other cards changed too: save them with this one.
+            var others = dirtyForms().filter(function(f) {
+                return f !== form;
+            });
+            if (others.length) {
+                ev.preventDefault();
+                saveAll(form);
+            } else {
+                leaving = true;
+            }
+        });
+        bar.querySelector('[data-mnemo-discard]').addEventListener('click', function() {
+            dirtyForms().forEach(function(form) {
+                form.reset();
+            });
+            discardHooks.forEach(function(fn) {
+                fn();
+            });
+            refresh();
+        });
+        window.addEventListener('beforeunload', function(ev) {
+            if (!leaving && dirtyForms().length) {
+                ev.preventDefault();
+                ev.returnValue = '';
+            }
+        });
+        return {
+            refresh: refresh,
+            onDiscard: function(fn) {
+                discardHooks.push(fn);
+            },
+            beforeSave: function(fn) {
+                saveHooks.push(fn);
+            },
+            dirty: dirtyForms
+        };
+    }
+
+    /**
      * Render the admin asset viewer's model previews: load each model, frame it
      * with axis markers over a floor grid, and draw it through a single shared
      * WebGL renderer whose output is copied into each card's 2D canvas (so the
@@ -14750,8 +14931,10 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} config The preview config ({models: [{canvasid, url}], addonsbaseurl}).
      * @param {Object} loaded The loaded Three.js + addon namespace.
      * @param {Object} root The preview root element (for the turn buttons).
+     * @param {Object|null} savebar The "Save all" bar (see initSaveBar), told when
+     *     a turn changes a card's settings.
      */
-    function renderModelPreviews(config, loaded, root) {
+    function renderModelPreviews(config, loaded, root, savebar) {
         var THREE = loaded.THREE;
         var models = config.models || [];
         if (!models.length || typeof THREE.WebGLRenderer !== 'function') {
@@ -14866,6 +15049,13 @@ define('format_mnemo/vr', [], function() {
                     showOrientation(e);
                     if (e.queue.length) {
                         startTurn(e);
+                    } else if (e.discarding) {
+                        // Discard turned the card back: its form is already reset.
+                        e.discarding = false;
+                    } else {
+                        // The settled view becomes the card's pending settings,
+                        // saved with the "Save all" bar or the card's own Save.
+                        useView(e, true);
                     }
                 }
                 animating = animating || e.t < 1;
@@ -14875,6 +15065,32 @@ define('format_mnemo/vr', [], function() {
                 window.requestAnimationFrame(step);
             }
         };
+        if (savebar) {
+            // A save while a card is still turning saves where the turn ends.
+            savebar.beforeSave(function() {
+                entries.forEach(function(e) {
+                    if (e.model && !e.discarding && (e.t < 1 || e.queue.length)) {
+                        useView(e, true);
+                    }
+                });
+            });
+            // Discard also turns every turned card back to its saved view.
+            savebar.onDiscard(function() {
+                entries.forEach(function(e) {
+                    if (e.model && (e.t < 1 || e.queue.length || !e.model.quaternion.equals(new THREE.Quaternion()))) {
+                        e.queue = ['reset'];
+                        e.discarding = true;
+                        if (e.t >= 1) {
+                            startTurn(e);
+                        }
+                    }
+                });
+                if (!animating) {
+                    animating = true;
+                    window.requestAnimationFrame(step);
+                }
+            });
+        }
         if (root) {
             root.addEventListener('click', function(ev) {
                 var use = ev.target.closest('[data-mnemo-useview]');
@@ -14953,12 +15169,15 @@ define('format_mnemo/vr', [], function() {
 
         /**
          * Copy a card's current view into its model settings form (pitch, roll
-         * and the facing radios), open the form and focus its save button, so
-         * the admin only has to press Save.
+         * and the facing radios). From the "Use this view" button it also opens
+         * the form and focuses its save button, so the admin only has to press
+         * Save; after a turn it does so quietly, leaving the change to the
+         * "Save all" bar.
          *
          * @param {Object} e The preview entry.
+         * @param {Boolean} [quiet] True to leave the form closed and the focus alone.
          */
-        function useView(e) {
+        function useView(e, quiet) {
             var form = document.querySelector('[data-mnemo-settings-for="' + e.id + '"]');
             if (!form) {
                 return;
@@ -14975,13 +15194,28 @@ define('format_mnemo/vr', [], function() {
             setAngle('roll', d.roll);
             if (e.category === 'vehicle') {
                 // A car's preview leaves out its saved facing, so a turn adds to
-                // it, and no turn leaves it as it is.
-                var current = form.querySelector('[name="yaw"]:checked');
+                // the saved facing (not one an earlier turn already set). A card
+                // turned back to no turn gets its saved facing back; pressing
+                // "Use this view" with no turn leaves the facing as it is.
+                var saved = null;
+                form.querySelectorAll('[name="yaw"]').forEach(function(radio) {
+                    if (radio.defaultChecked) {
+                        saved = radio;
+                    }
+                });
                 if (previewWrapDegrees(d.yaw) !== 0) {
-                    setFacing(form, (current && current.value !== '' ? parseFloat(current.value) : 0) + d.yaw);
+                    setFacing(form, (saved && saved.value !== '' ? parseFloat(saved.value) : 0) + d.yaw);
+                } else if (saved && quiet) {
+                    saved.checked = true;
                 }
             } else {
                 setFacing(form, d.yaw);
+            }
+            if (savebar) {
+                savebar.refresh();
+            }
+            if (quiet) {
+                return;
             }
             var details = form.closest('details');
             if (details) {
@@ -14995,17 +15229,19 @@ define('format_mnemo/vr', [], function() {
 
         /**
          * Tick the facing radio for a yaw, adding an option for an angle that is
-         * not one of the presets. A yaw of 0 keeps "Auto" when Auto is chosen,
-         * since the preview shows an automatic facing as 0.
+         * not one of the presets. A yaw of 0 keeps "Auto" when Auto is chosen or
+         * saved, since the preview shows an automatic facing as 0.
          *
          * @param {Element} form The model settings form.
          * @param {Number} yaw The yaw in degrees.
          */
         function setFacing(form, yaw) {
             var radios = form.querySelectorAll('[name="yaw"]');
-            var current = form.querySelector('[name="yaw"]:checked');
+            var auto = form.querySelector('[name="yaw"][value=""]');
             var value = String(previewWrapDegrees(yaw));
-            if (value === '0' && current && current.value === '') {
+            // A model saved (or set) to Auto and turned back to 0 stays Auto.
+            if (value === '0' && auto && (auto.checked || auto.defaultChecked)) {
+                auto.checked = true;
                 return;
             }
             for (var i = 0; i < radios.length; i++) {
@@ -15058,6 +15294,7 @@ define('format_mnemo/vr', [], function() {
         _HeadPose: HeadPose,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
+        _initSaveBar: initSaveBar,
         _previewModelLoader: previewModelLoader,
         _previewFailMessage: previewFailMessage,
         _drawPreviewMessage: drawPreviewMessage,
@@ -15149,9 +15386,11 @@ define('format_mnemo/vr', [], function() {
             } catch (e) {
                 return;
             }
+            // The bar works on typed changes even when the 3D previews cannot load.
+            var savebar = initSaveBar(root, config.strings || {});
             loadThree(config).then(function(loaded) {
                 try {
-                    renderModelPreviews(config, loaded, root);
+                    renderModelPreviews(config, loaded, root, savebar);
                 } catch (e) {
                     if (window.console) {
                         window.console.error(e);

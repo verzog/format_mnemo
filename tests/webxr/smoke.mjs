@@ -773,6 +773,73 @@ const scenarios = [
         }
     },
     {
+        name: 'save all: changed cards are counted, saved together, and discarded together',
+        fn: () => {
+            const M = window.__mnemoModule;
+            const root = document.createElement('div');
+            const card = (model, category, yaw) => '<details><summary>Settings</summary>' +
+                '<form data-mnemo-settings-for="c-' + model + '">' +
+                '<input type="hidden" name="savemodel" value="' + model + '">' +
+                '<input type="hidden" name="category" value="' + category + '">' +
+                '<input type="hidden" name="sesskey" value="k">' +
+                '<input type="radio" name="yaw" value=""' + (yaw === '' ? ' checked' : '') + '>' +
+                '<input type="radio" name="yaw" value="90"' + (yaw === '90' ? ' checked' : '') + '>' +
+                '<input type="number" name="storeys" value="" min="1">' +
+                '<input type="checkbox" name="beh_animate" value="1">' +
+                '<button type="submit">Save</button></form></details>';
+            root.innerHTML = card('building-quiz', 'building', '') + card('lamp', 'prop', '90') +
+                '<form data-mnemo-savebar hidden><input type="hidden" name="saveall" value="">' +
+                '<span class="format-mnemo-preview__savebar-count"></span>' +
+                '<button type="submit">Save all</button><button type="button" data-mnemo-discard>Discard</button></form>';
+            document.body.appendChild(root);
+            const bar = root.querySelector('[data-mnemo-savebar]');
+            let posted = null;
+            bar.submit = () => {
+                posted = JSON.parse(bar.querySelector('[name="saveall"]').value);
+            };
+            const api = M._initSaveBar(root, {changedone: 'one', changedmany: '{n} changed', unsaved: 'Unsaved'});
+            const forms = root.querySelectorAll('form[data-mnemo-settings-for]');
+            const hiddenAtStart = bar.hidden;
+            // Change the first card: one change, badge on that card only.
+            forms[0].querySelector('[name="storeys"]').value = '7';
+            forms[0].dispatchEvent(new Event('input', {bubbles: true}));
+            const one = !bar.hidden && bar.textContent.indexOf('one') !== -1 &&
+                root.querySelectorAll('.format-mnemo-preview__unsaved').length === 1;
+            // Change the second card's facing too.
+            forms[1].querySelector('[name="yaw"][value=""]').checked = true;
+            forms[1].dispatchEvent(new Event('change', {bubbles: true}));
+            const two = bar.textContent.indexOf('2 changed') !== -1;
+            // A card's own Save with another card changed saves both.
+            forms[1].dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+            // Each entry lists only its changed fields, and an unticked box is sent.
+            const both = posted && posted.length === 2 && posted[0].model === 'building-quiz' &&
+                posted[0].values.storeys === '7' && posted[1].model === 'lamp' && posted[1].values.yaw === '' &&
+                posted[0].values.sesskey === undefined && posted[0].values.beh_animate === '' &&
+                posted[0].changed.join() === 'storeys' && posted[1].changed.join() === 'yaw';
+            // A card whose value its own form would refuse stops Save all.
+            posted = null;
+            forms[0].querySelector('[name="storeys"]').value = '0';
+            bar.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+            const refused = posted === null && root.querySelector('details').open;
+            forms[0].querySelector('[name="storeys"]').value = '7';
+            // Changing a card back to how it loaded is not a change.
+            forms[1].querySelector('[name="yaw"][value="90"]').checked = true;
+            api.refresh();
+            const back = api.dirty().length === 1;
+            // Discard puts every form back and hides the bar.
+            let hooked = false;
+            api.onDiscard(() => {
+                hooked = true;
+            });
+            bar.querySelector('[data-mnemo-discard]').click();
+            const discarded = bar.hidden && hooked && forms[0].querySelector('[name="storeys"]').value === '' &&
+                !root.querySelector('.format-mnemo-preview__unsaved');
+            root.remove();
+            const pass = hiddenAtStart && one && two && both && refused && back && discarded;
+            return {pass, detail: JSON.stringify({hiddenAtStart, one, two, both, refused, back, discarded, posted})};
+        }
+    },
+    {
         name: 'credits: entries stay hidden until their model loads, then show with the list',
         fn: () => {
             const M = window.__mnemoModule;

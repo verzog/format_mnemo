@@ -480,9 +480,17 @@ it on **Default** (the model named for the slot, uploaded or bundled). The chose
 model's own settings (orientation, scale, storeys, credit and lite copy) come with
 it. If the chosen model is deleted, the slot goes back to its default.
 
-**Use this view.** Instead of typing angles, turn a model with the arrow buttons
-until it stands the way it should, then press **Use this view**: it fills in the
-model's facing, pitch and roll under **Model settings**, ready to **Save**.
+**Turning a model.** Instead of typing angles, turn a model with the arrow
+buttons until it stands the way it should. Each turn fills in the model's facing,
+pitch and roll under **Model settings** for you (**Use this view** does the same
+and opens the settings, ready to **Save**).
+
+**Save all.** Change as many cards as you like (turns, storeys, scale, credits),
+then save them together: once anything changes, a bar at the bottom of the page
+counts the changed models and each changed card shows **Unsaved**. **Save all**
+saves every changed card at once; **Discard changes** puts them all back. A
+card's own **Save** button also saves the other changed cards, so nothing is
+lost, and leaving the page with unsaved changes asks first.
 
 **Delete.** An uploaded model's card has a **Delete** button. After you confirm,
 it removes the model's file, its `-lite` copy and its model settings from the
