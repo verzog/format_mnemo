@@ -359,6 +359,8 @@ class asset_gallery {
                 'lite' => $lite,
                 'credit' => $credit,
                 'licenceflags' => model_licence::flags($credit),
+                // Where an uploaded model lives, so the viewer can offer to delete it.
+                'filearea' => $source === 'uploaded' ? $filearea : null,
             ];
         }
         return $out;

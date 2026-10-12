@@ -669,6 +669,25 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: angles wrap into 0-360 and split exactly in XYZ or YXZ order',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const M = window.__mnemoModule;
+            const wrap = [M._previewWrapDegrees(-90), M._previewWrapDegrees(359.99), M._previewWrapDegrees(-0.01),
+                M._previewWrapDegrees(12.5)].join();
+            const r = Math.PI / 180;
+            const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(12.5 * r, 0, 0, 'XYZ'));
+            const xyz = M._previewExactDegrees(THREE, q, 'XYZ');
+            // Heading 90 outside pitch 30 and roll 20.
+            const qv = new THREE.Quaternion().setFromEuler(new THREE.Euler(30 * r, 90 * r, 20 * r, 'YXZ'));
+            const yxz = M._previewExactDegrees(THREE, qv, 'YXZ');
+            const near = (a, b) => Math.abs(a - b) < 1e-6;
+            const pass = wrap === '270,0,0,12.5' && near(xyz.pitch, 12.5) && near(xyz.yaw, 0) &&
+                near(yxz.pitch, 30) && near(yxz.yaw, 90) && near(yxz.roll, 20);
+            return {pass, detail: JSON.stringify({wrap, xyz, yxz})};
+        }
+    },
+    {
         name: 'credits: entries stay hidden until their model loads, then show with the list',
         fn: () => {
             const M = window.__mnemoModule;

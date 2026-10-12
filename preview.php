@@ -30,6 +30,7 @@ require_once($CFG->libdir . '/adminlib.php');
 use format_mnemo\output\asset_gallery;
 use format_mnemo\local\model_config;
 use format_mnemo\local\model_licence;
+use format_mnemo\local\model_store;
 
 admin_externalpage_setup('format_mnemo_preview');
 
@@ -88,6 +89,48 @@ if ($savemodel !== '' && confirm_sesskey()) {
     redirect($PAGE->url);
 }
 
+// Delete an uploaded model: the card's Delete link asks first on a confirm
+// page; the confirmed POST (with sesskey) deletes. Only an uploaded model in
+// one of the three model areas can be deleted, never a bundled one.
+$deletemodel = optional_param('deletemodel', '', PARAM_RAW_TRIMMED);
+if ($deletemodel !== '') {
+    $deletearea = optional_param('deletearea', '', PARAM_ALPHA);
+    $files = model_store::files($deletearea, $deletemodel);
+    if (!$files) {
+        redirect($PAGE->url);
+    }
+    if (optional_param('confirm', 0, PARAM_BOOL) && confirm_sesskey()) {
+        model_store::delete($deletearea, $deletemodel);
+        redirect(
+            $PAGE->url,
+            get_string('preview_deleted', 'format_mnemo', s($deletemodel)),
+            null,
+            \core\output\notification::NOTIFY_SUCCESS
+        );
+    }
+    $message = get_string('preview_delete_confirm', 'format_mnemo', (object)[
+        'name' => s($deletemodel),
+        'files' => s(implode(', ', array_keys($files))),
+    ]);
+    if (is_readable($CFG->dirroot . '/course/format/mnemo/models/' . $deletemodel . '.glb')) {
+        $message .= ' ' . get_string('preview_delete_bundled', 'format_mnemo', s($deletemodel));
+    }
+    $continue = new moodle_url($PAGE->url, [
+        'deletemodel' => $deletemodel,
+        'deletearea' => $deletearea,
+        'confirm' => 1,
+        'sesskey' => sesskey(),
+    ]);
+    echo $OUTPUT->header();
+    echo $OUTPUT->confirm(
+        $message,
+        new single_button($continue, get_string('preview_delete', 'format_mnemo'), 'post', single_button::BUTTON_DANGER),
+        $PAGE->url
+    );
+    echo $OUTPUT->footer();
+    die;
+}
+
 $textures = asset_gallery::textures();
 $models = asset_gallery::models();
 $configurable = asset_gallery::configurable_model_names();
@@ -100,9 +143,10 @@ $rootid = 'mnemo-preview-' . uniqid();
  * @param string $name The model name (.glb basename).
  * @param array $cfg The model's current normalised config.
  * @param moodle_url $url This page's URL (the form target).
+ * @param string $canvasid The model card's canvas id, so "Use this view" can find the form.
  * @return string HTML for the panel.
  */
-function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): string {
+function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url, string $canvasid): string {
     $rows = '';
 
     // Environment checkboxes (empty = every environment).
@@ -277,7 +321,12 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
             get_string('preview_save', 'format_mnemo'),
             ['type' => 'submit', 'class' => 'btn btn-secondary btn-sm']
         ),
-        ['method' => 'post', 'action' => $url->out(false), 'class' => 'format-mnemo-preview__form']
+        [
+            'method' => 'post',
+            'action' => $url->out(false),
+            'class' => 'format-mnemo-preview__form',
+            'data-mnemo-settings-for' => $canvasid,
+        ]
     );
 
     return html_writer::tag(
@@ -291,7 +340,7 @@ function mnemo_model_settings_panel(string $name, array $cfg, moodle_url $url): 
 // keyed by their card's canvas id, plus the Three.js bootstrap URLs.
 $modelconfig = [];
 foreach ($models as $i => $model) {
-    $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url']];
+    $entry = ['canvasid' => $rootid . '-model-' . $i, 'url' => $model['url'], 'category' => $model['category'] ?? 'prop'];
     // Reflect a configurable model's orientation correction in its preview, so
     // an admin sees the effect of the pitch/yaw/roll they set (celestials have
     // no model-config entry). A vehicle's yaw is its travel-facing in the scene,
@@ -404,6 +453,16 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
             'aria-label' => $label,
         ]);
     }
+    // The Use this view button copies the current turn into the model's settings
+    // form, ready to save; only models with a settings panel get it.
+    if (in_array($model['key'], $configurable, true)) {
+        $turns .= html_writer::tag('button', get_string('preview_useview', 'format_mnemo'), [
+            'type' => 'button',
+            'class' => 'btn btn-sm btn-secondary format-mnemo-preview__usebtn',
+            'data-mnemo-useview' => 1,
+            'title' => get_string('preview_useview_help', 'format_mnemo'),
+        ]);
+    }
     $canvas .= html_writer::div($turns, 'format-mnemo-preview__turns', ['data-mnemo-turn-for' => $canvasid]) .
         html_writer::div('', 'format-mnemo-preview__orient', ['id' => $canvasid . '-orient', 'aria-live' => 'polite']);
     $body = html_writer::div($model['label'], 'format-mnemo-preview__name') .
@@ -413,6 +472,14 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
             get_string('preview_openmodel', 'format_mnemo'),
             ['class' => 'format-mnemo-preview__use', 'target' => '_blank', 'rel' => 'noopener']
         );
+    // An uploaded model can be deleted (after a confirm page).
+    if (!empty($model['filearea'])) {
+        $body .= html_writer::link(
+            new moodle_url($PAGE->url, ['deletemodel' => $model['key'], 'deletearea' => $model['filearea']]),
+            get_string('preview_delete', 'format_mnemo'),
+            ['class' => 'btn btn-sm btn-outline-danger format-mnemo-preview__delete']
+        );
+    }
     // Attribution read from the model's glTF asset block, when present.
     if (!empty($model['copyright'])) {
         $body .= html_writer::div(
@@ -481,7 +548,7 @@ $rendermodelcard = function (int $i, array $model) use ($rootid, $sourcebadge, $
     // configurable model - props, vehicles and buildings - but not the
     // celestials, which carry their own URL config.
     if (in_array($model['key'], $configurable, true)) {
-        $body .= mnemo_model_settings_panel($model['key'], model_config::get($model['key']), $PAGE->url);
+        $body .= mnemo_model_settings_panel($model['key'], model_config::get($model['key']), $PAGE->url, $canvasid);
     }
     return html_writer::div(
         $canvas . html_writer::div($body, 'format-mnemo-preview__meta'),
