@@ -29,6 +29,7 @@ require_once($CFG->libdir . '/adminlib.php');
 
 use format_mnemo\output\asset_gallery;
 use format_mnemo\local\model_config;
+use format_mnemo\local\model_form;
 use format_mnemo\local\model_licence;
 use format_mnemo\local\model_slots;
 use format_mnemo\local\model_store;
@@ -42,53 +43,11 @@ $PAGE->set_heading(get_string('preview_title', 'format_mnemo'));
 // external page already gates access to site config; a sesskey guards the POST.
 $savemodel = optional_param('savemodel', '', PARAM_RAW_TRIMMED);
 if ($savemodel !== '' && confirm_sesskey()) {
-    // Only accept a name that is a real, configurable model (props, vehicles
-    // and buildings — every viewer model bar the celestials).
-    $known = asset_gallery::configurable_model_names();
-    // The card's category decides which settings its form showed; only those
-    // are taken from the form, so saving one card never resets settings it
-    // does not show (an "av" prop card leaves the "av" car's movement alone).
-    $category = optional_param('category', '', PARAM_ALPHA);
-    $categories = [];
-    foreach (asset_gallery::models() as $model) {
-        if ((string)$model['key'] === $savemodel) {
-            $categories[] = $model['category'] ?? 'prop';
-        }
+    $values = [];
+    foreach (model_form::params() as $field => $type) {
+        $values[$field] = optional_param($field, '', $type);
     }
-    if (in_array($savemodel, $known, true) && in_array($category, $categories, true)) {
-        $fields = model_config::category_fields($category);
-        $numornull = function (string $raw): ?float {
-            return ($raw === '' || !is_numeric($raw)) ? null : (float)$raw;
-        };
-        $cfg = model_config::get($savemodel);
-        if (in_array('envs', $fields, true)) {
-            $cfg['envs'] = [];
-            foreach (model_config::ENVIRONMENTS as $env) {
-                if (optional_param('env_' . $env, 0, PARAM_BOOL)) {
-                    $cfg['envs'][] = $env;
-                }
-            }
-        }
-        foreach (['yaw', 'pitch', 'roll', 'scale', 'storeys'] as $field) {
-            if (in_array($field, $fields, true)) {
-                $cfg[$field] = $numornull(optional_param($field, '', PARAM_RAW_TRIMMED));
-            }
-        }
-        // Behaviour checkboxes: an unchecked box does not post, so each shown
-        // flag is read as off unless ticked. The store drops any flag left at
-        // its engine default.
-        foreach (array_keys(model_config::BEHAVIOUR_DEFAULTS) as $flag) {
-            if (in_array('beh_' . $flag, $fields, true)) {
-                $cfg['behaviour'][$flag] = (bool)optional_param('beh_' . $flag, 0, PARAM_BOOL);
-            }
-        }
-        $cfg['credit'] = [
-            'title' => optional_param('credit_title', '', PARAM_TEXT),
-            'author' => optional_param('credit_author', '', PARAM_TEXT),
-            'licence' => optional_param('credit_licence', '', PARAM_TEXT),
-            'source' => optional_param('credit_source', '', PARAM_URL),
-        ];
-        model_config::set($savemodel, $cfg);
+    if (model_form::save($savemodel, optional_param('category', '', PARAM_ALPHA), $values)) {
         redirect(
             $PAGE->url,
             get_string('preview_saved', 'format_mnemo', s($savemodel)),
@@ -97,6 +56,19 @@ if ($savemodel !== '' && confirm_sesskey()) {
         );
     }
     redirect($PAGE->url);
+}
+
+// Save every changed card at once (the page's "Save all" bar): a JSON list of
+// each changed card's model, category and form values.
+$saveall = optional_param('saveall', '', PARAM_RAW);
+if ($saveall !== '' && confirm_sesskey()) {
+    $saved = model_form::save_batch($saveall);
+    redirect(
+        $PAGE->url,
+        get_string('preview_savedall', 'format_mnemo', count($saved)),
+        null,
+        $saved ? \core\output\notification::NOTIFY_SUCCESS : \core\output\notification::NOTIFY_WARNING
+    );
 }
 
 // Save a section's slot choices: which uploaded model each slot (a building
@@ -484,6 +456,10 @@ $config['strings'] = [
     'loadfailed' => get_string('preview_model_failed', 'format_mnemo'),
     'loadfailedfbx' => get_string('preview_model_failed_fbx', 'format_mnemo'),
     'nogeometry' => get_string('preview_model_empty', 'format_mnemo'),
+    // The "Save all" bar's count of changed cards, and a changed card's badge.
+    'changedone' => get_string('preview_changed_one', 'format_mnemo'),
+    'changedmany' => get_string('preview_changed_many', 'format_mnemo', '{n}'),
+    'unsaved' => get_string('preview_unsaved', 'format_mnemo'),
     // The orientation readout under each card, with {pitch}/{yaw}/{roll}
     // placeholders the client fills in after each turn.
     'orientation' => get_string(
@@ -748,6 +724,32 @@ foreach ($modelcats as $cat => $catlabel) {
     echo $slotform;
     echo html_writer::div($cards, 'format-mnemo-preview__grid');
 }
+
+// The "Save all" bar: hidden until a card's settings change, it then counts
+// the changed cards and saves them all in one go (the client fills in the
+// saveall field with each changed card's values).
+echo html_writer::tag(
+    'form',
+    html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'saveall', 'value' => '']) .
+    html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]) .
+    html_writer::tag('span', '', ['class' => 'format-mnemo-preview__savebar-count', 'role' => 'status']) .
+    html_writer::tag('button', get_string('preview_saveall', 'format_mnemo'), [
+        'type' => 'submit',
+        'class' => 'btn btn-primary btn-sm',
+    ]) .
+    html_writer::tag('button', get_string('preview_discard', 'format_mnemo'), [
+        'type' => 'button',
+        'class' => 'btn btn-secondary btn-sm',
+        'data-mnemo-discard' => 1,
+    ]),
+    [
+        'method' => 'post',
+        'action' => $PAGE->url->out(false),
+        'class' => 'format-mnemo-preview__savebar',
+        'data-mnemo-savebar' => 1,
+        'hidden' => 'hidden',
+    ]
+);
 
 echo html_writer::end_div();
 

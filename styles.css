@@ -1037,6 +1037,31 @@
     color: #3a6ea5;
 }
 
+.format-mnemo-preview__savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 8px 12px;
+    background: #fff8e1;
+    border: 1px solid #f0c36d;
+    border-radius: 4px;
+    box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.format-mnemo-preview__savebar[hidden] {
+    display: none;
+}
+
+.format-mnemo-preview__savebar-count {
+    font-weight: bold;
+    margin-right: auto;
+}
+
 .format-mnemo-preview__form {
     margin-top: 8px;
     display: flex;
