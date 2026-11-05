@@ -434,7 +434,9 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
     // ('signfont'), the sign frame texture ('signtexture'), and the road,
     // ground and sidewalk textures ('roadtexture', 'groundtexture',
     // 'sidewalktexture'). These are all decorative, served like the plugin's
-    // bundled static files (which are already public).
+    // bundled static files (which are already public), so they need no login,
+    // even on a site that forces login. Only the file types the scene loads are
+    // served (see \format_mnemo\local\public_files).
     $siteareas = ['assetpack', 'vehicleassets', 'buildingassets', 'signfont', 'signtexture',
         'roadtexture', 'groundtexture',
         'sidewalktexture', 'spacetexture', 'planettextures', 'ringtexture', 'sunasset', 'moonasset'];
@@ -448,6 +450,11 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
         array_shift($args);
         $filename = array_pop($args);
         $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
+
+        // Served without a login check, so only the file types the scene loads.
+        if (!\format_mnemo\local\public_files::allowed($filearea, (string)$filename)) {
+            return false;
+        }
 
         $fs = get_file_storage();
         $file = $fs->get_file($context->id, 'format_mnemo', $filearea, 0, $filepath, $filename);
@@ -475,12 +482,20 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
         }
         $filename = array_pop($args);
         $filepath = '/' . $hash . '/' . ($args ? implode('/', $args) . '/' : '');
+        // A bundle may hold any file; serve only the types the model loader
+        // reads, so nothing in it can run as a page or script on this site.
+        if (!\format_mnemo\local\public_files::allowed('modelcache', (string)$filename)) {
+            return false;
+        }
 
         $fs = get_file_storage();
         $file = $fs->get_file($context->id, 'format_mnemo', 'modelcache', 0, $filepath, $filename);
         if (!$file || $file->is_directory()) {
             // First access for this bundle: extract it, then try once more.
-            if (\format_mnemo\local\model_bundle::extract_by_hash($hash)) {
+            // Only a logged-in (or guest) visitor's request unpacks a bundle, so
+            // anonymous requests cannot make the server do that work; the scene
+            // and asset viewer are only ever shown to logged-in visitors.
+            if (isloggedin() && \format_mnemo\local\model_bundle::extract_by_hash($hash)) {
                 $file = $fs->get_file($context->id, 'format_mnemo', 'modelcache', 0, $filepath, $filename);
             }
         }
