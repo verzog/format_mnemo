@@ -78,13 +78,15 @@ class add_placed_object extends external_api {
             'z' => $z,
         ]);
 
-        if (!in_array($params['type'], asset_gallery::placer_prop_names(), true)) {
-            throw new invalid_parameter_exception('Unknown prop type');
-        }
-
         $context = context_course::instance($params['courseid']);
         self::validate_context($context);
         require_capability('moodle/course:manageactivities', $context);
+
+        // Checked after the capability, so only course editors learn which
+        // prop names exist.
+        if (!in_array($params['type'], asset_gallery::placer_prop_names(), true)) {
+            throw new invalid_parameter_exception('Unknown prop type');
+        }
 
         // Snap to the placement grid and clamp to sane world bounds so a
         // misbehaving client cannot drop a prop at an extreme coordinate.

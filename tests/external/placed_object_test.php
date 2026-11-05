@@ -196,4 +196,19 @@ final class placed_object_test extends \advanced_testcase {
         $this->expectException(\required_capability_exception::class);
         add_placed_object::execute($course->id, 'lamp', 0.0, 0.0);
     }
+
+    /**
+     * A student asking for an unknown prop type gets the capability error,
+     * not "Unknown prop type", so the prop names are not revealed to them.
+     */
+    public function test_student_is_denied_before_type_check(): void {
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $this->setUser($student);
+
+        $this->expectException(\required_capability_exception::class);
+        add_placed_object::execute($course->id, 'no-such-prop', 0.0, 0.0);
+    }
 }
