@@ -795,6 +795,15 @@ admin UI, not this plugin.)
 - Respects `prefers-reduced-motion` for the loading indicator.
 - The plugin stores **no personal data** — it implements the Moodle Privacy API
   null provider (`classes/privacy/provider.php`).
+- **Site-wide assets are public.** The files an admin uploads in the plugin's
+  settings (asset packs, vehicle and building models, the sign font, and the
+  sky, road, ground and other textures), and the unpacked contents of uploaded
+  `.zip` model bundles, are served **without a login check, even on a site that
+  forces login** — like the plugin's bundled models, they are decorative. Do not
+  upload anything there that should be private. Only the file types the scene
+  loads are served (models and their `.bin` buffers, images, compressed textures
+  and webfonts), so an `.html` or `.js` file inside a bundle is never served
+  from your site. A bundle is unpacked only on a logged-in visitor's request.
 
 ## Development
 
