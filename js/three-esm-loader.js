@@ -41,8 +41,23 @@
 //
 
 const params = new URL(import.meta.url).searchParams;
-const src = params.get('src');
-const addonsBase = params.get('addons');
+
+// Import only from this site (the same origin as this loader). A loader URL
+// such as ?src=https://elsewhere/x.js must not pull a foreign script onto the
+// page, which would let it get around a same-site Content Security Policy.
+const sameSite = (url) => {
+    if (!url) {
+        return null;
+    }
+    try {
+        const resolved = new URL(url, import.meta.url);
+        return resolved.origin === new URL(import.meta.url).origin ? resolved.href : null;
+    } catch (e) {
+        return null;
+    }
+};
+const src = sameSite(params.get('src'));
+const addonsBase = sameSite(params.get('addons'));
 
 /**
  * Try to load the addon glTF loader stack from the explicit addons base URL
@@ -83,7 +98,7 @@ async function loadAddons() {
     return out;
 }
 
-import(src).then(async(three) => {
+(src ? import(src) : Promise.reject(new Error('format_mnemo: Three.js must load from this site'))).then(async(three) => {
     const addons = await loadAddons();
     const detail = Object.assign({THREE: three}, addons);
     window.dispatchEvent(new CustomEvent('format_mnemo:three-ready', {detail: detail}));

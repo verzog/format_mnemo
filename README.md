@@ -235,8 +235,8 @@ off).
   [Three.js](https://threejs.org) with the browser's native WebXR API. Three.js
   is the only third-party dependency; it is **bundled with the plugin**
   (`thirdparty/three.module.min.js`) and loaded as a same-origin ES module, so
-  the plugin needs no external CDN. An admin can override the source URL if they
-  prefer a shared or newer hosted copy.
+  the plugin needs no external CDN. An admin can point it at another copy
+  stored on the same Moodle site; a URL on another site is refused.
 
 ## Requirements
 
@@ -513,8 +513,11 @@ traffic, shared by every world that has streets — Cyberspace, Grid, and the
 Void, whose streets float in space.
 
 - **Three.js module URL** — where the browser loads Three.js from. **Leave blank**
-  (the default) to use the copy bundled with the plugin. Set it only to load
-  Three.js from a shared or newer hosted copy.
+  (the default) to use the copy bundled with the plugin. Set it only to load a
+  newer or shared copy **stored on this Moodle site** (a full URL on this site or
+  a path starting with `/`). A URL on another site is refused when you save, and
+  one saved before this rule is ignored (the bundled copy is used), because the
+  script runs on every Mnemo course page with the learner's session.
 - **Default environment** — the world selected for newly created courses
   (teachers can switch it per course).
 - **Cyberspace / Grid / Void look** — each environment has its own section, and
@@ -797,16 +800,15 @@ admin UI, not this plugin.)
   stores two learner preferences (comfort settings and control mapping), which
   the Privacy API provider (`classes/privacy/provider.php`) declares and exports.
 - **External hosts.** Moodle itself sends nothing to other sites. But if an
-  admin sets a URL setting (the Three.js override, the prop asset pack, or a
-  font, texture, sun or moon URL) or a teacher gives an activity a model URL on
+  admin sets a URL setting (the prop asset pack, or a font, texture, sun or
+  moon URL) or a teacher gives an activity a model URL on
   another site, **every learner's browser fetches that file from that site**,
   which receives the learner's IP address and browser details. This is declared
   in the Privacy API as the `externalassets` external location. For Australian
   Privacy Principle 8 (cross-border disclosure), use only hosts your
   organisation has assessed, or leave the URL settings blank and upload assets
-  into Moodle instead. The **Three.js module URL** is the most sensitive: that
-  script runs on every Mnemo course page with the learner's Moodle session, so
-  point it only at a host you control.
+  into Moodle instead. The **Three.js module URL** must be on this Moodle site,
+  so it never sends learners to another host.
 - Admins can stop teachers using model URLs with **Allow model URLs on
   activities** (on by default). When it is off, the activity form accepts only
   model file names, and any URL already saved is ignored (the activity shows its
