@@ -157,8 +157,8 @@ class scene_values {
 
     /**
      * Whether a placed prop's type is a safe model base name: not empty, fits
-     * the stored column, and has no path separators, parent references or
-     * control characters. Uploaded model names may hold spaces, dots or
+     * the stored column, has no path separators or control characters, and
+     * is not "." or "..". Uploaded model names may hold spaces, dots or
      * Unicode, so the name is not limited to a narrower character set, and a
      * name whose model is not (yet) on this site is still accepted - the scene
      * simply cannot load it until it is uploaded.
@@ -170,7 +170,10 @@ class scene_values {
         if (!is_string($type) || trim($type) === '' || \core_text::strlen($type) > self::TYPE_MAXLEN) {
             return false;
         }
-        if (strpos($type, '/') !== false || strpos($type, '\\') !== false || strpos($type, '..') !== false) {
+        // With path separators ruled out, dots cannot climb a directory, so
+        // only the bare "." and ".." names are refused (an uploaded model such
+        // as "tree..v2.glb" is a valid prop).
+        if (strpos($type, '/') !== false || strpos($type, '\\') !== false || $type === '.' || $type === '..') {
             return false;
         }
         return preg_match('/[\x00-\x1F\x7F]/', $type) === 0;

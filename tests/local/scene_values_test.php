@@ -63,6 +63,8 @@ final class scene_values_test extends \advanced_testcase {
             'model empty' => ['valid_model', '', false],
             'prop' => ['valid_prop_type', 'lamp', true],
             'prop unicode' => ['valid_prop_type', 'Café sign v2', true],
+            'prop double dot' => ['valid_prop_type', 'tree..v2', true],
+            'prop dot dot' => ['valid_prop_type', '..', false],
             'prop slash' => ['valid_prop_type', '../lamp', false],
             'prop backslash' => ['valid_prop_type', 'a\\b', false],
             'prop control' => ['valid_prop_type', "lamp\n", false],
