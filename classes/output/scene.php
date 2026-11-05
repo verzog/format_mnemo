@@ -582,17 +582,36 @@ class scene implements renderable, templatable {
      * @return array|null the video descriptor, or null when it is not a video
      */
     protected function classify_video_url(string $url): ?array {
-        $host = strtolower((string)parse_url($url, PHP_URL_HOST));
-        foreach (['youtube.com', 'youtu.be', 'vimeo.com'] as $embedhost) {
-            if ($host !== '' && strpos($host, $embedhost) !== false) {
-                return ['kind' => 'embed'];
-            }
+        if (self::is_embed_host((string)parse_url($url, PHP_URL_HOST))) {
+            return ['kind' => 'embed'];
         }
         $path = strtolower((string)parse_url($url, PHP_URL_PATH));
         if (preg_match('/\.(mp4|webm|ogv|m4v|mov)$/', $path)) {
             return ['kind' => 'file', 'src' => $url];
         }
         return null;
+    }
+
+    /**
+     * Whether a host is a video site whose links are shown as an embed poster
+     * (YouTube or Vimeo): the site's own domain or one of its subdomains, so
+     * "www.youtube.com" matches but "notyoutube.com" and
+     * "youtube.com.example" do not.
+     *
+     * @param string $host The URL's host name.
+     * @return bool True for a YouTube or Vimeo host.
+     */
+    public static function is_embed_host(string $host): bool {
+        $host = rtrim(strtolower($host), '.');
+        if ($host === '') {
+            return false;
+        }
+        foreach (['youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com'] as $embedhost) {
+            if ($host === $embedhost || str_ends_with($host, '.' . $embedhost)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
