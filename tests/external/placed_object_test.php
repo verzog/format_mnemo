@@ -55,6 +55,37 @@ final class placed_object_test extends \advanced_testcase {
     }
 
     /**
+     * Once a course holds the most placed props allowed, another is refused,
+     * and removing one makes room again.
+     */
+    public function test_placed_prop_limit(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $rows = [];
+        for ($i = 0; $i < \format_mnemo\local\scene_values::MAX_PLACED; $i++) {
+            $rows[] = (object)['courseid' => $course->id, 'type' => 'lamp', 'basex' => 0, 'basez' => 0, 'timecreated' => 1];
+        }
+        $DB->insert_records('format_mnemo_placedobj', $rows);
+
+        try {
+            add_placed_object::execute($course->id, 'lamp', 0.0, 0.0);
+            $this->fail('A prop over the limit was placed.');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('placedlimit', $e->errorcode);
+        }
+
+        $first = $DB->get_field('format_mnemo_placedobj', 'MIN(id)', ['courseid' => $course->id]);
+        remove_placed_object::execute($course->id, (int)$first);
+        $result = add_placed_object::execute($course->id, 'lamp', 0.0, 0.0);
+        $this->assertGreaterThan(0, $result['id']);
+    }
+
+    /**
      * An unknown prop type is rejected.
      */
     public function test_bad_type_rejected(): void {

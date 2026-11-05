@@ -146,8 +146,12 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
         if (!scene_values::valid_prop_type($data['type'] ?? null)) {
             return; // Not a safe model name; its transform is dropped as an orphan too.
         }
+        $courseid = $this->task->get_courseid();
+        if ($DB->count_records('format_mnemo_placedobj', ['courseid' => $courseid]) >= scene_values::MAX_PLACED) {
+            return; // The course is at the placed-prop limit; extra props are dropped.
+        }
         $record = (object)[
-            'courseid' => $this->task->get_courseid(),
+            'courseid' => $courseid,
             'type' => $data['type'],
             'basex' => scene_values::placed_coordinate($data['basex'] ?? 0),
             'basez' => scene_values::placed_coordinate($data['basez'] ?? 0),
