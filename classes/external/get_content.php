@@ -77,7 +77,9 @@ class get_content extends external_api {
         );
 
         [$course, $cm] = get_course_and_cm_from_cmid($params['cmid']);
-        require_login($course, false, $cm);
+        // Prevent redirects: a refusal (hidden course or activity, not enrolled)
+        // must be a web service error, not an HTML notice page or a redirect.
+        require_login($course, false, $cm, false, true);
         $context = context_module::instance($cm->id);
         self::validate_context($context);
 

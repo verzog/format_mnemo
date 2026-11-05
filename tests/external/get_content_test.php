@@ -209,8 +209,8 @@ final class get_content_test extends \advanced_testcase {
 
     /**
      * Assert that a call exposes no activity body: it is either refused with
-     * an exception or returns no blocks. (How require_login() refuses depends
-     * on the context it runs in, so either outcome counts.)
+     * an exception (require_login_exception, or required_capability_exception)
+     * or returns no blocks.
      *
      * @param callable $call The call to make.
      * @param string $secret Text from the body that must not come back.

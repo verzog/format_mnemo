@@ -62,7 +62,9 @@ class get_states extends external_api {
         $params = self::validate_parameters(self::execute_parameters(), ['courseid' => $courseid]);
 
         $course = get_course($params['courseid']);
-        require_login($course);
+        // Prevent redirects: a refusal (hidden course, not enrolled) must be a
+        // web service error, not an HTML notice page or a redirect.
+        require_login($course, false, null, false, true);
         $context = context_course::instance($course->id);
         self::validate_context($context);
 
