@@ -26,9 +26,8 @@ namespace format_mnemo\external;
 
 /**
  * Tests for structuring a readable activity's content into layout blocks.
- *
- * @covers \format_mnemo\external\get_content
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\get_content::class)]
 final class get_content_test extends \advanced_testcase {
     /**
      * A page's HTML is parsed into ordered heading, paragraph (with a link run),

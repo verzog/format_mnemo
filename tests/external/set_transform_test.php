@@ -26,9 +26,8 @@ namespace format_mnemo\external;
 
 /**
  * Tests for saving an activity's in-view transform.
- *
- * @covers \format_mnemo\external\set_transform
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\set_transform::class)]
 final class set_transform_test extends \advanced_testcase {
     /**
      * An editing teacher can save a transform, which lands in the building table

@@ -26,9 +26,8 @@ namespace format_mnemo\external;
 
 /**
  * Tests for hiding (deleting) a generated decorative prop per course.
- *
- * @covers \format_mnemo\external\remove_scene_object
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\remove_scene_object::class)]
 final class remove_scene_object_test extends \advanced_testcase {
     /**
      * An editing teacher can hide a generated prop, creating the row with

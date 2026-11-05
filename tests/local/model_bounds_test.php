@@ -27,9 +27,8 @@ namespace format_mnemo\local;
 /**
  * Tests reading a model's box through its node transforms, turning it by an
  * orientation, and the storeys it implies.
- *
- * @covers \format_mnemo\local\model_bounds
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_bounds::class)]
 final class model_bounds_test extends \advanced_testcase {
     /**
      * A glTF document with one mesh whose POSITION box is 2 x 4 x 6, centred

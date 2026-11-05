@@ -24,9 +24,9 @@ use context_course;
  * @package    format_mnemo
  * @copyright  2026 Vernon Spain
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
- * @covers     \format_mnemo
- * @covers     \format_mnemo\output\scene
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\output\scene::class)]
 final class scene_test extends \advanced_testcase {
     /**
      * The format exposes the expected default format options.

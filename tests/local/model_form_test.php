@@ -26,9 +26,8 @@ namespace format_mnemo\local;
 
 /**
  * Tests saving one card's form and saving every changed card at once.
- *
- * @covers \format_mnemo\local\model_form
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_form::class)]
 final class model_form_test extends \advanced_testcase {
     /**
      * One card's form saves only the settings its category shows.
