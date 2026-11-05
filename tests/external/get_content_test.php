@@ -317,6 +317,9 @@ final class get_content_test extends \advanced_testcase {
     /**
      * A role without the module's own view capability is refused, because the
      * body is read from the table rather than through the module's view page.
+     * Moodle already treats the activity as not visible to that role, so the
+     * refusal can come from require_login() before the service's own
+     * capability check (which stays as a second line of defence).
      */
     public function test_missing_view_capability_is_refused(): void {
         global $DB;
@@ -327,8 +330,7 @@ final class get_content_test extends \advanced_testcase {
         assign_capability('mod/page:view', CAP_PROHIBIT, $studentrole, \context_module::instance($page->cmid)->id);
         $this->setUser($student);
 
-        $this->expectException(\required_capability_exception::class);
-        get_content::execute($page->cmid);
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
     }
 
     /**
