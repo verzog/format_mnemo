@@ -90,12 +90,6 @@ class add_placed_object extends external_api {
 
         // Snap to the placement grid and clamp to sane world bounds so a
         // misbehaving client cannot drop a prop at an extreme coordinate.
-        // Every learner's scene loads every placed prop, so cap how many a
-        // course may hold.
-        if ($DB->count_records('format_mnemo_placedobj', ['courseid' => $params['courseid']]) >= scene_values::MAX_PLACED) {
-            throw new \moodle_exception('placedlimit', 'format_mnemo', '', scene_values::MAX_PLACED);
-        }
-
         $basex = scene_values::placed_coordinate($params['x']);
         $basez = scene_values::placed_coordinate($params['z']);
 
@@ -106,7 +100,24 @@ class add_placed_object extends external_api {
             'basez' => $basez,
             'timecreated' => time(),
         ];
-        $record->id = $DB->insert_record('format_mnemo_placedobj', $record);
+
+        // Every learner's scene loads every placed prop, so cap how many a
+        // course may hold. A per-course lock makes the count and the insert
+        // one step, so two editors placing at once cannot both take the last
+        // place.
+        $lock = \core\lock\lock_config::get_lock_factory('format_mnemo_placedobj')
+            ->get_lock('course' . $params['courseid'], 10);
+        if (!$lock) {
+            throw new \moodle_exception('locktimeout', 'moodle');
+        }
+        try {
+            if ($DB->count_records('format_mnemo_placedobj', ['courseid' => $params['courseid']]) >= scene_values::MAX_PLACED) {
+                throw new \moodle_exception('placedlimit', 'format_mnemo', '', scene_values::MAX_PLACED);
+            }
+            $record->id = $DB->insert_record('format_mnemo_placedobj', $record);
+        } finally {
+            $lock->release();
+        }
 
         return [
             'id' => (int)$record->id,
