@@ -604,10 +604,9 @@ function format_mnemo_coursemodule_validation($formwrapper, $data) {
         return $errors;
     }
     $isurl = (bool)preg_match('#^https?://#i', $model);
-    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.(glb|fbx|zip)$/i', $model);
     if ($isurl && !format_mnemo_external_models_allowed()) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_nourls', 'format_mnemo');
-    } else if (!$isurl && !$isfile) {
+    } else if (!\format_mnemo\local\scene_values::valid_model($model)) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
     }
     return $errors;
