@@ -208,6 +208,158 @@ final class get_content_test extends \advanced_testcase {
     }
 
     /**
+     * Assert that a call exposes no activity body: it is either refused with
+     * an exception (require_login_exception, or required_capability_exception)
+     * or returns no blocks.
+     *
+     * @param callable $call The call to make.
+     * @param string $secret Text from the body that must not come back.
+     */
+    protected function assert_no_content(callable $call, string $secret): void {
+        try {
+            $result = $call();
+        } catch (\moodle_exception $e) {
+            $this->assertNotEmpty($e->errorcode);
+            return;
+        }
+        $this->assertSame([], $result['blocks']);
+        $this->assertStringNotContainsString($secret, json_encode($result));
+    }
+
+    /**
+     * A page with known body text, in a Mnemo course.
+     *
+     * @param array $courseoptions Extra course fields.
+     * @param array $pageoptions Extra page fields.
+     * @return array The course and page.
+     */
+    protected function secret_page(array $courseoptions = [], array $pageoptions = []): array {
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo'] + $courseoptions);
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id,
+            'content' => '<p>Secret body text.</p>',
+            'contentformat' => FORMAT_HTML,
+        ] + $pageoptions);
+        return [$course, $page];
+    }
+
+    /**
+     * A user who is not enrolled in the course gets nothing.
+     */
+    public function test_not_enrolled_is_refused(): void {
+        $this->resetAfterTest();
+        [, $page] = $this->secret_page();
+        $this->setUser($this->getDataGenerator()->create_user());
+
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+    }
+
+    /**
+     * A user who is not logged in gets nothing.
+     */
+    public function test_not_logged_in_is_refused(): void {
+        $this->resetAfterTest();
+        [, $page] = $this->secret_page();
+        $this->setUser(null);
+
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+    }
+
+    /**
+     * A student cannot read a hidden activity, but a teacher can.
+     */
+    public function test_hidden_activity_is_refused(): void {
+        $this->resetAfterTest();
+        [$course, $page] = $this->secret_page([], ['visible' => 0]);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+
+        $this->setUser($student);
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+
+        $this->setUser($teacher);
+        $result = get_content::execute($page->cmid);
+        $this->assertStringContainsString('Secret', json_encode($result['blocks']));
+    }
+
+    /**
+     * A student cannot read an activity in a hidden course.
+     */
+    public function test_hidden_course_is_refused(): void {
+        $this->resetAfterTest();
+        [$course, $page] = $this->secret_page(['visible' => 0]);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $this->setUser($student);
+
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+    }
+
+    /**
+     * A student cannot read an activity whose access restriction is still in
+     * force (here, a date that has not yet arrived).
+     */
+    public function test_restricted_activity_is_refused(): void {
+        global $CFG;
+        $this->resetAfterTest();
+        $CFG->enableavailability = true;
+        $availability = json_encode(\core_availability\tree::get_root_json(
+            [\availability_date\condition::get_json(\availability_date\condition::DIRECTION_FROM, time() + WEEKSECS)],
+            \core_availability\tree::OP_AND,
+            true
+        ));
+        [$course, $page] = $this->secret_page([], ['availability' => $availability]);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $this->setUser($student);
+
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+    }
+
+    /**
+     * A role without the module's own view capability is refused, because the
+     * body is read from the table rather than through the module's view page.
+     * Moodle already treats the activity as not visible to that role, so the
+     * refusal can come from require_login() before the service's own
+     * capability check (which stays as a second line of defence).
+     */
+    public function test_missing_view_capability_is_refused(): void {
+        global $DB;
+        $this->resetAfterTest();
+        [$course, $page] = $this->secret_page();
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $studentrole = $DB->get_field('role', 'id', ['shortname' => 'student'], MUST_EXIST);
+        assign_capability('mod/page:view', CAP_PROHIBIT, $studentrole, \context_module::instance($page->cmid)->id);
+        $this->setUser($student);
+
+        $this->assert_no_content(fn() => get_content::execute($page->cmid), 'Secret');
+    }
+
+    /**
+     * A hidden book chapter is never returned, even when asked for by id: it
+     * is left out of the chapter list and the first visible chapter is
+     * returned instead.
+     */
+    public function test_hidden_book_chapter_is_not_returned(): void {
+        $this->resetAfterTest();
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $book = $this->getDataGenerator()->create_module('book', ['course' => $course->id]);
+        $bookgen = $this->getDataGenerator()->get_plugin_generator('mod_book');
+        $visible = $bookgen->create_chapter(['bookid' => $book->id, 'title' => 'Open', 'content' => '<p>Open text.</p>']);
+        $hidden = $bookgen->create_chapter([
+            'bookid' => $book->id,
+            'title' => 'Draft',
+            'content' => '<p>Secret draft.</p>',
+            'hidden' => 1,
+        ]);
+        $this->setUser($student);
+
+        $result = get_content::execute($book->cmid, (int)$hidden->id);
+        $this->assertSame((int)$visible->id, $result['chapterid']);
+        $this->assertSame([(int)$visible->id], array_column($result['chapters'], 'id'));
+        $this->assertStringNotContainsString('Secret', json_encode($result));
+    }
+
+    /**
      * The first block of a given type, or null.
      *
      * @param array $blocks The blocks.
