@@ -5054,7 +5054,155 @@ const scenarios = [
             const movesOtherwise = self.player.position.length() > 1e-6;
             return {pass: stayed && movesOtherwise, detail: `stayed=${stayed} moves=${movesOtherwise}`};
         }
-    }
+    },
+    {
+        name: 'bodypose: features read shoulders, raised arms and crossed arms',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            // A 33-landmark person in the unmirrored camera image: shoulders
+            // centred on cx, `w` apart (left shoulder 11 on the image right),
+            // nose above, wrists at the sides unless raised or crossed.
+            const body = (o) => {
+                const cx = o.cx === undefined ? 0.5 : o.cx;
+                const w = o.w || 0.2;
+                const sy = 0.5;
+                const lm = [];
+                for (let i = 0; i < 33; i++) {
+                    lm.push({x: cx, y: sy + w, z: 0, visibility: 1});
+                }
+                lm[0] = {x: cx, y: sy - 0.8 * w, z: 0, visibility: 1};
+                lm[11] = {x: cx + w / 2, y: sy, z: o.lz || 0, visibility: o.hidden ? 0.1 : 1};
+                lm[12] = {x: cx - w / 2, y: sy, z: o.rz || 0, visibility: 1};
+                let lw = {x: cx + w / 2, y: sy + 1.5 * w};
+                let rw = {x: cx - w / 2, y: sy + 1.5 * w};
+                if (o.up) {
+                    lw = {x: cx + w / 2, y: sy - 1.2 * w};
+                    rw = {x: cx - w / 2, y: sy - 1.2 * w};
+                } else if (o.crossed) {
+                    lw = {x: cx - 0.3 * w, y: sy + 0.6 * w};
+                    rw = {x: cx + 0.3 * w, y: sy + 0.6 * w};
+                }
+                lm[15] = Object.assign({z: 0, visibility: 1}, lw);
+                lm[16] = Object.assign({z: 0, visibility: 1}, rw);
+                return lm;
+            };
+            window.__mnemoTest.mkBody = body; // Shared by the body tests below.
+            const stand = bp.features(body({}));
+            const up = bp.features(body({up: true}));
+            const cross = bp.features(body({crossed: true}));
+            const pass = Math.abs(stand.width - 0.2) < 1e-9 && !stand.armsUp && !stand.crossed &&
+                up.armsUp && !up.crossed && cross.crossed && !cross.armsUp &&
+                bp.features(body({hidden: true})) === null && bp.detect(null, 0).length === 0;
+            return {pass, detail: `w=${stand.width.toFixed(2)} up=${up.armsUp} crossed=${cross.crossed}`};
+        }
+    },
+    {
+        name: 'bodypose: calibrates the stance, then lean moves and shoulder twist steers',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const body = window.__mnemoTest.mkBody;
+            const run = (o, secs) => {
+                let it = null;
+                for (let t = 0; t < secs; t += 0.05) {
+                    it = bp.update([body(o)], 0.05);
+                }
+                return it;
+            };
+            const first = bp.update([body({})], 0.05);
+            const settled = run({}, 1.6);
+            const lean = run({w: 0.27}, 0.1);
+            const back = run({w: 0.15}, 0.1);
+            const right = run({rz: 0.1}, 0.1);
+            const left = run({lz: 0.1}, 0.1);
+            const rise = run({up: true}, 0.1);
+            const pass = first.status === 'calibrating' && first.move === 0 &&
+                settled.status === 'tracking' && settled.move === 0 && settled.turn === 0 &&
+                lean.move > 0.5 && back.move < -0.3 && right.turn > 0 && left.turn < 0 &&
+                rise.rise === 1;
+            return {pass, detail: `first=${first.status} lean=${lean.move.toFixed(2)} back=${back.move.toFixed(2)} ` +
+                `right=${right.turn.toFixed(2)} left=${left.turn.toFixed(2)} rise=${rise.rise}`};
+        }
+    },
+    {
+        name: 'bodypose: crossed arms held pause, and crossing again resumes',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const body = window.__mnemoTest.mkBody;
+            const run = (o, secs) => {
+                let it = null;
+                for (let t = 0; t < secs; t += 0.05) {
+                    it = bp.update([body(o)], 0.05);
+                }
+                return it;
+            };
+            run({}, 1.6); // Calibrate.
+            const brief = run({crossed: true}, 0.2); // Too short to toggle.
+            run({}, 0.1);
+            run({crossed: true}, 0.7);
+            const paused = run({w: 0.3}, 0.2); // Leaning in while paused does nothing.
+            run({crossed: true}, 0.7);
+            const resumed = run({w: 0.3}, 0.1);
+            const pass = brief.status === 'tracking' && brief.move === 0 &&
+                paused.status === 'paused' && paused.move === 0 &&
+                resumed.status === 'tracking' && resumed.move > 0.5;
+            return {pass, detail: `brief=${brief.status} paused=${paused.status} resumed=${resumed.status}`};
+        }
+    },
+    {
+        name: 'bodypose: follows the closest person, ignoring someone briefly closer',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const body = window.__mnemoTest.mkBody;
+            // The presenter (wide shoulders, at x 0.3) and someone further back
+            // (narrow, at x 0.75).
+            bp.pick([body({cx: 0.75, w: 0.1}), body({cx: 0.3, w: 0.2})], 0.05);
+            const first = bp.target.x;
+            // The other person steps up and looks closer for half a second:
+            // still following the presenter.
+            let f = null;
+            for (let t = 0; t < 0.5; t += 0.05) {
+                f = bp.pick([body({cx: 0.3, w: 0.2}), body({cx: 0.75, w: 0.3})], 0.05);
+            }
+            const kept = f.mid.x;
+            // ... and for well over a second: they take over.
+            for (let t = 0; t < 1.2; t += 0.05) {
+                f = bp.pick([body({cx: 0.3, w: 0.2}), body({cx: 0.75, w: 0.3})], 0.05);
+            }
+            const switched = f.mid.x;
+            const lost = bp.update([], 0.05);
+            const pass = Math.abs(first - 0.3) < 1e-9 && Math.abs(kept - 0.3) < 1e-9 &&
+                Math.abs(switched - 0.75) < 1e-9 && lost.status === 'lost' && lost.move === 0;
+            return {pass, detail: `first=${first} kept=${kept} switched=${switched} lost=${lost.status}`};
+        }
+    },
+    {
+        name: 'cameranav: body mode applies rise, never falls back to frame motion, and stop clears it',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const cs = {yaw: 0, pitch: 0, navMove: 0, navStrafe: 0, navRise: 0};
+            // A fake video with a fresh frame, so sample() gets past its frame gate.
+            const video = {readyState: 4, videoWidth: 640, currentTime: 1};
+            const canvas = document.createElement('canvas');
+            const nav = new CN(cs, {video: video, canvas: canvas, body: true});
+            nav.intent = {turn: 0, move: 0.5, rise: 1};
+            nav.apply(0.016);
+            const rose = cs.navRise === 1 && cs.navMove === 0.5;
+            // No body model yet: sampling clears the intent rather than reading motion.
+            nav.sample();
+            const cleared = nav.intent.move === 0 && nav.intent.rise === 0 && nav.prev === null;
+            nav.intent = {turn: 0, move: 0, rise: 1};
+            nav.apply(0.016);
+            nav.stop();
+            const stopped = cs.navRise === 0 && cs.navMove === 0 && nav.bodyStatus === '';
+            const learner = new CN(cs, {video: video, canvas: canvas});
+            const pass = rose && cleared && stopped && nav.bodyMode === true && learner.bodyMode === false;
+            return {pass, detail: `rose=${rose} cleared=${cleared} stopped=${stopped}`};
+        }
+    },
 ];
 
 const launchOpts = {args: ['--no-sandbox', '--use-gl=swiftshader']};

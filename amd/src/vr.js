@@ -279,6 +279,8 @@ define('format_mnemo/vr', [], function() {
         this.invertlook = !!config.invertlook; // Invert drag-to-look direction.
         this.navMove = 0; // Analog forward/back from camera-gesture nav (-1..1).
         this.navStrafe = 0; // Analog strafe from camera-gesture nav (-1..1).
+        this.navRise = 0; // Analog rise from presenter-mode gestures (0..1).
+        this.presenterCeiling = 60; // Highest a presenter can rise while walking.
         this.cameraNav = null; // Webcam gesture-navigation driver (flat screen only).
         // Per-learner comfort settings (turn mode/angle, motion vignette,
         // movement speed). Seeded from the server user preference, falling back
@@ -519,6 +521,9 @@ define('format_mnemo/vr', [], function() {
         this.buildVrComfortPanel();
         if (this.config.cameranav !== false) {
             this.buildCameraNav();
+        }
+        if (this.config.presenter) {
+            this.buildPresenter();
         }
         if (this.config.game) {
             this.game = new GameManager(this);
@@ -6641,6 +6646,9 @@ define('format_mnemo/vr', [], function() {
         if (this.cameraNav && this.cameraNav.active) {
             this.cameraNav.stop();
         }
+        if (this.presenterNav && (this.presenterNav.active || this.presenterNav.starting)) {
+            this.presenterNav.stop();
+        }
     };
 
     /**
@@ -11413,12 +11421,16 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateCameraNav = function(dt) {
-        if (this.cameraNav && this.cameraNav.active) {
-            this.cameraNav.sample();
-            this.cameraNav.apply(dt);
-        } else if (this.navMove || this.navStrafe) {
+        // At most one camera control runs at a time: presenter mode or the
+        // learner camera navigation.
+        var nav = (this.presenterNav && this.presenterNav.active) ? this.presenterNav : this.cameraNav;
+        if (nav && nav.active) {
+            nav.sample();
+            nav.apply(dt);
+        } else if (this.navMove || this.navStrafe || this.navRise) {
             this.navMove = 0;
             this.navStrafe = 0;
+            this.navRise = 0;
         }
     };
 
@@ -11533,6 +11545,10 @@ define('format_mnemo/vr', [], function() {
         if (this.actionActive('down')) {
             this.player.position.y -= speed;
         }
+        // Analog rise from presenter-mode gestures (both arms raised).
+        if (this.navRise) {
+            this.player.position.y += speed * this.navRise;
+        }
         // Analog forward/back and strafe from camera-gesture navigation.
         if (this.navMove) {
             this.player.position.addScaledVector(forward, speed * this.navMove);
@@ -11578,6 +11594,13 @@ define('format_mnemo/vr', [], function() {
             this.player.position.addScaledVector(right, speed * this.navStrafe);
         }
 
+        // Presenter mode: both arms raised lifts the view (up to a ceiling), and
+        // gravity brings it back down once the arms drop.
+        if (this.navRise > 0) {
+            this.velocityY = 0;
+            this.onGround = false;
+            this.player.position.y = Math.min(this.presenterCeiling, this.player.position.y + speed * this.navRise);
+        }
         // Jump and gravity. A jump only launches from the ground; the apex stays
         // just under flyThreshold so the walker keeps to the streets.
         if (this.onGround && this.actionActive('up')) {
@@ -12572,6 +12595,13 @@ define('format_mnemo/vr', [], function() {
         this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
         this.maxPitch = Math.PI / 2 - 0.05; // Clamp, matching the drag-look limit.
         this.pitchEase = 8; // Look-pitch easing rate toward the target (per second).
+        // Body mode (the teacher presenter mode): full-body pose gestures from a
+        // MediaPipe PoseLandmarker instead of the hand/face/motion paths.
+        this.bodyMode = !!(dom && dom.body);
+        this.body = null; // A BodyPose once the pose landmarker has loaded.
+        this.bodyStatus = ''; // Last body status (lost, calibrating, paused, tracking).
+        this.onstatus = null; // Optional callback(status) when the body status changes.
+        this.onposefail = null; // Optional callback when body detection cannot load.
         // Tunables (the one place to adjust the feel): a deadzone that ignores
         // frame noise, a gain that maps motion energy to a full-scale axis, and
         // the steering rate. Smoothing is asymmetric and time-based - a short
@@ -12697,7 +12727,7 @@ define('format_mnemo/vr', [], function() {
      */
     CameraNav.prototype.clearIntent = function() {
         this.energy = {left: 0, right: 0, fwd: 0, back: 0};
-        this.intent = {turn: 0, move: 0};
+        this.intent = {turn: 0, move: 0, rise: 0};
     };
 
     /**
@@ -12748,6 +12778,16 @@ define('format_mnemo/vr', [], function() {
         }
         var frameDt = this.lastTime >= 0 ? v.currentTime - this.lastTime : 0;
         this.lastTime = v.currentTime;
+        // Body mode never falls back to frame motion: a presenter's gestures
+        // while the model loads must not move the scene.
+        if (this.bodyMode) {
+            if (this.body) {
+                this.sampleBody(v, frameDt);
+            } else {
+                this.clearIntent();
+            }
+            return;
+        }
         // Pose mode (MediaPipe hand and/or face landmarks) once it has loaded;
         // otherwise the frame-motion fallback.
         if (this.pose || this.head) {
@@ -12877,6 +12917,39 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Read one frame of full-body gestures (presenter mode) and set the intent:
+     * forward/back and steering eased like the other modes, rise as given. The
+     * body status (lost, calibrating, paused, tracking) is passed on whenever it
+     * changes, for the on-screen banner.
+     *
+     * @param {Object} v The video element.
+     * @param {Number} frameDt Seconds since the last processed frame.
+     */
+    CameraNav.prototype.sampleBody = function(v, frameDt) {
+        var ts = window.performance ? window.performance.now() : Date.now();
+        var it = this.body.update(this.body.detect(v, ts), Math.min(frameDt, this.maxFrameGap));
+        this.setBodyStatus(it.status);
+        this.poseMove = this.blend(this.poseMove, it.move, frameDt);
+        var turn = this.blend(this.intent.turn || 0, it.turn, frameDt);
+        this.intent = {turn: turn, move: this.poseMove, rise: it.rise};
+    };
+
+    /**
+     * Record the body status and tell the banner when it changes.
+     *
+     * @param {String} status The new status ('' when off).
+     */
+    CameraNav.prototype.setBodyStatus = function(status) {
+        if (status === this.bodyStatus) {
+            return;
+        }
+        this.bodyStatus = status;
+        if (this.onstatus) {
+            this.onstatus(status);
+        }
+    };
+
+    /**
      * Fire the arcade weapon along the camera crosshair from a finger-gun
      * trigger pull. A no-op unless the game is playing, and rate-limited so a
      * single pull cannot loose a burst from landmark jitter.
@@ -12908,6 +12981,10 @@ define('format_mnemo/vr', [], function() {
         // Already have (or are loading) a detector: nothing to do. Checking both
         // pose and head means a partial load (only one model succeeded) is not
         // retried, so the other is not re-created and leaked on a later start().
+        if (this.bodyMode) {
+            this.initBody();
+            return;
+        }
         if (this.pose || this.head || this.poseLoading || !cfg || !cfg.mediapipewasmurl) {
             return;
         }
@@ -12967,6 +13044,53 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Load the body-pose landmarker for presenter mode (up to three people, so
+     * the closest can be chosen). Runs at most once; on failure it reports
+     * through onposefail and the scene keeps its other controls.
+     */
+    CameraNav.prototype.initBody = function() {
+        var self = this;
+        var cfg = this.cs && this.cs.config;
+        if (this.body || this.poseLoading || !cfg || !cfg.mediapipewasmurl || !cfg.mediapipeposemodelurl) {
+            if (!this.body && !this.poseLoading && this.onposefail) {
+                this.onposefail();
+            }
+            return;
+        }
+        this.poseLoading = true;
+        var mp;
+        loadMediapipe(cfg).then(function(loaded) {
+            mp = loaded;
+            return mp.FilesetResolver.forVisionTasks(cfg.mediapipewasmurl);
+        }).then(function(fileset) {
+            return mp.PoseLandmarker.createFromOptions(fileset, {
+                baseOptions: {modelAssetPath: cfg.mediapipeposemodelurl, delegate: 'GPU'},
+                runningMode: 'VIDEO',
+                numPoses: 3
+            });
+        }).then(function(lm) {
+            self.poseLoading = false;
+            if (self.active) {
+                self.body = new BodyPose(lm);
+                if (self.onpose) {
+                    self.onpose();
+                }
+            } else if (lm && lm.close) {
+                lm.close();
+            }
+            return null;
+        }).catch(function(e) {
+            self.poseLoading = false;
+            if (window.console) {
+                window.console.warn('format_mnemo: body pose detection unavailable', e);
+            }
+            if (self.onposefail) {
+                self.onposefail();
+            }
+        });
+    };
+
+    /**
      * Install whichever pose detectors loaded, or - if the control was switched
      * off (or a headset entered) between the request and its resolution - close
      * them instead so no WASM/GPU landmarker is leaked.
@@ -13007,6 +13131,7 @@ define('format_mnemo/vr', [], function() {
         this.cs.yaw -= this.intent.turn * this.turnRate * dt;
         this.cs.navMove = this.intent.move;
         this.cs.navStrafe = 0;
+        this.cs.navRise = this.intent.rise || 0;
         // Head tilt aims vertically: ease the look pitch toward the absolute
         // target so the finger-gun shot (and the view) can reach high targets.
         // Only while a face is driving it, so mouse-look pitch is left alone
@@ -13044,7 +13169,9 @@ define('format_mnemo/vr', [], function() {
         // start() (its generation superseded) is dropped and its stream closed,
         // rather than activating the camera late or leaking a track.
         var gen = ++this.reqId;
-        md.getUserMedia({video: {facingMode: 'user', width: 320, height: 240}, audio: false})
+        // Body mode needs more detail to see a presenter a few metres away.
+        var size = this.bodyMode ? {width: 640, height: 480} : {width: 320, height: 240};
+        md.getUserMedia({video: {facingMode: 'user', width: size.width, height: size.height}, audio: false})
             .then(function(stream) {
                 if (gen !== self.reqId) {
                     stream.getTracks().forEach(function(t) {
@@ -13152,9 +13279,16 @@ define('format_mnemo/vr', [], function() {
         this.havePitch = false;
         this.gunArmed = false;
         this.handLostTime = 0;
+        // A restart may be a different presenter or stance: follow and
+        // calibrate afresh.
+        if (this.body) {
+            this.body.reset();
+        }
+        this.setBodyStatus('');
         if (this.cs) {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
+            this.cs.navRise = 0;
         }
         if (this.onchange) {
             this.onchange(false);
@@ -13478,6 +13612,264 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Full-body gesture reader for the teacher presenter mode, built on a
+     * MediaPipe PoseLandmarker. It follows one person - the one closest to the
+     * camera, judged by how wide their shoulders appear - and turns their upper
+     * body into navigation, so it works with a lectern webcam that only sees the
+     * presenter from the waist up:
+     *   - step or lean toward the screen (shoulders look wider) to fly forward,
+     *     away from it (narrower) to fly back;
+     *   - turn the shoulders left or right to steer;
+     *   - raise both hands above the head to rise;
+     *   - cross the arms over the chest (held briefly) to pause or resume, so
+     *     the presenter can talk and gesture without moving the scene.
+     * The first moments of tracking calibrate the presenter's normal stance, so
+     * every gesture is measured from how they usually stand.
+     *
+     * Everything but detect() is pure (landmarks in, intent out) so it is unit
+     * tested. Landmarks follow MediaPipe's pose model (0 nose, 11/12 left/right
+     * shoulder, 15/16 left/right wrist) in the camera's own, unmirrored image.
+     *
+     * @param {Object} landmarker A MediaPipe PoseLandmarker (null-safe for tests).
+     */
+    function BodyPose(landmarker) {
+        this.landmarker = landmarker || null;
+        // Tunables (the one place to adjust the feel after a trial run).
+        this.minVisibility = 0.5; // Ignore landmarks the model is unsure of.
+        this.calibTime = 1.5; // Seconds of normal stance that set the neutral.
+        this.leanDead = 0.06; // Shoulder-width change ignored (fraction of neutral).
+        this.leanFull = 0.3; // Shoulder-width change for full forward/back speed.
+        this.turnDead = 0.12; // Shoulder twist ignored.
+        this.turnFull = 0.5; // Shoulder twist for full steering.
+        this.crossHold = 0.5; // Seconds arms must stay crossed to pause/resume.
+        this.switchRatio = 1.25; // How much closer someone else must look ...
+        this.switchTime = 1.0; // ... and for how long, to take over.
+        this.matchRadius = 0.25; // How far the followed person may move per frame.
+        this.reset();
+    }
+
+    /**
+     * Forget the followed person, the calibration and the pause, so the next
+     * frames start afresh (a new presenter, or presenter mode restarted).
+     */
+    BodyPose.prototype.reset = function() {
+        this.target = null; // The followed person's last shoulder midpoint.
+        this.challenger = 0; // Seconds someone else has looked clearly closer.
+        this.neutral = null; // Calibrated {width, twist}.
+        this.calib = {time: 0, width: 0, twist: 0, n: 0};
+        this.paused = false;
+        this.crossTime = 0;
+        this.crossLatched = false;
+    };
+
+    /**
+     * Whether a landmark is present and confidently placed.
+     *
+     * @param {Object} p A landmark {x, y, z, visibility}.
+     * @return {Boolean} True when usable.
+     */
+    BodyPose.prototype.seen = function(p) {
+        return !!p && (p.visibility === undefined || p.visibility >= this.minVisibility);
+    };
+
+    /**
+     * The gesture features of one person: shoulder midpoint and width (a proxy
+     * for distance from the camera), shoulder twist, both hands above the head,
+     * and arms crossed over the chest. Null when the shoulders are not seen.
+     *
+     * @param {Array} lm The person's 33 pose landmarks.
+     * @return {Object|null} {mid, width, twist, armsUp, crossed}, or null.
+     */
+    BodyPose.prototype.features = function(lm) {
+        if (!lm || lm.length < 17) {
+            return null;
+        }
+        var ls = lm[11];
+        var rs = lm[12];
+        if (!this.seen(ls) || !this.seen(rs)) {
+            return null;
+        }
+        var width = Math.sqrt(Math.pow(ls.x - rs.x, 2) + Math.pow(ls.y - rs.y, 2));
+        if (width < 1e-3) {
+            return null;
+        }
+        var mid = {x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2};
+        // Turning to the presenter's right sends the right shoulder back (larger
+        // z) and the left one forward, so this is positive for a right turn.
+        var twist = ((rs.z || 0) - (ls.z || 0)) / width;
+        var lw = lm[15];
+        var rw = lm[16];
+        var nose = lm[0];
+        var armsUp = false;
+        var crossed = false;
+        if (this.seen(lw) && this.seen(rw)) {
+            // Above the head: above the nose when it is seen, else well above
+            // the shoulders.
+            var top = this.seen(nose) ? nose.y : mid.y - 0.6 * width;
+            armsUp = lw.y < top && rw.y < top;
+            // Crossed: each wrist past the middle, on the other shoulder's side,
+            // at chest height.
+            var margin = 0.1 * width;
+            var chest = function(w) {
+                return w.y > mid.y - 0.2 * width && w.y < mid.y + 2.2 * width;
+            };
+            var across = function(w, s) {
+                return (w.x - mid.x) * (s.x - mid.x) < 0 && Math.abs(w.x - mid.x) > margin;
+            };
+            crossed = across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
+        }
+        return {mid: mid, width: width, twist: twist, armsUp: armsUp, crossed: crossed};
+    };
+
+    /**
+     * Pick the person to follow from everyone in the frame: whoever looks
+     * closest (widest shoulders), but once following someone, keep them unless
+     * another person stays clearly closer for a moment, so someone walking past
+     * behind the lectern never takes over.
+     *
+     * @param {Array} poses Each person's landmarks.
+     * @param {Number} dt Seconds since the last frame.
+     * @return {Object|null} The followed person's features, or null when no one
+     *     is seen.
+     */
+    BodyPose.prototype.pick = function(poses, dt) {
+        var people = [];
+        (poses || []).forEach(function(lm) {
+            var f = this.features(lm);
+            if (f) {
+                people.push(f);
+            }
+        }, this);
+        if (!people.length) {
+            this.challenger = 0;
+            return null;
+        }
+        var closest = people.reduce(function(a, b) {
+            return b.width > a.width ? b : a;
+        });
+        var current = null;
+        if (this.target) {
+            var best = Infinity;
+            var target = this.target;
+            people.forEach(function(f) {
+                var d = Math.sqrt(Math.pow(f.mid.x - target.x, 2) + Math.pow(f.mid.y - target.y, 2));
+                if (d < best) {
+                    best = d;
+                    current = f;
+                }
+            });
+            if (best > this.matchRadius) {
+                current = null;
+            }
+        }
+        var chosen = current;
+        if (!current) {
+            // Nobody followed yet, or they left: follow the closest, afresh.
+            chosen = closest;
+            this.neutral = null;
+            this.calib = {time: 0, width: 0, twist: 0, n: 0};
+            this.challenger = 0;
+        } else if (closest !== current && closest.width > current.width * this.switchRatio) {
+            this.challenger += dt;
+            if (this.challenger >= this.switchTime) {
+                chosen = closest;
+                this.neutral = null;
+                this.calib = {time: 0, width: 0, twist: 0, n: 0};
+                this.challenger = 0;
+            }
+        } else {
+            this.challenger = 0;
+        }
+        this.target = chosen.mid;
+        return chosen;
+    };
+
+    /**
+     * Map a value past a deadzone onto -1..1, reaching full scale at `full`.
+     *
+     * @param {Number} v The value.
+     * @param {Number} dead The deadzone.
+     * @param {Number} full The value for full scale.
+     * @return {Number} The axis in -1..1.
+     */
+    BodyPose.prototype.axis = function(v, dead, full) {
+        var a = Math.abs(v);
+        if (a <= dead) {
+            return 0;
+        }
+        return (v < 0 ? -1 : 1) * Math.min(1, (a - dead) / (full - dead));
+    };
+
+    /**
+     * Turn one frame's people into the navigation intent and a status for the
+     * on-screen banner: 'lost' (no one seen), 'calibrating' (learning the
+     * presenter's normal stance), 'paused' (arms crossed to pause) or
+     * 'tracking'. Movement is zero unless tracking.
+     *
+     * @param {Array} poses Each person's landmarks.
+     * @param {Number} dt Seconds since the last frame.
+     * @return {Object} {move, turn, rise, status}.
+     */
+    BodyPose.prototype.update = function(poses, dt) {
+        var still = {move: 0, turn: 0, rise: 0};
+        var f = this.pick(poses, dt);
+        if (!f) {
+            this.crossTime = 0;
+            still.status = 'lost';
+            return still;
+        }
+        if (!this.neutral) {
+            var c = this.calib;
+            c.time += dt;
+            c.width += f.width;
+            c.twist += f.twist;
+            c.n++;
+            if (c.time >= this.calibTime && c.n) {
+                this.neutral = {width: c.width / c.n, twist: c.twist / c.n};
+            }
+            still.status = 'calibrating';
+            return still;
+        }
+        // Crossed arms held for a moment toggle the pause, once per crossing.
+        if (f.crossed) {
+            this.crossTime += dt;
+            if (this.crossTime >= this.crossHold && !this.crossLatched) {
+                this.paused = !this.paused;
+                this.crossLatched = true;
+            }
+        } else {
+            this.crossTime = 0;
+            this.crossLatched = false;
+        }
+        if (this.paused || f.crossed) {
+            still.status = this.paused ? 'paused' : 'tracking';
+            return still;
+        }
+        return {
+            move: this.axis(f.width / this.neutral.width - 1, this.leanDead, this.leanFull),
+            turn: this.axis(f.twist - this.neutral.twist, this.turnDead, this.turnFull),
+            rise: f.armsUp ? 1 : 0,
+            status: 'tracking'
+        };
+    };
+
+    /**
+     * Run pose detection on the current video frame and return every person's
+     * landmarks (empty when no one is seen or the runtime is unavailable).
+     *
+     * @param {Object} video The video element.
+     * @param {Number} timestampMs A monotonically increasing timestamp (ms).
+     * @return {Array} Each person's landmarks.
+     */
+    BodyPose.prototype.detect = function(video, timestampMs) {
+        if (!this.landmarker) {
+            return [];
+        }
+        var res = this.landmarker.detectForVideo(video, timestampMs);
+        return (res && res.landmarks) ? res.landmarks : [];
+    };
+
+    /**
      * Build the camera-navigation control: a toggle button in the HUD cluster and
      * a small mirrored preview with the control zones drawn on it. Flat-screen
      * only - the webcam is opened only when the learner switches it on, a clear
@@ -13560,6 +13952,10 @@ define('format_mnemo/vr', [], function() {
                 self.cameraNav.stop();
                 return;
             }
+            // Only one camera control at a time.
+            if (self.presenterNav && (self.presenterNav.active || self.presenterNav.starting)) {
+                self.presenterNav.stop();
+            }
             showHint();
             self.cameraNav.start(function(reason) {
                 // Failed to open: show why, without the live indicator.
@@ -13578,6 +13974,112 @@ define('format_mnemo/vr', [], function() {
         if (this.renderer && this.renderer.xr && this.renderer.xr.addEventListener) {
             this.renderer.xr.addEventListener('sessionstart', function() {
                 self.cameraNav.stop();
+            });
+        }
+    };
+
+    /**
+     * Build presenter mode for teachers: a button that switches the webcam to
+     * full-body gestures (see BodyPose), a small mirrored preview, and a large
+     * banner the audience can read showing what the scene is doing and how to
+     * drive it. The camera opens only when the teacher turns presenter mode on,
+     * is analysed on this computer, and is released when it is turned off, the
+     * page is hidden or a headset is entered. Only one camera control runs at a
+     * time, so turning this on stops the learner camera navigation.
+     */
+    Cyberspace.prototype.buildPresenter = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'format-mnemo__presenter-btn';
+        button.textContent = s.presenter || 'Presenter mode';
+        button.setAttribute('aria-pressed', 'false');
+        this.controlsRight.appendChild(button);
+
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__presenter';
+        panel.hidden = true;
+        var video = document.createElement('video');
+        video.className = 'format-mnemo__presenter-video';
+        video.muted = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('aria-hidden', 'true');
+        var text = document.createElement('div');
+        text.className = 'format-mnemo__presenter-text';
+        var status = document.createElement('div');
+        status.className = 'format-mnemo__presenter-status';
+        status.setAttribute('role', 'status');
+        var hint = document.createElement('div');
+        hint.className = 'format-mnemo__presenter-hint';
+        text.appendChild(status);
+        text.appendChild(hint);
+        panel.appendChild(video);
+        panel.appendChild(text);
+        this.root.appendChild(panel);
+
+        var analysis = document.createElement('canvas');
+        analysis.width = 48;
+        analysis.height = 36;
+        this.presenterNav = new CameraNav(this, {video: video, canvas: analysis, body: true});
+
+        // The banner: a status line, and the gesture guide while tracking.
+        var show = function(statusText, hintText) {
+            status.textContent = statusText || '';
+            hint.textContent = hintText || '';
+            hint.hidden = !hintText;
+        };
+        var describe = function(state) {
+            if (state === 'calibrating') {
+                show(s.presenter_calibrating);
+            } else if (state === 'tracking') {
+                show(s.presenter_tracking, s.presenter_hint);
+            } else if (state === 'paused') {
+                show(s.presenter_paused, s.presenter_resume);
+            } else if (state === 'lost') {
+                show(s.presenter_lost);
+            }
+        };
+        this.presenterNav.onstatus = describe;
+        this.presenterNav.onpose = function() {
+            show(s.presenter_lost);
+        };
+        this.presenterNav.onposefail = function() {
+            show(s.presenter_failed);
+        };
+        this.presenterNav.onchange = function(on) {
+            button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            button.classList.toggle('format-mnemo__presenter-btn--on', on);
+            panel.classList.toggle('format-mnemo__presenter--live', on);
+            panel.hidden = !on;
+        };
+
+        button.addEventListener('click', function() {
+            if (self.presenterNav.active || self.presenterNav.starting) {
+                self.presenterNav.stop();
+                return;
+            }
+            if (self.cameraNav && (self.cameraNav.active || self.cameraNav.starting)) {
+                self.cameraNav.stop();
+            }
+            show(s.presenter_loading);
+            self.presenterNav.start(function(reason) {
+                var msg = s.cameranav_denied || '';
+                if (reason === 'insecure') {
+                    msg = s.cameranav_insecure || '';
+                } else if (reason === 'unavailable') {
+                    msg = s.cameranav_unavailable || '';
+                }
+                show(msg);
+                panel.hidden = false;
+            }, function() {
+                show(self.presenterNav.body ? s.presenter_lost : s.presenter_loading);
+            });
+        });
+
+        if (this.renderer && this.renderer.xr && this.renderer.xr.addEventListener) {
+            this.renderer.xr.addEventListener('sessionstart', function() {
+                self.presenterNav.stop();
             });
         }
     };
@@ -15321,6 +15823,7 @@ define('format_mnemo/vr', [], function() {
         _CameraNav: CameraNav,
         _HandPose: HandPose,
         _HeadPose: HeadPose,
+        _BodyPose: BodyPose,
         _Cyberspace: Cyberspace,
         _framePreviewModel: framePreviewModel,
         _initSaveBar: initSaveBar,
