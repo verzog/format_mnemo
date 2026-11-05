@@ -8263,46 +8263,75 @@ define('format_mnemo/vr', [], function() {
         this.controlsLeft.appendChild(btn);
         this.editButton = btn;
 
+        // Built with DOM methods and textContent (never innerHTML), so a label
+        // string can never be read as markup.
+        var el = function(tag, attrs, text) {
+            var node = document.createElement(tag);
+            Object.keys(attrs || {}).forEach(function(name) {
+                node.setAttribute(name, attrs[name]);
+            });
+            if (text !== undefined) {
+                node.textContent = text;
+            }
+            return node;
+        };
         var field = function(key, label, min, max, step) {
-            return '<label class="format-mnemo__editor-row">' +
-                '<span>' + label + '</span>' +
-                '<input type="range" data-mnemo-ed="' + key + '" min="' + min +
-                '" max="' + max + '" step="' + step + '">' +
-                '<output data-mnemo-out="' + key + '"></output>' +
-                '</label>';
+            var row = el('label', {'class': 'format-mnemo__editor-row'});
+            row.appendChild(el('span', {}, label));
+            row.appendChild(el('input', {
+                'type': 'range', 'data-mnemo-ed': key, 'min': String(min), 'max': String(max), 'step': String(step)
+            }));
+            row.appendChild(el('output', {'data-mnemo-out': key}));
+            return row;
+        };
+        var check = function(rowattr, inputattr, label) {
+            var row = el('label', {'class': 'format-mnemo__editor-snap'});
+            row.setAttribute(rowattr, '');
+            var input = el('input', {'type': 'checkbox'});
+            input.setAttribute(inputattr, '');
+            row.appendChild(input);
+            row.appendChild(el('span', {}, label));
+            return row;
+        };
+        var action = function(act, label, cls) {
+            var attrs = {'type': 'button', 'data-mnemo-ed-act': act};
+            if (cls) {
+                attrs['class'] = cls;
+            }
+            return el('button', attrs, label);
         };
         var panel = document.createElement('div');
         panel.className = 'format-mnemo__editor';
         panel.hidden = true;
-        panel.innerHTML =
-            '<div class="format-mnemo__editor-caption">' + (s.editediting || 'Editing') + '</div>' +
-            '<div class="format-mnemo__editor-title" data-mnemo-ed-name></div>' +
-            field('scale', s.editscale || 'Scale', 0.3, 4, 0.05) +
-            field('sx', s.editwidth || 'Width', 0.3, 4, 0.05) +
-            field('sy', s.editheight || 'Height', 0.3, 4, 0.05) +
-            field('sz', s.editdepth || 'Depth', 0.3, 4, 0.05) +
-            field('x', (s.editmove || 'Move') + ' X', -20, 20, 0.5) +
-            field('y', (s.editmove || 'Move') + ' Y', -10, 30, 0.5) +
-            field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5) +
-            field('rot', s.editrotate || 'Rotate', 0, 360, 1) +
-            field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05) +
-            field('texsize', s.edittexsize || 'Texture size', 0.25, 4, 0.05) +
-            '<label class="format-mnemo__editor-snap" data-mnemo-ed-snaprow>' +
-            '<input type="checkbox" data-mnemo-ed-snap>' +
-            '<span>' + (s.editsnap || 'Snap to grid') + '</span>' +
-            '</label>' +
-            '<label class="format-mnemo__editor-snap" data-mnemo-ed-snapsurfacerow>' +
-            '<input type="checkbox" data-mnemo-ed-snapsurface>' +
-            '<span>' + (s.editsnapsurface || 'Snap to surface') + '</span>' +
-            '</label>' +
-            '<div class="format-mnemo__editor-actions">' +
-            '<button type="button" data-mnemo-ed-act="save">' + (s.editsave || 'Save') + '</button>' +
-            '<button type="button" data-mnemo-ed-act="reset">' + (s.editreset || 'Reset') + '</button>' +
-            '<button type="button" data-mnemo-ed-act="close">' + (s.editclose || 'Close') + '</button>' +
-            '</div>' +
-            '<button type="button" class="format-mnemo__editor-delete" data-mnemo-ed-act="delete">' +
-            (s.editdelete || 'Delete') + '</button>' +
-            '<div class="format-mnemo__editor-status" data-mnemo-ed-status></div>';
+        var title = el('div', {'class': 'format-mnemo__editor-title'});
+        title.setAttribute('data-mnemo-ed-name', '');
+        var actions = el('div', {'class': 'format-mnemo__editor-actions'});
+        actions.appendChild(action('save', s.editsave || 'Save'));
+        actions.appendChild(action('reset', s.editreset || 'Reset'));
+        actions.appendChild(action('close', s.editclose || 'Close'));
+        var status = el('div', {'class': 'format-mnemo__editor-status'});
+        status.setAttribute('data-mnemo-ed-status', '');
+        [
+            el('div', {'class': 'format-mnemo__editor-caption'}, s.editediting || 'Editing'),
+            title,
+            field('scale', s.editscale || 'Scale', 0.3, 4, 0.05),
+            field('sx', s.editwidth || 'Width', 0.3, 4, 0.05),
+            field('sy', s.editheight || 'Height', 0.3, 4, 0.05),
+            field('sz', s.editdepth || 'Depth', 0.3, 4, 0.05),
+            field('x', (s.editmove || 'Move') + ' X', -20, 20, 0.5),
+            field('y', (s.editmove || 'Move') + ' Y', -10, 30, 0.5),
+            field('z', (s.editmove || 'Move') + ' Z', -20, 20, 0.5),
+            field('rot', s.editrotate || 'Rotate', 0, 360, 1),
+            field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05),
+            field('texsize', s.edittexsize || 'Texture size', 0.25, 4, 0.05),
+            check('data-mnemo-ed-snaprow', 'data-mnemo-ed-snap', s.editsnap || 'Snap to grid'),
+            check('data-mnemo-ed-snapsurfacerow', 'data-mnemo-ed-snapsurface', s.editsnapsurface || 'Snap to surface'),
+            actions,
+            action('delete', s.editdelete || 'Delete', 'format-mnemo__editor-delete'),
+            status
+        ].forEach(function(node) {
+            panel.appendChild(node);
+        });
         this.root.appendChild(panel);
         this.editorPanel = panel;
 
