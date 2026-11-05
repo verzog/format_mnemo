@@ -24,8 +24,8 @@
   </library>
   <library>
     <location>thirdparty/mediapipe</location>
-    <name>MediaPipe Tasks Vision (hand/face landmarkers + models)</name>
-    <description>On-device hand and face landmark detection (WASM runtime, ES module bundle and the hand/face landmarker model files) powering the optional pose-based camera navigation for flat-screen viewers.</description>
+    <name>MediaPipe Tasks Vision (hand/face/pose landmarkers + models)</name>
+    <description>On-device hand, face and body-pose landmark detection (WASM runtime, ES module bundle and the hand, face and pose_landmarker_lite model files) powering the optional pose-based camera navigation for flat-screen viewers and the teacher presenter mode.</description>
     <version>0.10.18</version>
     <license>Apache-2.0</license>
     <repository>https://github.com/google-ai-edge/mediapipe</repository>
