@@ -8296,7 +8296,7 @@ define('format_mnemo/vr', [], function() {
         var action = function(act, label, cls) {
             var attrs = {'type': 'button', 'data-mnemo-ed-act': act};
             if (cls) {
-                attrs['class'] = cls;
+                attrs.class = cls;
             }
             return el('button', attrs, label);
         };
