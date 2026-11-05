@@ -829,10 +829,7 @@ class asset_gallery {
         // is set (mirroring scene::get_scene_config); otherwise the preview
         // would run two Three.js instances. With an override, compressed models
         // fall back to the built-in uncompressed-glTF parser.
-        $customthree = !empty(get_config('format_mnemo', 'threeurl'));
-        $threeurl = $customthree
-            ? get_config('format_mnemo', 'threeurl')
-            : (new moodle_url('/course/format/mnemo/thirdparty/three.module.min.js'))->out(false);
+        [$threeurl, $customthree] = \format_mnemo\local\same_site::three_url();
         return [
             'threeurl' => $threeurl,
             'loaderurl' => (new moodle_url('/course/format/mnemo/js/three-esm-loader.js'))->out(false),
