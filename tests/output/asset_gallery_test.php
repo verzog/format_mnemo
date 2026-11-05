@@ -27,9 +27,8 @@ namespace format_mnemo\output;
 /**
  * Tests that the gallery resolves each texture and model to the right URL and
  * source (uploaded / url / bundled / none).
- *
- * @covers \format_mnemo\output\asset_gallery
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\output\asset_gallery::class)]
 final class asset_gallery_test extends \advanced_testcase {
     /**
      * Store a one-byte file in a system-context plugin file area.

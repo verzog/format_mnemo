@@ -26,9 +26,8 @@ namespace format_mnemo\external;
 
 /**
  * Tests for saving a non-activity scene object's transform per course.
- *
- * @covers \format_mnemo\external\set_scene_object
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\set_scene_object::class)]
 final class set_scene_object_test extends \advanced_testcase {
     /**
      * An editing teacher can save a scene object, keyed per course by slot key.

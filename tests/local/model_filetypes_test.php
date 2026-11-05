@@ -26,9 +26,8 @@ namespace format_mnemo\local;
 
 /**
  * Tests for registering the 3D model file types.
- *
- * @covers \format_mnemo\local\model_filetypes
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_filetypes::class)]
 final class model_filetypes_test extends \advanced_testcase {
     /**
      * Missing .glb and .fbx types are registered with their MIME types.

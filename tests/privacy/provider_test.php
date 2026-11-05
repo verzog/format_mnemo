@@ -20,6 +20,7 @@ use core_privacy\local\metadata\collection;
 use core_privacy\local\metadata\types\external_location;
 use core_privacy\local\metadata\types\subsystem_link;
 use core_privacy\local\metadata\types\user_preference;
+use core_privacy\local\request\writer;
 
 /**
  * Tests for the Mnemo course format's privacy provider metadata.
@@ -51,5 +52,36 @@ final class provider_test extends \advanced_testcase {
         foreach ($fields as $string) {
             $this->assertTrue(get_string_manager()->string_exists($string, 'format_mnemo'));
         }
+    }
+
+    /**
+     * Both preferences are exported for a user who has them, with their
+     * descriptions, and nothing is exported for a user who has neither.
+     */
+    public function test_export_user_preferences(): void {
+        $this->resetAfterTest();
+        $user = $this->getDataGenerator()->create_user();
+        $other = $this->getDataGenerator()->create_user();
+        $comfort = json_encode(['turnmode' => 'snap', 'snapangle' => 30]);
+        $keybinds = json_encode(['forward' => 'KeyW', 'fire' => 'left']);
+        set_user_preference('format_mnemo_comfort', $comfort, $user);
+        set_user_preference('format_mnemo_keybinds', $keybinds, $user);
+
+        provider::export_user_preferences($user->id);
+        $prefs = writer::with_context(\context_system::instance())->get_user_preferences('format_mnemo');
+        $this->assertSame($comfort, $prefs->format_mnemo_comfort->value);
+        $this->assertSame(
+            get_string('privacy:metadata:preference:comfort', 'format_mnemo'),
+            $prefs->format_mnemo_comfort->description
+        );
+        $this->assertSame($keybinds, $prefs->format_mnemo_keybinds->value);
+        $this->assertSame(
+            get_string('privacy:metadata:preference:keybinds', 'format_mnemo'),
+            $prefs->format_mnemo_keybinds->description
+        );
+
+        writer::reset();
+        provider::export_user_preferences($other->id);
+        $this->assertFalse(writer::with_context(\context_system::instance())->has_any_data());
     }
 }

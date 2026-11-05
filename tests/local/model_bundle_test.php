@@ -26,9 +26,8 @@ namespace format_mnemo\local;
 
 /**
  * Tests for multi-file model bundle (.zip) resolution and extraction.
- *
- * @covers \format_mnemo\local\model_bundle
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_bundle::class)]
 final class model_bundle_test extends \advanced_testcase {
     /**
      * Store a .zip bundle with the given entries in a model file area.

@@ -26,9 +26,8 @@ namespace format_mnemo\external;
 
 /**
  * Tests for structuring a readable activity's content into layout blocks.
- *
- * @covers \format_mnemo\external\get_content
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\get_content::class)]
 final class get_content_test extends \advanced_testcase {
     /**
      * A page's HTML is parsed into ordered heading, paragraph (with a link run),
@@ -357,6 +356,60 @@ final class get_content_test extends \advanced_testcase {
         $this->assertSame((int)$visible->id, $result['chapterid']);
         $this->assertSame([(int)$visible->id], array_column($result['chapters'], 'id'));
         $this->assertStringNotContainsString('Secret', json_encode($result));
+    }
+
+    /**
+     * Unusual links and image sources never break the response: every value
+     * passes the declared return types (as the web service layer checks), a
+     * link that would not keeps its text unlinked, and a plain web link stays
+     * a link.
+     */
+    public function test_unusual_links_pass_return_validation(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $student = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $page = $this->getDataGenerator()->create_module('page', ['course' => $course->id]);
+        $links = [
+            'web' => 'https://example.org/',
+            'mail' => 'mailto:someone@example.org',
+            'phone' => 'tel:+61200000000',
+            'anchor' => '#part2',
+            'relative' => 'view.php?id=1',
+            'spaced' => 'https://example.org/a b',
+            'unicode' => 'https://example.org/café',
+            'oddscheme' => 'weird+scheme:thing',
+        ];
+        $html = '<p>';
+        foreach ($links as $label => $href) {
+            $html .= '<a href="' . s($href) . '">Link' . $label . '</a> ';
+        }
+        $html .= '</p><img src="weird+scheme:pic" alt="Odd"><img src="https://example.org/ok.png" alt="Fine">';
+        $DB->set_field('page', 'content', $html, ['id' => $page->id]);
+        $DB->set_field('page', 'contentformat', FORMAT_HTML, ['id' => $page->id]);
+
+        $this->setUser($student);
+        $result = get_content::execute($page->cmid);
+        // Throws invalid_response_exception if any value fails its type.
+        $clean = \core_external\external_api::clean_returnvalue(get_content::execute_returns(), $result);
+
+        $text = '';
+        $hrefs = [];
+        foreach ($clean['blocks'] as $block) {
+            foreach ($block['runs'] ?? [] as $run) {
+                $text .= $run['text'] . ' ';
+                if (isset($run['href'])) {
+                    $hrefs[] = $run['href'];
+                }
+            }
+        }
+        foreach (array_keys($links) as $label) {
+            $this->assertStringContainsString('Link' . $label, $text);
+        }
+        $this->assertContains('https://example.org/', $hrefs);
+        $srcs = array_column(array_filter($clean['blocks'], fn($b) => $b['type'] === 'image'), 'src');
+        $this->assertContains('https://example.org/ok.png', $srcs);
     }
 
     /**

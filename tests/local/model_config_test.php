@@ -26,9 +26,8 @@ namespace format_mnemo\local;
 
 /**
  * Tests that model_config validates, stores and reads per-model settings.
- *
- * @covers \format_mnemo\local\model_config
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_config::class)]
 final class model_config_test extends \advanced_testcase {
     /**
      * Set then get round-trips a valid config, and a defaults-only config is
