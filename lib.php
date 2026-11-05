@@ -588,10 +588,25 @@ function format_mnemo_coursemodule_validation($formwrapper, $data) {
     if ($model === '') {
         return $errors;
     }
-    if (!\format_mnemo\local\scene_values::valid_model($model)) {
+    $isurl = (bool)preg_match('#^https?://#i', $model);
+    if ($isurl && !format_mnemo_external_models_allowed()) {
+        $errors['format_mnemo_building'] = get_string('activitybuilding_nourls', 'format_mnemo');
+    } else if (!\format_mnemo\local\scene_values::valid_model($model)) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
     }
     return $errors;
+}
+
+/**
+ * Whether teachers may give an activity a model URL on another site (the
+ * 'allowexternalmodels' admin setting). An unset value (before the setting is
+ * first saved) counts as allowed, matching the setting's default.
+ *
+ * @return bool True when activity model URLs are allowed.
+ */
+function format_mnemo_external_models_allowed(): bool {
+    $value = get_config('format_mnemo', 'allowexternalmodels');
+    return $value === false || !empty($value);
 }
 
 /**

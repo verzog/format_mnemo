@@ -70,6 +70,16 @@ if ($ADMIN->fulltree) {
         PARAM_URL
     ));
 
+    // Whether teachers may enter a full URL to a model on another site in an
+    // activity's building model field. On by default to keep existing courses
+    // working; turning it off keeps learners' browsers on this site's models.
+    $settings->add(new admin_setting_configcheckbox(
+        'format_mnemo/allowexternalmodels',
+        get_string('setting_allowexternalmodels', 'format_mnemo'),
+        get_string('setting_allowexternalmodels_desc', 'format_mnemo'),
+        1
+    ));
+
     // Upload a prop asset pack straight into Moodle instead of hosting it at a
     // URL. Files land in the 'assetpack' file area at system context and are
     // served via pluginfile; the loader reads them by the same
