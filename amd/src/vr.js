@@ -281,6 +281,11 @@ define('format_mnemo/vr', [], function() {
         this.navStrafe = 0; // Analog strafe from camera-gesture nav (-1..1).
         this.navRise = 0; // Analog rise from presenter-mode gestures (0..1).
         this.presenterCeiling = 60; // Highest a presenter can rise while walking.
+        this.presenterDwell = 1.5; // Seconds the pointer must rest on a sign to open it.
+        this.presenterPointing = false; // Presenter mode is driving the pointer.
+        this.dwellTarget = null; // The sign the presenter's pointer rests on.
+        this.dwellTime = 0; // How long it has rested there.
+        this.dwellDone = false; // That sign was opened; wait for the pointer to move off.
         this.cameraNav = null; // Webcam gesture-navigation driver (flat screen only).
         // Per-learner comfort settings (turn mode/angle, motion vignette,
         // movement speed). Seeded from the server user preference, falling back
@@ -11069,6 +11074,7 @@ define('format_mnemo/vr', [], function() {
             // crosshair instead of opening a node (see clickOpen).
             this.updateCameraNav(dt);
             this.updateDesktop(dt);
+            this.updatePresenterPoint(dt);
             this.updateDesktopHighlight();
             if (this.gestures) {
                 this.gestures.updateVignette(0, dt);
@@ -12602,6 +12608,7 @@ define('format_mnemo/vr', [], function() {
         this.bodyStatus = ''; // Last body status (lost, calibrating, paused, tracking).
         this.onstatus = null; // Optional callback(status) when the body status changes.
         this.onposefail = null; // Optional callback when body detection cannot load.
+        this.pointer = null; // Body mode: where an outstretched arm points, or null.
         // Tunables (the one place to adjust the feel): a deadzone that ignores
         // frame noise, a gain that maps motion energy to a full-scale axis, and
         // the steering rate. Smoothing is asymmetric and time-based - a short
@@ -12728,6 +12735,7 @@ define('format_mnemo/vr', [], function() {
     CameraNav.prototype.clearIntent = function() {
         this.energy = {left: 0, right: 0, fwd: 0, back: 0};
         this.intent = {turn: 0, move: 0, rise: 0};
+        this.pointer = null;
     };
 
     /**
@@ -12932,6 +12940,7 @@ define('format_mnemo/vr', [], function() {
         this.poseMove = this.blend(this.poseMove, it.move, frameDt);
         var turn = this.blend(this.intent.turn || 0, it.turn, frameDt);
         this.intent = {turn: turn, move: this.poseMove, rise: it.rise};
+        this.pointer = it.pointer || null;
     };
 
     /**
@@ -13284,6 +13293,7 @@ define('format_mnemo/vr', [], function() {
         if (this.body) {
             this.body.reset();
         }
+        this.pointer = null;
         this.setBodyStatus('');
         if (this.cs) {
             this.cs.navMove = 0;
@@ -13622,7 +13632,10 @@ define('format_mnemo/vr', [], function() {
      *   - turn the shoulders left or right to steer;
      *   - raise both hands above the head to rise;
      *   - cross the arms over the chest (held briefly) to pause or resume, so
-     *     the presenter can talk and gesture without moving the scene.
+     *     the presenter can talk and gesture without moving the scene;
+     *   - raise one hand above the shoulder to point: a pointer follows that
+     *     hand across the screen (the scene holds still meanwhile), and holding
+     *     it on a sign opens that activity.
      * The first moments of tracking calibrate the presenter's normal stance, so
      * every gesture is measured from how they usually stand.
      *
@@ -13645,6 +13658,10 @@ define('format_mnemo/vr', [], function() {
         this.switchRatio = 1.25; // How much closer someone else must look ...
         this.switchTime = 1.0; // ... and for how long, to take over.
         this.matchRadius = 0.25; // How far the followed person may move per frame.
+        this.pointRangeX = 1.5; // Hand offset from the body's middle (x width) to a screen edge.
+        this.pointCentreY = 0.6; // Hand height above the shoulders (x width) = screen middle.
+        this.pointRangeY = 0.6; // Hand height change (x width) to the top or bottom edge.
+        this.pointEase = 0.35; // Pointer smoothing per frame (0..1; 1 = none).
         this.reset();
     }
 
@@ -13660,6 +13677,7 @@ define('format_mnemo/vr', [], function() {
         this.paused = false;
         this.crossTime = 0;
         this.crossLatched = false;
+        this.pointer = null; // Smoothed pointer {x, y} in -1..1, or null.
     };
 
     /**
@@ -13718,7 +13736,47 @@ define('format_mnemo/vr', [], function() {
             };
             crossed = across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
         }
-        return {mid: mid, width: width, twist: twist, armsUp: armsUp, crossed: crossed};
+        var point = crossed || armsUp ? null : this.pointing(lm, mid, width);
+        return {mid: mid, width: width, twist: twist, armsUp: armsUp, crossed: crossed, point: point};
+    };
+
+    /**
+     * Where a pointing hand puts the pointer on the screen. Pointing is one
+     * hand raised above the shoulders with the other hand lowered (or out of
+     * view); both hands up is the rise gesture instead. The raised hand then
+     * works like a trackpad: its offset from the middle of the shoulders moves
+     * the pointer, mirrored so it reads like a mirror, with hand height a
+     * little above the shoulders as the middle of the screen.
+     *
+     * @param {Array} lm The person's pose landmarks.
+     * @param {Object} mid The shoulder midpoint.
+     * @param {Number} width The shoulder width.
+     * @return {Object|null} The raw pointer {x, y} in -1..1, or null.
+     */
+    BodyPose.prototype.pointing = function(lm, mid, width) {
+        var self = this;
+        var raised = function(w) {
+            return self.seen(w) && w.y < mid.y;
+        };
+        var lowered = function(w) {
+            return !self.seen(w) || w.y > mid.y + 0.5 * width;
+        };
+        var hand = null;
+        if (raised(lm[15]) && lowered(lm[16])) {
+            hand = lm[15];
+        } else if (raised(lm[16]) && lowered(lm[15])) {
+            hand = lm[16];
+        }
+        if (!hand) {
+            return null;
+        }
+        var clamp = function(v) {
+            return Math.max(-1, Math.min(1, v));
+        };
+        return {
+            x: clamp(-(hand.x - mid.x) / (this.pointRangeX * width)),
+            y: clamp(((mid.y - this.pointCentreY * width) - hand.y) / (this.pointRangeY * width))
+        };
     };
 
     /**
@@ -13803,18 +13861,20 @@ define('format_mnemo/vr', [], function() {
     /**
      * Turn one frame's people into the navigation intent and a status for the
      * on-screen banner: 'lost' (no one seen), 'calibrating' (learning the
-     * presenter's normal stance), 'paused' (arms crossed to pause) or
-     * 'tracking'. Movement is zero unless tracking.
+     * presenter's normal stance), 'paused' (arms crossed to pause), 'pointing'
+     * (one arm out: the pointer is set) or 'tracking'. Movement is zero unless
+     * tracking.
      *
      * @param {Array} poses Each person's landmarks.
      * @param {Number} dt Seconds since the last frame.
-     * @return {Object} {move, turn, rise, status}.
+     * @return {Object} {move, turn, rise, pointer, status}.
      */
     BodyPose.prototype.update = function(poses, dt) {
-        var still = {move: 0, turn: 0, rise: 0};
+        var still = {move: 0, turn: 0, rise: 0, pointer: null};
         var f = this.pick(poses, dt);
         if (!f) {
             this.crossTime = 0;
+            this.pointer = null;
             still.status = 'lost';
             return still;
         }
@@ -13842,13 +13902,25 @@ define('format_mnemo/vr', [], function() {
             this.crossLatched = false;
         }
         if (this.paused || f.crossed) {
+            this.pointer = null;
             still.status = this.paused ? 'paused' : 'tracking';
             return still;
         }
+        // Pointing: the scene holds still while the pointer follows the hand.
+        if (f.point) {
+            var p = this.pointer;
+            var a = this.pointEase;
+            this.pointer = p ? {x: p.x + (f.point.x - p.x) * a, y: p.y + (f.point.y - p.y) * a} : f.point;
+            still.pointer = this.pointer;
+            still.status = 'pointing';
+            return still;
+        }
+        this.pointer = null;
         return {
             move: this.axis(f.width / this.neutral.width - 1, this.leanDead, this.leanFull),
             turn: this.axis(f.twist - this.neutral.twist, this.turnDead, this.turnFull),
             rise: f.armsUp ? 1 : 0,
+            pointer: null,
             status: 'tracking'
         };
     };
@@ -14018,6 +14090,14 @@ define('format_mnemo/vr', [], function() {
         panel.appendChild(text);
         this.root.appendChild(panel);
 
+        // The pointer ring for point-and-hold, positioned over the scene.
+        var ring = document.createElement('div');
+        ring.className = 'format-mnemo__presenter-ring';
+        ring.hidden = true;
+        ring.setAttribute('aria-hidden', 'true');
+        this.root.appendChild(ring);
+        this.presenterRing = ring;
+
         var analysis = document.createElement('canvas');
         analysis.width = 48;
         analysis.height = 36;
@@ -14034,6 +14114,8 @@ define('format_mnemo/vr', [], function() {
                 show(s.presenter_calibrating);
             } else if (state === 'tracking') {
                 show(s.presenter_tracking, s.presenter_hint);
+            } else if (state === 'pointing') {
+                show(s.presenter_pointing);
             } else if (state === 'paused') {
                 show(s.presenter_paused, s.presenter_resume);
             } else if (state === 'lost') {
@@ -14082,6 +14164,96 @@ define('format_mnemo/vr', [], function() {
                 self.presenterNav.stop();
             });
         }
+    };
+
+    /**
+     * Drive the presenter's pointer for one frame. While presenter mode sees
+     * an outstretched arm, the pointer (shown as a ring) follows it, the sign
+     * under it lights up like a mouse hover, and resting on the same sign for
+     * presenterDwell seconds opens it - the ring fills as the time runs. Once a
+     * sign has opened, the pointer must move off it (or drop) before it can
+     * open again. When the arm drops the pointer is hidden, leaving the mouse
+     * pointer to the mouse.
+     *
+     * @param {Number} dt Delta time in seconds.
+     */
+    Cyberspace.prototype.updatePresenterPoint = function(dt) {
+        var nav = this.presenterNav;
+        var pointer = nav && nav.active ? nav.pointer : null;
+        var busy = this.editMode || this.placeMode || (this.game && this.game.isPlaying());
+        if (!pointer || busy) {
+            if (this.presenterPointing) {
+                this.presenterPointing = false;
+                this.pointerNdc.set(-2, -2);
+                this.showPresenterRing(null, 0);
+            }
+            this.dwellTarget = null;
+            this.dwellTime = 0;
+            this.dwellDone = false;
+            return;
+        }
+        this.presenterPointing = true;
+        this.pointerNdc.set(pointer.x, pointer.y);
+        this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+        var hits = this.raycaster.intersectObjects(this.interactive, false);
+        var target = hits.length ? hits[0].object : null;
+        if (target && target.userData && target.userData.readerContent) {
+            target = null; // The reader's text page is not a sign to open.
+        }
+        var step = this.dwellStep(target, dt);
+        this.showPresenterRing(pointer, step.progress);
+        if (step.open) {
+            this.activate(target);
+        }
+    };
+
+    /**
+     * Advance the point-and-hold timer: resting on the same target accumulates
+     * time towards presenterDwell, moving to another target (or off every
+     * target) starts again, and a target opens once, then waits until the
+     * pointer leaves it. Pure state, so it is unit tested.
+     *
+     * @param {Object|null} target The interactive object under the pointer.
+     * @param {Number} dt Delta time in seconds.
+     * @return {Object} {progress (0..1), open (true on the frame to open)}.
+     */
+    Cyberspace.prototype.dwellStep = function(target, dt) {
+        if (target !== this.dwellTarget) {
+            this.dwellTarget = target;
+            this.dwellTime = 0;
+            this.dwellDone = false;
+        }
+        if (!target || this.dwellDone) {
+            return {progress: 0, open: false};
+        }
+        this.dwellTime += Math.max(0, dt);
+        if (this.dwellTime >= this.presenterDwell) {
+            this.dwellDone = true;
+            return {progress: 1, open: true};
+        }
+        return {progress: this.dwellTime / this.presenterDwell, open: false};
+    };
+
+    /**
+     * Show (or hide) the presenter's pointer ring at a pointer position, filled
+     * to the given fraction of the hold time.
+     *
+     * @param {Object|null} pointer The pointer {x, y} in -1..1, or null to hide.
+     * @param {Number} progress How far the hold has run (0..1).
+     */
+    Cyberspace.prototype.showPresenterRing = function(pointer, progress) {
+        var ring = this.presenterRing;
+        if (!ring) {
+            return;
+        }
+        if (!pointer) {
+            ring.hidden = true;
+            return;
+        }
+        ring.hidden = false;
+        ring.style.left = ((pointer.x + 1) / 2 * 100) + '%';
+        ring.style.top = ((1 - pointer.y) / 2 * 100) + '%';
+        ring.style.setProperty('--mnemo-dwell', String(Math.round(progress * 100)));
     };
 
     /**

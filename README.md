@@ -299,6 +299,7 @@ head, so a webcam that only sees you from the waist up is enough.
 | Step or lean **back** | Fly backwards |
 | **Turn your shoulders** left or right | Steer |
 | **Raise both arms** above your head | Rise up (you drift back down when you lower them) |
+| **Raise one hand** above your shoulder to point | A ring follows that hand and the sign under it lights up; hold it on a sign for 1.5 seconds (the ring fills) to open that activity. The scene holds still while you point |
 | **Cross your arms** over your chest (hold for half a second) | Pause or resume, so you can talk and gesture freely |
 | Stand normally | Stay still |
 
@@ -311,7 +312,8 @@ stops when you switch to the list view, hide the tab or enter a headset. The
 camera is processed on the lectern PC only and is never recorded or uploaded.
 
 The feel can be adjusted after a trial run: the sensitivity values are the
-tunables at the top of `BodyPose` in `amd/src/vr.js`.
+tunables at the top of `BodyPose` in `amd/src/vr.js`, and the hold time to open
+a sign is `presenterDwell` (1.5 seconds) in the `Cyberspace` constructor.
 
 ### Testing in VR (e.g. a Meta Quest 2)
 

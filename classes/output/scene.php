@@ -917,6 +917,7 @@ class scene implements renderable, templatable {
                 'presenter_loading' => get_string('presenter_loading', 'format_mnemo'),
                 'presenter_lost' => get_string('presenter_lost', 'format_mnemo'),
                 'presenter_paused' => get_string('presenter_paused', 'format_mnemo'),
+                'presenter_pointing' => get_string('presenter_pointing', 'format_mnemo'),
                 'presenter_resume' => get_string('presenter_resume', 'format_mnemo'),
                 'presenter_tracking' => get_string('presenter_tracking', 'format_mnemo'),
                 'edit' => get_string('editlayout', 'format_mnemo'),

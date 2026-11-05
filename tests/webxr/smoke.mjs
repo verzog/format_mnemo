@@ -5203,6 +5203,76 @@ const scenarios = [
             return {pass, detail: `rose=${rose} cleared=${cleared} stopped=${stopped}`};
         }
     },
+    {
+        name: 'bodypose: one hand raised points (mirrored), and the scene holds still',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const base = window.__mnemoTest.mkBody;
+            // Raise the left hand (landmark 15) to (handX, handY) shoulder widths
+            // from the middle of the shoulders (handY up is positive).
+            const body = (o) => {
+                const lm = base(o);
+                if (o.handX !== undefined) {
+                    const w = o.w || 0.2;
+                    lm[15] = {x: 0.5 + o.handX * w, y: 0.5 - o.handY * w, z: 0, visibility: 1};
+                }
+                return lm;
+            };
+            const centre = bp.features(body({handX: 0, handY: 0.6}));
+            const right = bp.features(body({handX: 0.75, handY: 0.6})); // Image right = presenter's left.
+            const edge = bp.features(body({handX: 3, handY: 2}));
+            const chest = bp.features(body({handX: 0.5, handY: -0.3})); // Below the shoulders: not pointing.
+            const both = bp.features(body({up: true}));
+            const close = (a, b) => Math.abs(a - b) < 1e-9;
+            for (let t = 0; t < 1.6; t += 0.05) {
+                bp.update([body({})], 0.05); // Calibrate.
+            }
+            const it = bp.update([body({handX: 0.75, handY: 0.6, w: 0.3})], 0.05); // Pointing while leaning in.
+            const after = bp.update([body({})], 0.05);
+            const pass = centre.point && close(centre.point.x, 0) && close(centre.point.y, 0) &&
+                close(right.point.x, -0.5) && close(right.point.y, 0) &&
+                edge.point.x === -1 && edge.point.y === 1 && chest.point === null && both.point === null &&
+                it.status === 'pointing' && it.move === 0 && it.turn === 0 && it.pointer !== null &&
+                after.status === 'tracking' && after.pointer === null;
+            return {pass, detail: `centre=${centre.point && centre.point.x.toFixed(2)},${centre.point && centre.point.y.toFixed(2)} ` +
+                `right=${right.point && right.point.x.toFixed(2)} chest=${chest.point} status=${it.status} after=${after.status}`};
+        }
+    },
+    {
+        name: 'presenter: holding the pointer on a sign opens it once, moving off restarts',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.presenterDwell = 1.5;
+            self.dwellTarget = null;
+            self.dwellTime = 0;
+            self.dwellDone = false;
+            const a = {userData: {url: 'a'}};
+            const b = {userData: {url: 'b'}};
+            let opens = 0;
+            let progress = 0;
+            for (let t = 0; t < 1.0; t += 0.1) {
+                const st = self.dwellStep(a, 0.1);
+                opens += st.open ? 1 : 0;
+                progress = st.progress;
+            }
+            const midway = opens === 0 && progress > 0.5 && progress < 1;
+            self.dwellStep(b, 0.1); // Moved to another sign: starts again.
+            const restarted = self.dwellTime < 0.2;
+            for (let t = 0; t < 3; t += 0.1) {
+                opens += self.dwellStep(b, 0.1).open ? 1 : 0;
+            }
+            const once = opens === 1;
+            self.dwellStep(null, 0.1); // Off every sign.
+            for (let t = 0; t < 1.7; t += 0.1) {
+                opens += self.dwellStep(b, 0.1).open ? 1 : 0;
+            }
+            const again = opens === 2;
+            const pass = midway && restarted && once && again;
+            return {pass, detail: `midway=${midway} restarted=${restarted} once=${once} again=${again}`};
+        }
+    },
 ];
 
 const launchOpts = {args: ['--no-sandbox', '--use-gl=swiftshader']};
