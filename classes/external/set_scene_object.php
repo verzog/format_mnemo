@@ -30,6 +30,7 @@ use core_external\external_single_structure;
 use core_external\external_value;
 use context_course;
 use invalid_parameter_exception;
+use format_mnemo\local\scene_values;
 
 /**
  * Save the transform and brightness set for a non-activity scene object (a
@@ -37,9 +38,6 @@ use invalid_parameter_exception;
  * slot key. Guarded by the activity-editing capability on the course.
  */
 class set_scene_object extends external_api {
-    /** @var string Allowed shape of a scene-object slot key (type:index). */
-    const KEY_PATTERN = '/^[a-z]+:[0-9]+$/';
-
     /**
      * Parameters.
      *
@@ -109,7 +107,7 @@ class set_scene_object extends external_api {
             'brightness' => $brightness,
         ]);
 
-        if (!preg_match(self::KEY_PATTERN, $params['objkey'])) {
+        if (!scene_values::valid_key($params['objkey'])) {
             throw new invalid_parameter_exception('Invalid scene object key');
         }
 
@@ -119,20 +117,8 @@ class set_scene_object extends external_api {
 
         // Clamp to sane ranges so a misbehaving client cannot store extreme
         // values, and normalise the rotation.
-        $rotation = fmod((float)$params['rotation'], 360.0);
-        if ($rotation < 0) {
-            $rotation += 360.0;
-        }
-        $fields = [
-            'scale' => min(10.0, max(0.1, (float)$params['scale'])),
-            'scalex' => min(10.0, max(0.1, (float)$params['scalex'])),
-            'scaley' => min(10.0, max(0.1, (float)$params['scaley'])),
-            'scalez' => min(10.0, max(0.1, (float)$params['scalez'])),
-            'offsetx' => min(200.0, max(-200.0, (float)$params['offsetx'])),
-            'offsety' => min(200.0, max(-200.0, (float)$params['offsety'])),
-            'offsetz' => min(200.0, max(-200.0, (float)$params['offsetz'])),
-            'rotation' => $rotation,
-            'brightness' => min(5.0, max(0.0, (float)$params['brightness'])),
+        $fields = scene_values::transform($params) + [
+            'brightness' => scene_values::brightness($params['brightness']),
             'timemodified' => time(),
         ];
 

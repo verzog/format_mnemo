@@ -29,6 +29,7 @@ use core_external\external_function_parameters;
 use core_external\external_single_structure;
 use core_external\external_value;
 use context_module;
+use format_mnemo\local\scene_values;
 
 /**
  * Save the scale, position offset and rotation set for an activity's object
@@ -103,26 +104,7 @@ class set_transform extends external_api {
 
         // Clamp to sane ranges so a misbehaving client cannot store extreme
         // values that would break the scene, and normalise the rotation.
-        $scale = min(10.0, max(0.1, (float)$params['scale']));
-        $offsetx = min(200.0, max(-200.0, (float)$params['offsetx']));
-        $offsety = min(200.0, max(-200.0, (float)$params['offsety']));
-        $offsetz = min(200.0, max(-200.0, (float)$params['offsetz']));
-        $rotation = fmod((float)$params['rotation'], 360.0);
-        if ($rotation < 0) {
-            $rotation += 360.0;
-        }
-
-        $fields = [
-            'scale' => $scale,
-            'scalex' => min(10.0, max(0.1, (float)$params['scalex'])),
-            'scaley' => min(10.0, max(0.1, (float)$params['scaley'])),
-            'scalez' => min(10.0, max(0.1, (float)$params['scalez'])),
-            'offsetx' => $offsetx,
-            'offsety' => $offsety,
-            'offsetz' => $offsetz,
-            'rotation' => $rotation,
-            'timemodified' => time(),
-        ];
+        $fields = scene_values::transform($params) + ['timemodified' => time()];
         $record = $DB->get_record('format_mnemo_building', ['cmid' => $cm->id]);
         if ($record) {
             $DB->update_record('format_mnemo_building', (object)(['id' => $record->id] + $fields));

@@ -588,9 +588,7 @@ function format_mnemo_coursemodule_validation($formwrapper, $data) {
     if ($model === '') {
         return $errors;
     }
-    $isurl = (bool)preg_match('#^https?://#i', $model);
-    $isfile = (bool)preg_match('/^[A-Za-z0-9._-]+\.(glb|fbx|zip)$/i', $model);
-    if (!$isurl && !$isfile) {
+    if (!\format_mnemo\local\scene_values::valid_model($model)) {
         $errors['format_mnemo_building'] = get_string('activitybuilding_invalid', 'format_mnemo');
     }
     return $errors;

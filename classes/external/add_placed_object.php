@@ -31,6 +31,7 @@ use core_external\external_value;
 use context_course;
 use invalid_parameter_exception;
 use format_mnemo\output\asset_gallery;
+use format_mnemo\local\scene_values;
 
 /**
  * Place one decorative prop at a grid-snapped position with the in-view object
@@ -40,12 +41,6 @@ use format_mnemo\output\asset_gallery;
  * the scene offers. Guarded by the activity-editing capability on the course.
  */
 class add_placed_object extends external_api {
-    /** @var float Grid cell size the placement snaps to (world units). */
-    const GRID = 2.0;
-
-    /** @var float Half-extent clamp on placement coordinates (world units). */
-    const BOUND = 400.0;
-
     /**
      * Parameters.
      *
@@ -93,12 +88,8 @@ class add_placed_object extends external_api {
 
         // Snap to the placement grid and clamp to sane world bounds so a
         // misbehaving client cannot drop a prop at an extreme coordinate.
-        $snap = function (float $v): float {
-            $v = round($v / self::GRID) * self::GRID;
-            return min(self::BOUND, max(-self::BOUND, $v));
-        };
-        $basex = $snap((float)$params['x']);
-        $basez = $snap((float)$params['z']);
+        $basex = scene_values::placed_coordinate($params['x']);
+        $basez = scene_values::placed_coordinate($params['z']);
 
         $record = (object)[
             'courseid' => $params['courseid'],

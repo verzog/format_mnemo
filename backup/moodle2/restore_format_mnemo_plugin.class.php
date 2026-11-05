@@ -22,12 +22,19 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use format_mnemo\local\scene_values;
+
 /**
  * Restores the per-section topic images stored by the Mnemo format.
  *
  * Section format options themselves are restored generically by core; this
  * plugin re-attaches the files from the format's 'sectionimage' area, mapping
  * each old section id to the newly created one.
+ *
+ * A backup file is untrusted input (it may come from another site or have been
+ * edited by hand), so every scene value is held to the same rules as the web
+ * services and the activity form ({@see scene_values}): numbers are clamped,
+ * and a model, key or prop type that is not valid is dropped.
  */
 class restore_format_mnemo_plugin extends restore_format_plugin {
     /** @var array<int, int> Old-to-new id map for placed props, so a
@@ -91,13 +98,21 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
     public function process_mnemobuilding($data) {
         global $DB;
 
-        $data = (object)$data;
-        $data->cmid = $this->task->get_moduleid();
-        unset($data->id);
+        $data = (array)$data;
+        $model = trim((string)($data['model'] ?? ''));
+        if ($model !== '' && !scene_values::valid_model($model)) {
+            // Not a model file name or URL: keep the transform, drop the model.
+            $model = '';
+        }
+        $record = (object)(scene_values::transform($data) + [
+            'cmid' => $this->task->get_moduleid(),
+            'model' => $model,
+            'timemodified' => (int)($data['timemodified'] ?? 0),
+        ]);
         // A given module has at most one row (unique cmid); guard against a
         // pre-existing one from a partial/repeated restore.
-        if (!$DB->record_exists('format_mnemo_building', ['cmid' => $data->cmid])) {
-            $DB->insert_record('format_mnemo_building', $data);
+        if (!$DB->record_exists('format_mnemo_building', ['cmid' => $record->cmid])) {
+            $DB->insert_record('format_mnemo_building', $record);
         }
     }
 
@@ -126,11 +141,19 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
     public function process_mnemoplacedobj($data) {
         global $DB;
 
-        $data = (object)$data;
-        $oldid = (int)$data->id;
-        $data->courseid = $this->task->get_courseid();
-        unset($data->id);
-        $this->placedmap[$oldid] = (int)$DB->insert_record('format_mnemo_placedobj', $data);
+        $data = (array)$data;
+        $oldid = (int)($data['id'] ?? 0);
+        if (!scene_values::valid_prop_type($data['type'] ?? null)) {
+            return; // Not a safe model name; its transform is dropped as an orphan too.
+        }
+        $record = (object)[
+            'courseid' => $this->task->get_courseid(),
+            'type' => $data['type'],
+            'basex' => scene_values::placed_coordinate($data['basex'] ?? 0),
+            'basez' => scene_values::placed_coordinate($data['basez'] ?? 0),
+            'timecreated' => (int)($data['timecreated'] ?? 0),
+        ];
+        $this->placedmap[$oldid] = (int)$DB->insert_record('format_mnemo_placedobj', $record);
     }
 
     /**
@@ -145,23 +168,32 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
     public function process_mnemosceneobj($data) {
         global $DB;
 
-        $data = (object)$data;
-        $data->courseid = $this->task->get_courseid();
-        unset($data->id);
-        if (preg_match('/^placed:([0-9]+)$/', $data->objkey, $matches)) {
+        $data = (array)$data;
+        $objkey = $data['objkey'] ?? null;
+        if (!scene_values::valid_key($objkey)) {
+            return; // Not a valid slot key.
+        }
+        if (preg_match('/^placed:([0-9]+)$/', $objkey, $matches)) {
             $oldid = (int)$matches[1];
             if (!isset($this->placedmap[$oldid])) {
                 return; // Orphan transform: its prop was not restored.
             }
-            $data->objkey = 'placed:' . $this->placedmap[$oldid];
+            $objkey = 'placed:' . $this->placedmap[$oldid];
         }
+        $record = (object)(scene_values::transform($data) + [
+            'courseid' => $this->task->get_courseid(),
+            'objkey' => $objkey,
+            'brightness' => scene_values::brightness($data['brightness'] ?? 1.0),
+            'hidden' => empty($data['hidden']) ? 0 : 1,
+            'timemodified' => (int)($data['timemodified'] ?? 0),
+        ]);
         if (
             !$DB->record_exists(
                 'format_mnemo_sceneobj',
-                ['courseid' => $data->courseid, 'objkey' => $data->objkey]
+                ['courseid' => $record->courseid, 'objkey' => $record->objkey]
             )
         ) {
-            $DB->insert_record('format_mnemo_sceneobj', $data);
+            $DB->insert_record('format_mnemo_sceneobj', $record);
         }
     }
 }
