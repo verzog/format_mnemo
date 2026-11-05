@@ -163,6 +163,7 @@ $string['palette_neon'] = 'Neon (pink, cyan and orange)';
 $string['palette_neonorange'] = 'Neon orange';
 $string['place'] = 'Place objects';
 $string['placebarrier'] = 'Barrier';
+$string['placedlimit'] = 'This course already has the most placed objects allowed ({$a}). Remove one before placing another.';
 $string['placedone'] = 'Done placing';
 $string['placehint'] = 'Pick an object, then click a grid square to place it.';
 $string['placekiosk'] = 'Kiosk';

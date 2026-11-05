@@ -53,6 +53,9 @@ class scene_values {
     /** @var float Half-extent clamp on placed-prop coordinates (world units). */
     const BOUND = 400.0;
 
+    /** @var int The most teacher-placed props one course may hold. */
+    const MAX_PLACED = 500;
+
     /**
      * Clamp a number into a range, treating a non-finite value as the default.
      *

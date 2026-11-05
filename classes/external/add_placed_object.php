@@ -88,6 +88,12 @@ class add_placed_object extends external_api {
 
         // Snap to the placement grid and clamp to sane world bounds so a
         // misbehaving client cannot drop a prop at an extreme coordinate.
+        // Every learner's scene loads every placed prop, so cap how many a
+        // course may hold.
+        if ($DB->count_records('format_mnemo_placedobj', ['courseid' => $params['courseid']]) >= scene_values::MAX_PLACED) {
+            throw new \moodle_exception('placedlimit', 'format_mnemo', '', scene_values::MAX_PLACED);
+        }
+
         $basex = scene_values::placed_coordinate($params['x']);
         $basez = scene_values::placed_coordinate($params['z']);
 
