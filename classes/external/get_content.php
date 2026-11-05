@@ -424,6 +424,10 @@ class get_content extends external_api {
             // Skip data URIs (already inline, and potentially huge) and empties.
             return;
         }
+        $src = self::clean_url($src);
+        if ($src === null) {
+            return; // A source the return type would reject; skip the image.
+        }
         $block = ['type' => 'image', 'src' => $src, 'alt' => self::clean($img->getAttribute('alt'))];
         $w = (int)$img->getAttribute('width');
         $h = (int)$img->getAttribute('height');
@@ -533,14 +537,32 @@ class get_content extends external_api {
             }
             $childhref = $href;
             if ($tag === 'a') {
-                $candidate = trim((string)$child->getAttribute('href'));
                 // Only real navigable links, never javascript: or empty anchors.
-                if ($candidate !== '' && stripos($candidate, 'javascript:') !== 0) {
+                // A link the return type would reject keeps its text, unlinked.
+                $candidate = self::clean_url((string)$child->getAttribute('href'));
+                if ($candidate !== null) {
                     $childhref = $candidate;
                 }
             }
             self::collect_runs($child, $childhref, $runs);
         }
+    }
+
+    /**
+     * A URL that will pass the PARAM_URL return check unchanged, or null.
+     * Moodle rejects the whole response when a returned value changes on
+     * cleaning, so a link or image source it would alter is dropped here
+     * instead of breaking the reader. javascript: URLs are never returned.
+     *
+     * @param string $url The raw URL.
+     * @return string|null The URL, or null when it is empty or not acceptable.
+     */
+    protected static function clean_url(string $url): ?string {
+        $url = trim($url);
+        if ($url === '' || stripos($url, 'javascript:') === 0) {
+            return null;
+        }
+        return clean_param($url, PARAM_URL) === $url ? $url : null;
     }
 
     /**
