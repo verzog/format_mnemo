@@ -34,9 +34,9 @@ if ($ADMIN->fulltree) {
 
     // URL of the Three.js ES module. Left blank, the plugin loads the copy it
     // bundles (thirdparty/three.module.min.js). Override only to point at a
-    // shared or newer hosted copy; it must be an ES module build that exports
-    // the THREE namespace.
-    $settings->add(new admin_setting_configtext(
+    // shared or newer copy on this Moodle site; it must be an ES module build
+    // that exports the THREE namespace. A URL on another site is refused.
+    $settings->add(new \format_mnemo\admin\setting_samesiteurl(
         'format_mnemo/threeurl',
         get_string('setting_threeurl', 'format_mnemo'),
         get_string('setting_threeurl_desc', 'format_mnemo'),

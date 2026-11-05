@@ -27,9 +27,8 @@ namespace format_mnemo\local;
 /**
  * Tests reading credits from glTF, merging typed credits, licence flags and
  * the credit line.
- *
- * @covers \format_mnemo\local\model_licence
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_licence::class)]
 final class model_licence_test extends \advanced_testcase {
     /** @var array The asset block of a Sketchfab download. */
     const SKETCHFAB = [
@@ -96,11 +95,11 @@ final class model_licence_test extends \advanced_testcase {
     /**
      * Each licence is sorted into the right flags.
      *
-     * @dataProvider classify_provider
      * @param string|null $licence The licence text.
      * @param string|null $copyright The copyright notice.
      * @param string[] $expected The flags expected to be true.
      */
+    #[\PHPUnit\Framework\Attributes\DataProvider('classify_provider')]
     public function test_classify(?string $licence, ?string $copyright, array $expected): void {
         $kind = model_licence::classify(['licence' => $licence, 'copyright' => $copyright]);
         $this->assertEqualsCanonicalizing($expected, array_keys(array_filter($kind)));

@@ -26,10 +26,9 @@ namespace format_mnemo\external;
 
 /**
  * Tests for placing and removing teacher-placed decorative props.
- *
- * @covers \format_mnemo\external\add_placed_object
- * @covers \format_mnemo\external\remove_placed_object
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\add_placed_object::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\remove_placed_object::class)]
 final class placed_object_test extends \advanced_testcase {
     /**
      * An editing teacher can place a prop; its position is grid-snapped.
@@ -53,6 +52,37 @@ final class placed_object_test extends \advanced_testcase {
         $this->assertEquals($course->id, $row->courseid);
         $this->assertEqualsWithDelta(4.0, (float)$row->basex, 1e-6);
         $this->assertEqualsWithDelta(-6.0, (float)$row->basez, 1e-6);
+    }
+
+    /**
+     * Once a course holds the most placed props allowed, another is refused,
+     * and removing one makes room again.
+     */
+    public function test_placed_prop_limit(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $teacher = $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+        $this->setUser($teacher);
+
+        $rows = [];
+        for ($i = 0; $i < \format_mnemo\local\scene_values::MAX_PLACED; $i++) {
+            $rows[] = (object)['courseid' => $course->id, 'type' => 'lamp', 'basex' => 0, 'basez' => 0, 'timecreated' => 1];
+        }
+        $DB->insert_records('format_mnemo_placedobj', $rows);
+
+        try {
+            add_placed_object::execute($course->id, 'lamp', 0.0, 0.0);
+            $this->fail('A prop over the limit was placed.');
+        } catch (\moodle_exception $e) {
+            $this->assertSame('placedlimit', $e->errorcode);
+        }
+
+        $first = $DB->get_field('format_mnemo_placedobj', 'MIN(id)', ['courseid' => $course->id]);
+        remove_placed_object::execute($course->id, (int)$first);
+        $result = add_placed_object::execute($course->id, 'lamp', 0.0, 0.0);
+        $this->assertGreaterThan(0, $result['id']);
     }
 
     /**

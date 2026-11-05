@@ -27,9 +27,8 @@ namespace format_mnemo\local;
 /**
  * Tests which files make up a model and that deleting removes them, the
  * lite copy, unpacked bundles and the model's settings, and nothing else.
- *
- * @covers \format_mnemo\local\model_store
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_store::class)]
 final class model_store_test extends \advanced_testcase {
     /**
      * Store a file in a system-context plugin file area.
