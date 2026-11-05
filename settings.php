@@ -185,6 +185,16 @@ if ($ADMIN->fulltree) {
         1
     ));
 
+    // Presenter mode: lets teachers (format/mnemo:present) drive the scene with
+    // full-body gestures from a lectern webcam during a lecture. Untick to
+    // remove it site-wide.
+    $settings->add(new admin_setting_configcheckbox(
+        'format_mnemo/presentermode',
+        get_string('setting_presentermode', 'format_mnemo'),
+        get_string('setting_presentermode_desc', 'format_mnemo'),
+        1
+    ));
+
     // Sun and moon. In every environment one celestial body follows the site
     // clock — the sun by day, the moon by night. Each can be given its own
     // asset: a flat image that skins the glowing disc, or a 3D .glb model placed

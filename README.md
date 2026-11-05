@@ -520,6 +520,13 @@ Void, whose streets float in space.
   script runs on every Mnemo course page with the learner's session.
 - **Default environment** — the world selected for newly created courses
   (teachers can switch it per course).
+- **Presenter mode** — on by default. Lets teachers with the **Use presenter
+  mode** capability (`format/mnemo:present`; editing teachers, non-editing
+  teachers and managers by default) drive the scene with full-body gestures from
+  a lectern webcam during a lecture. Only the person closest to the camera is
+  followed; the camera is used only while the teacher has presenter mode on, is
+  processed on that computer and is never uploaded or recorded. Untick to remove
+  it site-wide.
 - **Cyberspace / Grid / Void look** — each environment has its own section, and
   every course on that world shares its look:
   - **Neon palette** — the dominant glow colour of the data structures.
@@ -685,7 +692,7 @@ scene keeps its mouse/keyboard/touch controls.
 When it can, the control upgrades from simple frame-motion detection to
 **on-device hand- and head-pose recognition** using MediaPipe Tasks Vision, all
 vendored same-origin under `thirdparty/mediapipe/` (the ES module bundle, the
-WASM runtime and the hand and face landmark models), so **no external host is
+WASM runtime and the hand, face and body-pose landmark models), so **no external host is
 contacted**. With pose recognition you **turn your head to steer and tilt it to
 aim up or down**, **open your palm to stop**, and **make a fist and pull it
 toward you to glide forward** — and in the arcade game you **make a finger gun
@@ -835,6 +842,11 @@ inside a full Moodle tree with `grunt amd` and commit both build files.
   <https://threejs.org>. Bundled unmodified at
   `thirdparty/three.module.min.js`; upstream licence at
   `thirdparty/three.js-LICENSE.txt`. Declared in `thirdpartylibs.xml`.
+- **MediaPipe Tasks Vision** `0.10.18` — Apache licence 2.0, © The MediaPipe
+  Authors, <https://github.com/google-ai-edge/mediapipe>. The ES module bundle,
+  WASM runtime and the hand, face and body-pose (`pose_landmarker_lite`) model
+  files are bundled unmodified under `thirdparty/mediapipe/`; upstream licence at
+  `thirdparty/mediapipe-LICENSE.txt`. Declared in `thirdpartylibs.xml`.
 
 ## Licence
 

@@ -785,6 +785,14 @@ class scene implements renderable, templatable {
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/hand_landmarker.task'))->out(false),
             'mediapipefacemodelurl' =>
                 (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/face_landmarker.task'))->out(false),
+            // Presenter mode (full-body gestures from a lectern webcam): offered
+            // only to users with format/mnemo:present, while the site-wide
+            // setting is on (an unset value counts as on), with the body-pose
+            // model it uses.
+            'presenter' => get_config('format_mnemo', 'presentermode') !== '0'
+                && has_capability('format/mnemo:present', context_course::instance((int)$course->id)),
+            'mediapipeposemodelurl' =>
+                (new moodle_url('/course/format/mnemo/thirdparty/mediapipe/models/pose_landmarker_lite.task'))->out(false),
             // Optional arcade game mode (off by default): a light-hearted
             // shoot-the-targets mini-game overlaid on the scene.
             'game' => !empty($envconfig('game', 0)),
