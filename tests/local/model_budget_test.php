@@ -26,10 +26,9 @@ namespace format_mnemo\local;
 
 /**
  * Tests the triangle counting, the budget warnings and the upload checks.
- *
- * @covers \format_mnemo\local\model_budget
- * @covers \format_mnemo\admin\setting_modelupload
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_budget::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\admin\setting_modelupload::class)]
 final class model_budget_test extends \advanced_testcase {
     /**
      * Build GLB bytes holding the given glTF JSON (no binary chunk).
@@ -144,10 +143,10 @@ final class model_budget_test extends \advanced_testcase {
     /**
      * Triangles are counted from accessor counts, by primitive mode and use.
      *
-     * @dataProvider triangle_provider
      * @param array $gltf The glTF document.
      * @param int|null $expected The expected triangle count.
      */
+    #[\PHPUnit\Framework\Attributes\DataProvider('triangle_provider')]
     public function test_count_triangles(array $gltf, ?int $expected): void {
         $this->assertSame($expected, model_budget::count_triangles($gltf));
     }

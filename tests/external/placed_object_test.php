@@ -26,10 +26,9 @@ namespace format_mnemo\external;
 
 /**
  * Tests for placing and removing teacher-placed decorative props.
- *
- * @covers \format_mnemo\external\add_placed_object
- * @covers \format_mnemo\external\remove_placed_object
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\add_placed_object::class)]
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\external\remove_placed_object::class)]
 final class placed_object_test extends \advanced_testcase {
     /**
      * An editing teacher can place a prop; its position is grid-snapped.

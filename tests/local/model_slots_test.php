@@ -26,9 +26,8 @@ namespace format_mnemo\local;
 
 /**
  * Tests the slots, their choices, saving, and the aliases the 3D view gets.
- *
- * @covers \format_mnemo\local\model_slots
  */
+#[\PHPUnit\Framework\Attributes\CoversClass(\format_mnemo\local\model_slots::class)]
 final class model_slots_test extends \advanced_testcase {
     /**
      * Store a file in a system-context plugin file area.
