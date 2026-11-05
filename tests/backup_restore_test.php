@@ -30,7 +30,8 @@ use restore_controller;
 #[\PHPUnit\Framework\Attributes\CoversClass(\restore_format_mnemo_plugin::class)]
 final class backup_restore_test extends \advanced_testcase {
     /**
-     * Back up a course and restore it as a new course.
+     * Back up a course and restore it as a new course. Import mode keeps the
+     * unpacked backup in the temp folder, so the restore can read it by id.
      *
      * @param \stdClass $course The course to back up.
      * @return int The new course id.
@@ -46,7 +47,7 @@ final class backup_restore_test extends \advanced_testcase {
             $course->id,
             backup::FORMAT_MOODLE,
             backup::INTERACTIVE_NO,
-            backup::MODE_SAMESITE,
+            backup::MODE_IMPORT,
             $USER->id
         );
         $backupid = $bc->get_backupid();
@@ -58,7 +59,7 @@ final class backup_restore_test extends \advanced_testcase {
             $backupid,
             $newid,
             backup::INTERACTIVE_NO,
-            backup::MODE_SAMESITE,
+            backup::MODE_IMPORT,
             $USER->id,
             backup::TARGET_NEW_COURSE
         );
