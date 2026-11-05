@@ -462,6 +462,83 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * With activity model URLs turned off, the building field rejects a URL
+     * (file names still pass) and the scene ignores a URL that is already
+     * stored, so learners' browsers are not sent to the other site.
+     */
+    public function test_external_model_urls_can_be_turned_off(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(
+            ['format' => 'mnemo', 'numsections' => 1],
+            ['createsections' => true]
+        );
+        $remote = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Remote',
+        ]);
+        $local = $this->getDataGenerator()->create_module('page', [
+            'course' => $course->id, 'section' => 1, 'name' => 'Local',
+        ]);
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $remote->cmid, 'model' => 'https://cdn.example/x.glb', 'timemodified' => time(),
+        ]);
+        $DB->insert_record('format_mnemo_building', (object)[
+            'cmid' => $local->cmid, 'model' => 'library.glb', 'timemodified' => time(),
+        ]);
+
+        $buildings = function () use ($PAGE, $course): array {
+            $PAGE->set_context(context_course::instance($course->id));
+            $scene = new \format_mnemo\output\scene(course_get_format($course));
+            $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+            $out = [];
+            foreach ($config['sections'] as $section) {
+                foreach ($section['activities'] as $act) {
+                    $out[$act['id']] = $act['building'];
+                }
+            }
+            return $out;
+        };
+
+        // Allowed by default (setting unset), so existing courses keep working.
+        $this->assertTrue(format_mnemo_external_models_allowed());
+        $this->assertSame('https://cdn.example/x.glb', $buildings()[$remote->cmid]);
+
+        set_config('allowexternalmodels', 0, 'format_mnemo');
+        $this->assertFalse(format_mnemo_external_models_allowed());
+        $result = $buildings();
+        $this->assertNull($result[$remote->cmid]);
+        $this->assertSame('library.glb', $result[$local->cmid]);
+
+        $wrapper = new class ($course) {
+            /** @var \stdClass The course. */
+            private $course;
+
+            /**
+             * Store the course.
+             *
+             * @param \stdClass $course the course
+             */
+            public function __construct($course) {
+                $this->course = $course;
+            }
+
+            /**
+             * Return the course.
+             *
+             * @return \stdClass the course
+             */
+            public function get_course() {
+                return $this->course;
+            }
+        };
+        $errors = format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'https://cdn.example/x.glb']);
+        $this->assertSame(get_string('activitybuilding_nourls', 'format_mnemo'), $errors['format_mnemo_building']);
+        $this->assertSame([], format_mnemo_coursemodule_validation($wrapper, ['format_mnemo_building' => 'library.glb']));
+    }
+
+    /**
      * With no sign font/texture configured, the scene config carries null for
      * both, so the client keeps its bundled monospace font and flat neon frame.
      */

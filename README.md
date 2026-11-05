@@ -717,7 +717,7 @@ look (monospace font, flat neon frame, flat road and dark floor).
 | `thirdparty/three.module.min.js` | Bundled Three.js (see Third-party libraries). |
 | `thirdparty/jsm/` | Bundled Three.js addons: `GLTFLoader` + Draco/KTX2/meshopt decoders for compressed asset packs. |
 | `js/three-esm-loader.js` | Native ES-module shim: imports Three.js and the addon loaders, hands them to `vr.js`. |
-| `classes/privacy/provider.php` | Null privacy provider — the plugin stores no personal data. |
+| `classes/privacy/provider.php` | Privacy provider: declares the topic-image files, the two learner preferences, and the external hosts a learner's browser may fetch assets from. |
 | `classes/external/set_transform.php` | Web service backing the in-view editor: saves an activity's scale/position/rotation (capability-checked). |
 | `classes/external/set_scene_object.php` | Web service saving a non-activity scene object's transform + brightness per course, by slot key (capability-checked). |
 | `classes/external/add_placed_object.php` | Web service placing a decorative prop at a grid-snapped position per course (capability-checked). |
@@ -793,8 +793,24 @@ admin UI, not this plugin.)
 - The immersive scene is a progressive enhancement over a fully accessible,
   keyboard-navigable HTML list that is always present in the page.
 - Respects `prefers-reduced-motion` for the loading indicator.
-- The plugin stores **no personal data** — it implements the Moodle Privacy API
-  null provider (`classes/privacy/provider.php`).
+- The plugin's own tables hold **no personal data** (only scene layout). It
+  stores two learner preferences (comfort settings and control mapping), which
+  the Privacy API provider (`classes/privacy/provider.php`) declares and exports.
+- **External hosts.** Moodle itself sends nothing to other sites. But if an
+  admin sets a URL setting (the Three.js override, the prop asset pack, or a
+  font, texture, sun or moon URL) or a teacher gives an activity a model URL on
+  another site, **every learner's browser fetches that file from that site**,
+  which receives the learner's IP address and browser details. This is declared
+  in the Privacy API as the `externalassets` external location. For Australian
+  Privacy Principle 8 (cross-border disclosure), use only hosts your
+  organisation has assessed, or leave the URL settings blank and upload assets
+  into Moodle instead. The **Three.js module URL** is the most sensitive: that
+  script runs on every Mnemo course page with the learner's Moodle session, so
+  point it only at a host you control.
+- Admins can stop teachers using model URLs with **Allow model URLs on
+  activities** (on by default). When it is off, the activity form accepts only
+  model file names, and any URL already saved is ignored (the activity shows its
+  default building).
 
 ## Development
 
