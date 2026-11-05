@@ -36,6 +36,13 @@ use core_privacy\local\request\writer;
  * movement speed) and the desktop control mapping (movement keys, fire button,
  * look sensitivity and invert). All are declared here, and the preferences are
  * exported on request.
+ *
+ * Moodle itself sends nothing to other sites, but when an administrator or a
+ * teacher points the scene at an asset hosted elsewhere (a Three.js override,
+ * an external asset pack, texture or font URL, or an activity's model URL),
+ * each learner's browser fetches it from that site, which receives the
+ * learner's IP address and browser details. That is declared as an external
+ * location so it appears in the site's privacy registry.
  */
 class provider implements
     \core_privacy\local\metadata\provider,
@@ -51,6 +58,14 @@ class provider implements
             'core_files',
             [],
             'privacy:metadata:core_files'
+        );
+        $collection->add_external_location_link(
+            'externalassets',
+            [
+                'ipaddress' => 'privacy:metadata:externalassets:ipaddress',
+                'useragent' => 'privacy:metadata:externalassets:useragent',
+            ],
+            'privacy:metadata:externalassets'
         );
         $collection->add_user_preference(
             'format_mnemo_comfort',

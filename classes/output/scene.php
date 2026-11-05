@@ -493,13 +493,20 @@ class scene implements renderable, templatable {
 
     /**
      * The model file name/URL for a building row, or null when it holds only a
-     * transform (empty model).
+     * transform (empty model) or a URL to another site while the admin has
+     * turned activity model URLs off.
      *
      * @param stdClass|null $row A preload_building_rows() row, or null.
      * @return string|null
      */
     protected function row_model(?stdClass $row): ?string {
         if ($row === null || trim((string)$row->model) === '') {
+            return null;
+        }
+        // A URL to another site is ignored once the admin turns those off, so
+        // learners' browsers are not sent to it (the activity's default
+        // building is used instead).
+        if (preg_match('#^https?://#i', (string)$row->model) && !format_mnemo_external_models_allowed()) {
             return null;
         }
         return $row->model;
