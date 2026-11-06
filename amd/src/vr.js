@@ -13658,6 +13658,7 @@ define('format_mnemo/vr', [], function() {
         this.switchRatio = 1.25; // How much closer someone else must look ...
         this.switchTime = 1.0; // ... and for how long, to take over.
         this.matchRadius = 0.25; // How far the followed person may move per frame.
+        this.forgetTime = 1.0; // Seconds out of view before the presenter is forgotten.
         this.pointRangeX = 1.5; // Hand offset from the body's middle (x width) to a screen edge.
         this.pointCentreY = 0.6; // Hand height above the shoulders (x width) = screen middle.
         this.pointRangeY = 0.6; // Hand height change (x width) to the top or bottom edge.
@@ -13674,6 +13675,7 @@ define('format_mnemo/vr', [], function() {
         this.challenger = 0; // Seconds someone else has looked clearly closer.
         this.neutral = null; // Calibrated {width, twist}.
         this.calib = {time: 0, width: 0, twist: 0, n: 0};
+        this.lostTime = 0; // Seconds since anyone was seen.
         this.paused = false;
         this.crossTime = 0;
         this.crossLatched = false;
@@ -13800,8 +13802,18 @@ define('format_mnemo/vr', [], function() {
         }, this);
         if (!people.length) {
             this.challenger = 0;
+            // A dropped frame or two keeps the presenter; out of view for
+            // longer, forget them, so whoever steps up next (even at the same
+            // spot) is calibrated afresh rather than inheriting their stance.
+            this.lostTime += dt;
+            if (this.lostTime >= this.forgetTime) {
+                this.target = null;
+                this.neutral = null;
+                this.calib = {time: 0, width: 0, twist: 0, n: 0};
+            }
             return null;
         }
+        this.lostTime = 0;
         var closest = people.reduce(function(a, b) {
             return b.width > a.width ? b : a;
         });

@@ -5180,6 +5180,30 @@ const scenarios = [
         }
     },
     {
+        name: 'bodypose: a dropped frame keeps the presenter; out of view for long, the next person recalibrates',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const body = window.__mnemoTest.mkBody;
+            const run = (poses, secs) => {
+                let it = null;
+                for (let t = 0; t < secs; t += 0.05) {
+                    it = bp.update(poses, 0.05);
+                }
+                return it;
+            };
+            run([body({})], 1.6); // Calibrate a presenter of width 0.2.
+            run([], 0.2); // A brief dropout ...
+            const kept = run([body({w: 0.3})], 0.05); // ... then leaning in still drives.
+            run([], 1.2); // Gone for over a second.
+            // Someone wider steps up at the same spot: calibrates, does not fly.
+            const fresh = run([body({w: 0.3})], 0.05);
+            const pass = kept.status === 'tracking' && kept.move > 0.5 &&
+                fresh.status === 'calibrating' && fresh.move === 0;
+            return {pass, detail: `kept=${kept.status}/${kept.move.toFixed(2)} fresh=${fresh.status}/${fresh.move}`};
+        }
+    },
+    {
         name: 'cameranav: body mode applies rise, never falls back to frame motion, and stop clears it',
         fn: () => {
             const CN = window.__mnemoModule._CameraNav;
