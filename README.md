@@ -280,6 +280,39 @@ Alternatively install the ZIP via
 | Desktop / mobile | drag | `W`/`S`/`A`/`D` + `Shift` boost — learners walk (`Space` jumps), editing teachers fly (`R`/`F`/`Space` up/down) | click the node |
 | VR headset | head + point the controller/hand | point + **squeeze trigger** or **pinch** and hold to glide | point at the node and **pinch / trigger** |
 
+### Presenter mode (lecture theatres)
+
+Teachers with the **Use presenter mode** capability see a **Presenter mode**
+button in the 3D view (students never do). It is for demonstrating a course on
+the projector from the lectern: the lectern webcam watches the presenter and
+their body drives the scene. Everything is read from the shoulders, arms and
+head, so a webcam that only sees you from the waist up is enough.
+
+1. Open the course on the lectern PC (Chrome or Edge, over HTTPS) and click
+   **Presenter mode**. Allow the camera when the browser asks.
+2. **Stand still** for a moment while it learns your normal stance.
+3. Then:
+
+| Do this | The scene does this |
+| --- | --- |
+| Step or lean **toward** the screen | Fly forward (further = faster) |
+| Step or lean **back** | Fly backwards |
+| **Turn your shoulders** left or right | Steer |
+| **Raise both arms** above your head | Rise up (you drift back down when you lower them) |
+| **Cross your arms** over your chest (hold for half a second) | Pause or resume, so you can talk and gesture freely |
+| Stand normally | Stay still |
+
+Only the person **closest to the camera** is followed (judged by how wide their
+shoulders look); someone further back is ignored, and another person only takes
+over if they stay clearly closer for over a second. A banner along the bottom of
+the scene shows what presenter mode is doing in large text the audience can
+read. Click **Presenter mode** again to stop and release the camera; it also
+stops when you switch to the list view, hide the tab or enter a headset. The
+camera is processed on the lectern PC only and is never recorded or uploaded.
+
+The feel can be adjusted after a trial run: the sensitivity values are the
+tunables at the top of `BodyPose` in `amd/src/vr.js`.
+
 ### Testing in VR (e.g. a Meta Quest 2)
 
 The immersive view is **WebXR**, so it runs in a browser — there is no native app
