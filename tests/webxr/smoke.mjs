@@ -5297,6 +5297,85 @@ const scenarios = [
             return {pass, detail: `midway=${midway} restarted=${restarted} once=${once} again=${again}`};
         }
     },
+    {
+        name: 'presenter: pointing stops movement at once and holds the view up against gravity',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CN = window.__mnemoModule._CameraNav;
+            const CS = window.__mnemoModule._Cyberspace;
+            const cs = {yaw: 0, pitch: 0, navMove: 0, navStrafe: 0, navRise: 0, navHold: false};
+            const video = {readyState: 4, videoWidth: 640, currentTime: 1};
+            const nav = new CN(cs, {video: video, canvas: document.createElement('canvas'), body: true});
+            // Moving forward and turning, then a frame that reports pointing.
+            nav.poseMove = 0.8;
+            nav.intent = {turn: 0.6, move: 0.8, rise: 0};
+            nav.body = {
+                detect: () => [],
+                update: () => ({move: 0, turn: 0, rise: 0, pointer: {x: 0.1, y: 0.2}, status: 'pointing'}),
+                reset: () => {}
+            };
+            nav.sampleBody(video, 0.033);
+            nav.apply(0.016);
+            const stopped = nav.intent.move === 0 && nav.intent.turn === 0 && cs.navMove === 0 && cs.navHold === true;
+            // Walking, 30 units up: held while pointing, falls once released.
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.yaw = 0;
+            self.player = new THREE.Group();
+            self.player.position.set(0, 30, 0);
+            self.velocityY = 0;
+            self.onGround = false;
+            self.gravity = 30;
+            self.jumpSpeed = 8;
+            self.navMove = 0;
+            self.navStrafe = 0;
+            self.navRise = 0;
+            self.navHold = true;
+            self.actionActive = () => false;
+            self.comfortSpeedScale = () => 1;
+            for (let i = 0; i < 90; i++) {
+                self.updateDesktopWalk(1 / 60); // 1.5 s of pointing.
+            }
+            const held = Math.abs(self.player.position.y - 30) < 1e-6;
+            self.navHold = false;
+            self.updateDesktopWalk(0.1);
+            const falls = self.player.position.y < 30;
+            nav.stop();
+            const cleared = cs.navHold === false;
+            const pass = stopped && held && falls && cleared;
+            return {pass, detail: `stopped=${stopped} held=${held} y=${self.player.position.y.toFixed(2)} cleared=${cleared}`};
+        }
+    },
+    {
+        name: 'presenter: the pointer ring is hidden as a sign opens',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            const THREE = window.__mnemoTest.THREE;
+            self.pointerNdc = new THREE.Vector2(-2, -2);
+            self.camera = new THREE.PerspectiveCamera();
+            const sign = {userData: {url: 'x'}};
+            self.raycaster = {setFromCamera: () => {}, intersectObjects: () => [{object: sign}]};
+            self.interactive = [sign];
+            self.presenterNav = {active: true, pointer: {x: 0, y: 0}};
+            self.presenterRing = document.createElement('div');
+            self.presenterDwell = 1.5;
+            self.dwellTarget = null;
+            self.dwellTime = 0;
+            self.dwellDone = false;
+            let opened = 0;
+            let ringHiddenAtOpen = null;
+            self.activate = () => {
+                opened++;
+                ringHiddenAtOpen = self.presenterRing.hidden;
+            };
+            self.updatePresenterPoint(1.0);
+            const showing = self.presenterRing.hidden === false;
+            self.updatePresenterPoint(0.6); // Past 1.5 s: opens.
+            const pass = showing && opened === 1 && ringHiddenAtOpen === true && self.presenterRing.hidden === true;
+            return {pass, detail: `showing=${showing} opened=${opened} hiddenAtOpen=${ringHiddenAtOpen}`};
+        }
+    },
 ];
 
 const launchOpts = {args: ['--no-sandbox', '--use-gl=swiftshader']};

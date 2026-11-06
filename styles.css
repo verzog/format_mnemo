@@ -414,7 +414,7 @@
    and fills while it rests on a sign (--mnemo-dwell is 0..100). */
 .format-mnemo__presenter-ring {
     position: absolute;
-    z-index: 7;
+    z-index: 4; /* Below the activity panel (5), above the scene. */
     width: 56px;
     height: 56px;
     border-radius: 50%;

@@ -281,6 +281,7 @@ define('format_mnemo/vr', [], function() {
         this.navStrafe = 0; // Analog strafe from camera-gesture nav (-1..1).
         this.navRise = 0; // Analog rise from presenter-mode gestures (0..1).
         this.presenterCeiling = 60; // Highest a presenter can rise while walking.
+        this.navHold = false; // Presenter is pointing: hold the view still (no gravity).
         this.presenterDwell = 1.5; // Seconds the pointer must rest on a sign to open it.
         this.presenterPointing = false; // Presenter mode is driving the pointer.
         this.dwellTarget = null; // The sign the presenter's pointer rests on.
@@ -11433,10 +11434,11 @@ define('format_mnemo/vr', [], function() {
         if (nav && nav.active) {
             nav.sample();
             nav.apply(dt);
-        } else if (this.navMove || this.navStrafe || this.navRise) {
+        } else if (this.navMove || this.navStrafe || this.navRise || this.navHold) {
             this.navMove = 0;
             this.navStrafe = 0;
             this.navRise = 0;
+            this.navHold = false;
         }
     };
 
@@ -11613,7 +11615,13 @@ define('format_mnemo/vr', [], function() {
             this.velocityY = this.jumpSpeed;
             this.onGround = false;
         }
-        this.velocityY -= this.gravity * dt;
+        if (this.navHold) {
+            // Presenter pointing: hang where the view is, so a raised sign
+            // stays under the pointer while it is held.
+            this.velocityY = 0;
+        } else {
+            this.velocityY -= this.gravity * dt;
+        }
         this.player.position.y += this.velocityY * dt;
         if (this.player.position.y <= 0) {
             this.player.position.y = 0;
@@ -12937,10 +12945,17 @@ define('format_mnemo/vr', [], function() {
         var ts = window.performance ? window.performance.now() : Date.now();
         var it = this.body.update(this.body.detect(v, ts), Math.min(frameDt, this.maxFrameGap));
         this.setBodyStatus(it.status);
+        this.pointer = it.pointer || null;
+        if (this.pointer) {
+            // Pointing holds the scene still at once (no easing out), so the
+            // sign stays under the pointer while it is held.
+            this.poseMove = 0;
+            this.intent = {turn: 0, move: 0, rise: 0};
+            return;
+        }
         this.poseMove = this.blend(this.poseMove, it.move, frameDt);
         var turn = this.blend(this.intent.turn || 0, it.turn, frameDt);
         this.intent = {turn: turn, move: this.poseMove, rise: it.rise};
-        this.pointer = it.pointer || null;
     };
 
     /**
@@ -13141,6 +13156,8 @@ define('format_mnemo/vr', [], function() {
         this.cs.navMove = this.intent.move;
         this.cs.navStrafe = 0;
         this.cs.navRise = this.intent.rise || 0;
+        // While the presenter points, hold the view where it is (no falling).
+        this.cs.navHold = !!this.pointer;
         // Head tilt aims vertically: ease the look pitch toward the absolute
         // target so the finger-gun shot (and the view) can reach high targets.
         // Only while a face is driving it, so mouse-look pitch is left alone
@@ -13299,6 +13316,7 @@ define('format_mnemo/vr', [], function() {
             this.cs.navMove = 0;
             this.cs.navStrafe = 0;
             this.cs.navRise = 0;
+            this.cs.navHold = false;
         }
         if (this.onchange) {
             this.onchange(false);
@@ -14213,10 +14231,14 @@ define('format_mnemo/vr', [], function() {
             target = null; // The reader's text page is not a sign to open.
         }
         var step = this.dwellStep(target, dt);
-        this.showPresenterRing(pointer, step.progress);
         if (step.open) {
+            // Hide the ring first: the scene stops updating while the activity
+            // panel is open, so a ring left showing would sit over it.
+            this.showPresenterRing(null, 0);
             this.activate(target);
+            return;
         }
+        this.showPresenterRing(pointer, step.progress);
     };
 
     /**
