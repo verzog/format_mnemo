@@ -410,6 +410,27 @@
     color: #9fe6ff;
 }
 
+/* Presenter mode pointer: a ring that follows the presenter's pointing hand
+   and fills while it rests on a sign (--mnemo-dwell is 0..100). */
+.format-mnemo__presenter-ring {
+    position: absolute;
+    z-index: 4; /* Below the activity panel (5), above the scene. */
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: conic-gradient(rgba(0, 229, 255, 0.9) calc(var(--mnemo-dwell, 0) * 1%), rgba(0, 229, 255, 0.2) 0);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+.format-mnemo__presenter-ring::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: rgba(2, 6, 15, 0.55);
+}
+
 /* Optional arcade game: launch button (left of the comfort gear) + HUD overlay. */
 .format-mnemo__game-btn {
     width: 40px;
