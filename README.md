@@ -249,8 +249,8 @@ off).
 
 ## Installation
 
-1. Copy this directory to `course/format/mnemo` inside your Moodle site so the
-   path is `.../course/format/mnemo/version.php`.
+1. Copy this directory to `public/course/format/mnemo` inside your Moodle site
+   so the path is `.../public/course/format/mnemo/version.php`.
 2. Visit **Site administration → Notifications** and complete the plugin
    upgrade.
 3. (Optional) Configure the plugin under
@@ -799,8 +799,9 @@ admin UI, not this plugin.)
 - **File API** — `format_mnemo_pluginfile` serves uploaded asset packs and
   textures from the system context via `stored_file` / pluginfile URLs.
 - **MUC caching** (`db/caches.php`), **XMLDB** schema + `db/upgrade.php`,
-  **backup/restore** (`backup/moodle2/`), the **Privacy API** null provider,
-  **events/observers**, and standard **lang strings**.
+  **backup/restore** (`backup/moodle2/`), a **Privacy API** provider that
+  declares and exports the two learner preferences, **events/observers**, and
+  standard **lang strings**.
 
 **Client — vanilla JS, no UI framework**
 
