@@ -5205,9 +5205,18 @@ const scenarios = [
                 lm[12] = {x: cx - w / 2, y: sy, z: o.rz || 0, visibility: 1};
                 let lw = {x: cx + w / 2, y: sy + 1.5 * w};
                 let rw = {x: cx - w / 2, y: sy + 1.5 * w};
-                if (o.up) {
+                if (o.up) { // Both arms overhead: pure climb.
                     lw = {x: cx + w / 2, y: sy - 1.2 * w};
                     rw = {x: cx - w / 2, y: sy - 1.2 * w};
+                } else if (o.armsFwd) { // Both arms at shoulder height: fly forward.
+                    lw = {x: cx + w / 2, y: sy};
+                    rw = {x: cx - w / 2, y: sy};
+                } else if (o.arms45) { // Both arms at head height: forward + climb.
+                    lw = {x: cx + w / 2, y: sy - 0.6 * w};
+                    rw = {x: cx - w / 2, y: sy - 0.6 * w};
+                } else if (o.pullIn) { // Both hands drawn in to the waist: reverse.
+                    lw = {x: cx + 0.1 * w, y: sy + 1.0 * w};
+                    rw = {x: cx - 0.1 * w, y: sy + 1.0 * w};
                 } else if (o.crossed) {
                     lw = {x: cx - 0.3 * w, y: sy + 0.6 * w};
                     rw = {x: cx + 0.3 * w, y: sy + 0.6 * w};
@@ -5220,14 +5229,17 @@ const scenarios = [
             const stand = bp.features(body({}));
             const up = bp.features(body({up: true}));
             const cross = bp.features(body({crossed: true}));
-            const pass = Math.abs(stand.width - 0.2) < 1e-9 && !stand.armsUp && !stand.crossed &&
-                up.armsUp && !up.crossed && cross.crossed && !cross.armsUp &&
+            // Arms down sit well below the shoulders (armH very negative); arms
+            // overhead sit well above (armH > 1); crossed arms are flagged.
+            const pass = Math.abs(stand.width - 0.2) < 1e-9 && stand.armH < -1 && !stand.crossed &&
+                up.armH > 1 && !up.crossed && cross.crossed &&
                 bp.features(body({hidden: true})) === null && bp.detect(null, 0).length === 0;
-            return {pass, detail: `w=${stand.width.toFixed(2)} up=${up.armsUp} crossed=${cross.crossed}`};
+            return {pass, detail: `w=${stand.width.toFixed(2)} standH=${stand.armH.toFixed(2)} ` +
+                `upH=${up.armH.toFixed(2)} crossed=${cross.crossed}`};
         }
     },
     {
-        name: 'bodypose: calibrates the stance, then lean moves and shoulder twist steers',
+        name: 'bodypose: the arm-height dial flies forward/climb, pull-in reverses, shoulder twist steers',
         fn: () => {
             const BP = window.__mnemoModule._BodyPose;
             const bp = new BP(null);
@@ -5241,17 +5253,22 @@ const scenarios = [
             };
             const first = bp.update([body({})], 0.05);
             const settled = run({}, 1.6);
-            const lean = run({w: 0.27}, 0.1);
-            const back = run({w: 0.15}, 0.1);
+            const fwd = run({armsFwd: true}, 0.1); // Arms at shoulder height: forward, no climb.
+            const diag = run({arms45: true}, 0.1); // Arms at head height: forward + climb.
+            const climb = run({up: true}, 0.1); // Arms overhead: pure climb, no forward.
+            const rev = run({pullIn: true}, 0.1); // Hands in to the waist: reverse.
             const right = run({rz: 0.1}, 0.1);
             const left = run({lz: 0.1}, 0.1);
-            const rise = run({up: true}, 0.1);
             const pass = first.status === 'calibrating' && first.move === 0 &&
-                settled.status === 'tracking' && settled.move === 0 && settled.turn === 0 &&
-                lean.move > 0.5 && back.move < -0.3 && right.turn > 0 && left.turn < 0 &&
-                rise.rise === 1;
-            return {pass, detail: `first=${first.status} lean=${lean.move.toFixed(2)} back=${back.move.toFixed(2)} ` +
-                `right=${right.turn.toFixed(2)} left=${left.turn.toFixed(2)} rise=${rise.rise}`};
+                settled.status === 'tracking' && settled.move === 0 && settled.turn === 0 && settled.rise === 0 &&
+                fwd.move > 0.8 && fwd.rise === 0 &&
+                diag.move > 0.2 && diag.rise > 0.2 &&
+                climb.rise > 0.8 && Math.abs(climb.move) < 0.2 &&
+                rev.move < -0.5 &&
+                right.turn > 0 && left.turn < 0;
+            return {pass, detail: `fwd=${fwd.move.toFixed(2)}/${fwd.rise.toFixed(2)} ` +
+                `diag=${diag.move.toFixed(2)}/${diag.rise.toFixed(2)} climb=${climb.move.toFixed(2)}/${climb.rise.toFixed(2)} ` +
+                `rev=${rev.move.toFixed(2)} turn=${right.turn.toFixed(2)}/${left.turn.toFixed(2)}`};
         }
     },
     {
@@ -5271,12 +5288,12 @@ const scenarios = [
             const brief = run({crossed: true}, 0.2); // Too short to toggle.
             run({}, 0.1);
             run({crossed: true}, 0.7);
-            const paused = run({w: 0.3}, 0.2); // Leaning in while paused does nothing.
+            const paused = run({armsFwd: true}, 0.2); // Reaching forward while paused does nothing.
             run({crossed: true}, 0.7);
-            const resumed = run({w: 0.3}, 0.1);
+            const resumed = run({armsFwd: true}, 0.1);
             const pass = brief.status === 'tracking' && brief.move === 0 &&
                 paused.status === 'paused' && paused.move === 0 &&
-                resumed.status === 'tracking' && resumed.move > 0.5;
+                resumed.status === 'tracking' && resumed.move > 0.8;
             return {pass, detail: `brief=${brief.status} paused=${paused.status} resumed=${resumed.status}`};
         }
     },
@@ -5323,11 +5340,11 @@ const scenarios = [
             };
             run([body({})], 1.6); // Calibrate a presenter of width 0.2.
             run([], 0.2); // A brief dropout ...
-            const kept = run([body({w: 0.3})], 0.05); // ... then leaning in still drives.
+            const kept = run([body({armsFwd: true})], 0.05); // ... then reaching forward still drives.
             run([], 1.2); // Gone for over a second.
-            // Someone wider steps up at the same spot: calibrates, does not fly.
-            const fresh = run([body({w: 0.3})], 0.05);
-            const pass = kept.status === 'tracking' && kept.move > 0.5 &&
+            // Someone steps up at the same spot: calibrates afresh, does not fly.
+            const fresh = run([body({armsFwd: true})], 0.05);
+            const pass = kept.status === 'tracking' && kept.move > 0.8 &&
                 fresh.status === 'calibrating' && fresh.move === 0;
             return {pass, detail: `kept=${kept.status}/${kept.move.toFixed(2)} fresh=${fresh.status}/${fresh.move}`};
         }
