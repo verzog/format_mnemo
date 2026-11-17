@@ -1,0 +1,2 @@
+# Local dependencies for the dev-only WebXR smoke test (tests/webxr).
+/tests/webxr/node_modules

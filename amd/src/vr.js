@@ -13762,10 +13762,11 @@ define('format_mnemo/vr', [], function() {
      * camera, judged by how wide their shoulders appear - and turns their upper
      * body into navigation, so it works with a lectern webcam that only sees the
      * presenter from the waist up:
-     *   - step or lean toward the screen (shoulders look wider) to fly forward,
-     *     away from it (narrower) to fly back;
-     *   - turn the shoulders left or right to steer;
-     *   - raise both hands above the head to rise;
+     *   - raise both arms as an "arm-height dial": up to about shoulder height
+     *     to fly forward, higher to blend in a climb, fully overhead for a pure
+     *     climb, and arms down to stop;
+     *   - draw both hands in to the waist (standing in place) to fly back;
+     *   - turn the shoulders left or right to steer (works while flying);
      *   - cross the arms over the chest (held briefly) to pause or resume, so
      *     the presenter can talk and gesture without moving the scene;
      *   - raise one hand above the shoulder to point: a pointer follows that
@@ -13785,8 +13786,13 @@ define('format_mnemo/vr', [], function() {
         // Tunables (the one place to adjust the feel after a trial run).
         this.minVisibility = 0.5; // Ignore landmarks the model is unsure of.
         this.calibTime = 1.5; // Seconds of normal stance that set the neutral.
-        this.leanDead = 0.06; // Shoulder-width change ignored (fraction of neutral).
-        this.leanFull = 0.3; // Shoulder-width change for full forward/back speed.
+        this.liftDead = -0.5; // Wrist height (widths above shoulders) to start engaging forward.
+        this.liftFull = -0.1; // Wrist height for full forward engagement.
+        this.climbStart = 0.2; // Wrist height where the dial starts blending into a climb.
+        this.climbFull = 1.0; // Wrist height (arms overhead) for a pure climb.
+        this.reverseClose = 0.35; // Hand-to-middle distance (widths) to start reversing.
+        this.reverseFull = 0.12; // Hand-to-middle distance for full reverse.
+        this.reverseLiftGate = 0.2; // Reverse only when the arms are not raised (lift below this).
         this.turnDead = 0.12; // Shoulder twist ignored.
         this.turnFull = 0.5; // Shoulder twist for full steering.
         this.crossHold = 0.5; // Seconds arms must stay crossed to pause/resume.
@@ -13829,11 +13835,14 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * The gesture features of one person: shoulder midpoint and width (a proxy
-     * for distance from the camera), shoulder twist, both hands above the head,
-     * and arms crossed over the chest. Null when the shoulders are not seen.
+     * for distance from the camera), shoulder twist, the average height of the
+     * wrists above the shoulders (the forward/climb dial) and how far in from the
+     * body's middle they are drawn (the pull-in reverse), arms crossed over the
+     * chest, and a pointing hand. Null when the shoulders are not seen.
      *
      * @param {Array} lm The person's 33 pose landmarks.
-     * @return {Object|null} {mid, width, twist, armsUp, crossed}, or null.
+     * @return {Object|null} {mid, width, twist, armH, handClose, crossed, point},
+     *     or null.
      */
     BodyPose.prototype.features = function(lm) {
         if (!lm || lm.length < 17) {
@@ -13854,14 +13863,15 @@ define('format_mnemo/vr', [], function() {
         var twist = ((rs.z || 0) - (ls.z || 0)) / width;
         var lw = lm[15];
         var rw = lm[16];
-        var nose = lm[0];
-        var armsUp = false;
+        var armH = null;
+        var handClose = null;
         var crossed = false;
         if (this.seen(lw) && this.seen(rw)) {
-            // Above the head: above the nose when it is seen, else well above
-            // the shoulders.
-            var top = this.seen(nose) ? nose.y : mid.y - 0.6 * width;
-            armsUp = lw.y < top && rw.y < top;
+            // The wrists' average height above the shoulders (in widths, up is
+            // positive) drives the forward/climb dial; their average distance in
+            // from the body's middle drives the pull-in reverse.
+            armH = (mid.y - (lw.y + rw.y) / 2) / width;
+            handClose = (Math.abs(lw.x - mid.x) + Math.abs(rw.x - mid.x)) / 2 / width;
             // Crossed: each wrist past the middle, on the other shoulder's side,
             // at chest height.
             var margin = 0.1 * width;
@@ -13873,8 +13883,11 @@ define('format_mnemo/vr', [], function() {
             };
             crossed = across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
         }
-        var point = crossed || armsUp ? null : this.pointing(lm, mid, width);
-        return {mid: mid, width: width, twist: twist, armsUp: armsUp, crossed: crossed, point: point};
+        // Pointing is one hand raised with the other lowered, so both arms raised
+        // (the dial) never reads as pointing; crossed arms (pause) never do either.
+        var point = crossed ? null : this.pointing(lm, mid, width);
+        return {mid: mid, width: width, twist: twist, armH: armH, handClose: handClose,
+            crossed: crossed, point: point};
     };
 
     /**
@@ -14006,6 +14019,22 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Map a value onto 0..1: 0 at or below `lo`, 1 at or above `hi`, linear
+     * between. Used for the one-sided arm-height and pull-in ramps.
+     *
+     * @param {Number} v The value.
+     * @param {Number} lo The value mapping to 0.
+     * @param {Number} hi The value mapping to 1.
+     * @return {Number} The ramp in 0..1.
+     */
+    BodyPose.prototype.ramp = function(v, lo, hi) {
+        if (hi === lo) {
+            return 0;
+        }
+        return Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+    };
+
+    /**
      * Turn one frame's people into the navigation intent and a status for the
      * on-screen banner: 'lost' (no one seen), 'calibrating' (learning the
      * presenter's normal stance), 'paused' (arms crossed to pause), 'pointing'
@@ -14063,10 +14092,26 @@ define('format_mnemo/vr', [], function() {
             return still;
         }
         this.pointer = null;
+        // The arm-height dial: both arms raised toward shoulder height fly
+        // forward, and the higher they go the more that blends into a climb,
+        // until fully overhead is a pure climb (Decision A). Arms low and drawn
+        // in to the body's middle fly back, standing in place (Decision B).
+        var forward = 0;
+        var rise = 0;
+        var reverse = 0;
+        if (f.armH !== null) {
+            var lift = this.ramp(f.armH, this.liftDead, this.liftFull);
+            var climb = this.ramp(f.armH, this.climbStart, this.climbFull);
+            forward = lift * (1 - climb);
+            rise = lift * climb;
+            if (lift < this.reverseLiftGate && f.handClose !== null) {
+                reverse = this.ramp(this.reverseClose - f.handClose, 0, this.reverseClose - this.reverseFull);
+            }
+        }
         return {
-            move: this.axis(f.width / this.neutral.width - 1, this.leanDead, this.leanFull),
+            move: forward - reverse,
             turn: this.axis(f.twist - this.neutral.twist, this.turnDead, this.turnFull),
-            rise: f.armsUp ? 1 : 0,
+            rise: rise,
             pointer: null,
             status: 'tracking'
         };
