@@ -29,4 +29,4 @@ $plugin->requires  = 2025100600; // Moodle 5.1.
 $plugin->supported = [501, 503]; // Moodle 5.1 - 5.3.
 $plugin->component = 'format_mnemo';
 $plugin->maturity  = MATURITY_ALPHA;
-$plugin->release   = 'v0.1.0';
+$plugin->release   = '0.1.0';
