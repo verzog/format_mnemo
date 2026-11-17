@@ -13639,7 +13639,11 @@ define('format_mnemo/vr', [], function() {
     function HeadPose(landmarker) {
         this.landmarker = landmarker || null;
         this.yawGain = 0.5; // Head-yaw signal at which steering is full.
-        this.yawDeadzone = 0.1; // Ignore a head near centre.
+        // The neutral zone for head-turn steering: a head within this of the
+        // calibrated straight-ahead does not steer left/right. Kept wide so a
+        // still head (and small involuntary movement) never drifts the view;
+        // the low sensitivity level widens it further (divided by sensitivity).
+        this.yawDeadzone = 0.16; // Ignore a head near centre.
         // Pitch: a head-tilt signal (nose height relative to the eyes) is mapped
         // absolutely to a look angle, so tilting the head up looks up by a set
         // amount rather than spinning like yaw. The gain is the tilt away from

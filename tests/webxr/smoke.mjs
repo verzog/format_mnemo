@@ -3053,8 +3053,9 @@ const scenarios = [
                 nav.samplePose({}, 0.033);
             }
             const centred = Math.abs(nav.intent.turn) < 1e-6;
-            // Turning right of the resting pose (a lower yaw signal) steers right.
-            yaw = -0.3;
+            // A firm turn right of the resting pose (a lower yaw signal) steers
+            // right; a bigger turn than before, as the neutral zone is wider.
+            yaw = -0.5;
             for (let i = 0; i < 60; i++) {
                 nav.samplePose({}, 0.033);
             }
@@ -3080,14 +3081,14 @@ const scenarios = [
                 return hp.intent({yaw: yaw, pitch: 0, size: 0.4}, 0, 0.4, 0).turn;
             };
             // A modest right turn: low ignores it, high steers harder than normal.
-            const low = turnAt('low', -0.15);
-            const normal = turnAt('normal', -0.15);
-            const high = turnAt('high', -0.15);
+            const low = turnAt('low', -0.24);
+            const normal = turnAt('normal', -0.24);
+            const high = turnAt('high', -0.24);
             // A small turn steers gently (the response is squared), a firm turn
             // still reaches the full rate, and an unknown level means normal.
             const gentle = normal > 0 && normal < 0.05;
             const full = turnAt('normal', -0.7) === 1 && turnAt('normal', 0.7) === -1;
-            const unknown = turnAt('bogus', -0.15) === normal;
+            const unknown = turnAt('bogus', -0.24) === normal;
             // The calibrated neutral yaw is subtracted before the deadzone.
             const hp = new HeP(null);
             const offset = hp.intent({yaw: 0.3, pitch: 0, size: 0.4}, 0, 0.4, 0.3).turn === 0;
