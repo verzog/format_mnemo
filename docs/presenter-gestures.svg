@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 700" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="700" fill="#f3f4f6"/>
+  <text x="30" y="40" font-size="24" font-weight="700" fill="#111827">Presenter-mode poses</text>
+  <text x="30" y="64" font-size="14" fill="#4b5563">Both arms move together. Arms down = STOP; reach forward = GO; lift = CLIMB.</text>
+
+  <!-- Row 1 band -->
+  <rect x="20" y="84" width="1000" height="258" rx="12" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="36" y="108" font-size="15" font-weight="700" fill="#1f2937">1 · The arm-height dial — forward &#8596; climb  (one smooth motion · side view, facing the screen &#9654;)</text>
+
+  <!-- Row 1 figures: side view, facing right. head centres y=190 -->
+  <!-- STOP -->
+  <g transform="translate(150,190)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="14" y1="-2" x2="22" y2="-2" stroke-width="3"/>
+    <line x1="0" y1="15" x2="0" y2="90"/>
+    <line x1="0" y1="90" x2="16" y2="150"/>
+    <line x1="0" y1="90" x2="-12" y2="150"/>
+    <line x1="0" y1="25" x2="9" y2="76"/>
+    <circle cx="9" cy="76" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <text x="150" y="312" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">STOP</text>
+  <text x="150" y="330" font-size="12" fill="#6b7280" text-anchor="middle">arms down (rest)</text>
+
+  <!-- FORWARD -->
+  <g transform="translate(400,190)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="14" y1="-2" x2="22" y2="-2" stroke-width="3"/>
+    <line x1="0" y1="15" x2="0" y2="90"/>
+    <line x1="0" y1="90" x2="16" y2="150"/>
+    <line x1="0" y1="90" x2="-12" y2="150"/>
+    <line x1="0" y1="25" x2="52" y2="25"/>
+    <circle cx="52" cy="25" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <line x1="378" y1="300" x2="438" y2="300" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+  <text x="400" y="312" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">FORWARD</text>
+  <text x="400" y="330" font-size="12" fill="#6b7280" text-anchor="middle">arms out front · further = faster</text>
+
+  <!-- FORWARD + UP -->
+  <g transform="translate(650,190)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="14" y1="-2" x2="22" y2="-2" stroke-width="3"/>
+    <line x1="0" y1="15" x2="0" y2="90"/>
+    <line x1="0" y1="90" x2="16" y2="150"/>
+    <line x1="0" y1="90" x2="-12" y2="150"/>
+    <line x1="0" y1="25" x2="37" y2="-12"/>
+    <circle cx="37" cy="-12" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <line x1="636" y1="255" x2="680" y2="212" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+  <text x="650" y="312" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">FORWARD + UP</text>
+  <text x="650" y="330" font-size="12" fill="#6b7280" text-anchor="middle">the in-between — blends automatically</text>
+
+  <!-- CLIMB -->
+  <g transform="translate(900,190)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="14" y1="-2" x2="22" y2="-2" stroke-width="3"/>
+    <line x1="0" y1="15" x2="0" y2="90"/>
+    <line x1="0" y1="90" x2="16" y2="150"/>
+    <line x1="0" y1="90" x2="-12" y2="150"/>
+    <line x1="0" y1="25" x2="2" y2="-30"/>
+    <circle cx="2" cy="-30" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <line x1="930" y1="180" x2="930" y2="130" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+  <text x="900" y="312" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">CLIMB</text>
+  <text x="900" y="330" font-size="12" fill="#6b7280" text-anchor="middle">both arms up</text>
+
+  <!-- Row 2 band -->
+  <rect x="20" y="360" width="1000" height="310" rx="12" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="36" y="384" font-size="15" font-weight="700" fill="#1f2937">2 · The other gestures  (front view)</text>
+
+  <!-- Row 2 figures: front view. head centres y=470 -->
+  <!-- STEER -->
+  <g transform="translate(150,470)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="-22" y1="25" x2="22" y2="25"/>
+    <line x1="0" y1="25" x2="0" y2="90"/>
+    <line x1="-16" y1="90" x2="16" y2="90"/>
+    <line x1="-16" y1="90" x2="-18" y2="150"/>
+    <line x1="16" y1="90" x2="18" y2="150"/>
+    <line x1="-22" y1="25" x2="-27" y2="78"/>
+    <line x1="22" y1="25" x2="27" y2="78"/>
+    <path d="M-34,-34 A 34,20 0 0 1 34,-34" fill="none" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+    <path d="M34,-34 A 34,20 0 0 0 -34,-34" fill="none" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+  </g>
+  <text x="150" y="620" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">STEER / LOOK</text>
+  <text x="150" y="638" font-size="12" fill="#6b7280" text-anchor="middle">turn your shoulders L / R</text>
+  <text x="150" y="654" font-size="12" fill="#6b7280" text-anchor="middle">(works while flying)</text>
+
+  <!-- REVERSE -->
+  <g transform="translate(400,470)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="-22" y1="25" x2="22" y2="25"/>
+    <line x1="0" y1="25" x2="0" y2="90"/>
+    <line x1="-16" y1="90" x2="16" y2="90"/>
+    <line x1="-16" y1="90" x2="-18" y2="150"/>
+    <line x1="16" y1="90" x2="18" y2="150"/>
+    <line x1="-22" y1="25" x2="-34" y2="55"/>
+    <line x1="-34" y1="55" x2="-9" y2="70"/>
+    <circle cx="-9" cy="70" r="3.5" fill="#1f2937" stroke="none"/>
+    <line x1="22" y1="25" x2="34" y2="55"/>
+    <line x1="34" y1="55" x2="9" y2="70"/>
+    <circle cx="9" cy="70" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <line x1="430" y1="520" x2="384" y2="520" stroke="#2563eb" stroke-width="3" marker-end="url(#ah)"/>
+  <text x="400" y="620" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">REVERSE</text>
+  <text x="400" y="638" font-size="12" fill="#6b7280" text-anchor="middle">pull both hands in to waist</text>
+  <text x="400" y="654" font-size="12" fill="#9ca3af" text-anchor="middle">(in place · proposed B)</text>
+
+  <!-- PAUSE -->
+  <g transform="translate(650,470)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="-22" y1="25" x2="22" y2="25"/>
+    <line x1="0" y1="25" x2="0" y2="90"/>
+    <line x1="-16" y1="90" x2="16" y2="90"/>
+    <line x1="-16" y1="90" x2="-18" y2="150"/>
+    <line x1="16" y1="90" x2="18" y2="150"/>
+    <line x1="-22" y1="25" x2="16" y2="62"/>
+    <circle cx="16" cy="62" r="3.5" fill="#1f2937" stroke="none"/>
+    <line x1="22" y1="25" x2="-16" y2="62"/>
+    <circle cx="-16" cy="62" r="3.5" fill="#1f2937" stroke="none"/>
+  </g>
+  <text x="650" y="620" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">PAUSE / RESUME</text>
+  <text x="650" y="638" font-size="12" fill="#6b7280" text-anchor="middle">cross arms, hold ~0.5 s</text>
+  <text x="650" y="654" font-size="12" fill="#6b7280" text-anchor="middle">(talk &amp; gesture freely)</text>
+
+  <!-- POINT -->
+  <g transform="translate(900,470)" fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="0" r="15"/>
+    <line x1="-22" y1="25" x2="22" y2="25"/>
+    <line x1="0" y1="25" x2="0" y2="90"/>
+    <line x1="-16" y1="90" x2="16" y2="90"/>
+    <line x1="-16" y1="90" x2="-18" y2="150"/>
+    <line x1="16" y1="90" x2="18" y2="150"/>
+    <line x1="-22" y1="25" x2="-27" y2="78"/>
+    <line x1="22" y1="25" x2="52" y2="-12"/>
+    <circle cx="52" cy="-12" r="3.5" fill="#1f2937" stroke="none"/>
+    <line x1="52" y1="-12" x2="70" y2="-26" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="4 4"/>
+    <rect x="70" y="-40" width="22" height="16" rx="2" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+  </g>
+  <text x="900" y="620" font-size="14" font-weight="700" fill="#111827" text-anchor="middle">POINT &amp; OPEN</text>
+  <text x="900" y="638" font-size="12" fill="#6b7280" text-anchor="middle">raise one hand · a pointer follows</text>
+  <text x="900" y="654" font-size="12" fill="#6b7280" text-anchor="middle">hold on a sign ~1.5 s to open</text>
+</svg>

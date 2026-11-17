@@ -95,36 +95,46 @@ values to tune on a trial run.
 - **Conflict guard:** requires **two** arms forward. **One** arm raised is
   pointing (§4.6), not forward.
 
-### 4.3 Climb — both arms raised
-- **Intent:** rise straight up.
-- **Condition:** both wrists above the head line (above the nose, or well above
-  the shoulders when the nose is hidden).
-- **Mapping:** analog rise up to the presenter ceiling (currently 60 units).
-- **Threshold:** both wrists above head line; full rise once clearly above.
-- ⭐ **DECISION A — is climb its own axis, or only combined with forward?**
-  - *Option 1 (recommended): one vertical arm axis.* Arm elevation is a single
-    dial: **down = stop → forward = fly forward → up = climb**, and the
-    in-between (arms up *and* out) blends forward+climb automatically. This gives
-    your "up and forward" for free and keeps poses from colliding.
-    "Up and forward" is then not a separate gesture — it is the midpoint.
-  - *Option 2: forward and climb are independent* (arms-forward for speed, a
-    separate both-arms-up for pure vertical). More expressive, but "up",
-    "up+forward", and "back-by-head" start to look alike to the camera (§4.4).
+### 4.3 Vertical arm axis — forward ↔ climb  ✅ LOCKED (Decision A, Option 1)
+- **Intent:** one smooth "arm-height dial" controls forward flight and climbing.
+- **The dial (how high both arms are held):**
+  - arms **down** = stop (rest);
+  - arms **out in front** (about horizontal) = fly forward;
+  - arms **up overhead** = climb straight up;
+  - arms **in between** (raised but still reaching forward) = forward **and**
+    climb, blended smoothly.
+- **Condition (landmarks):** both wrists tracked; the forward↔climb blend comes
+  from wrist height relative to the shoulders (at shoulder height = forward; at/
+  above the head line = climb), with the forward amount also scaled by reach
+  (§4.2). Climb caps at the presenter ceiling (currently 60 units).
+- **Why:** "up and forward" needs no gesture of its own — it is simply the
+  midpoint of the dial, and no two move-poses look alike to the camera.
+- **Trade-off (accepted):** you cannot hold both arms high and still fly
+  dead-level; arm height always mixes in some climb. Fine for flying through a
+  course.
 
 ### 4.4 Reverse / descend
-- **Intent:** back away / come down.
-- ⭐ **DECISION B — which reverse gesture?**
-  - *Option 1 (recommended): step back.* Shoulders look narrower than neutral →
-    reverse; it is the natural opposite of "reach/step toward the screen",
-    already half-built, and never collides with a raised-arm pose. Deadzone
-    **0.06 W**, full at **0.30 W** (current `leanDead`/`leanFull`).
-  - *Option 2: arms drawn in to the chest* (elbows tuck, wrists toward
-    sternum). Works, but adds another arm pose near the "crossed = pause" pose.
-  - *Option 3: your original "both arms raised and pulled back by the head".*
-    Not recommended — too close to "climb" (§4.3) and tiring.
-- **Descend:** falls out of the vertical axis in Option 1 of §4.3 (arms below
-  neutral rest = sink), or is tied to reverse. We can also leave descent to
-  gravity/neutral. *(Flag if you want an explicit "come down".)*
+- **Intent:** back away a little.
+- **Problem with "step back" (your note):** physically stepping backward is
+  limited by the stage and the camera's view — a long reverse walks the
+  presenter off their mark and out of frame, and tracking is lost. So reverse
+  must work **standing in place**.
+- ⭐ **DECISION B — which in-place reverse gesture?**
+  - *Option 1 (now recommended): pull both hands in.* The opposite of reaching
+    forward — draw both hands back toward the waist (elbows drawn back), done
+    standing still, so stage position and framing never change. Pull further =
+    reverse faster; release to stop. Kept **low at the waist** (not the chest)
+    so it never looks like "arms crossed = pause" (§4.5).
+  - *Option 2: step back* (shoulders narrower). Simple, but limited by physical
+    space and loses tracking on a long reverse — your point. Keep only as a
+    gentle, very-short nudge, if at all.
+  - *Dropped: "arms raised and pulled back by the head"* — too close to climb.
+- **You rarely need to fly far backward:** the natural way to travel back is to
+  **turn around (steer) and fly forward**, exactly as in a game. So reverse only
+  needs to be a short "back off a step", not a fast long-haul control — which
+  also makes the in-place pull-back gesture perfectly sufficient.
+- **Descend:** lowering both arms below the forward position sinks gently toward
+  neutral; an explicit "come down" can be added if wanted. *(Flag if so.)*
 
 ### 4.5 Stop / pause / resume
 - **Stop (continuous):** the **rest state** — arms down, standing normally.
@@ -154,8 +164,8 @@ values to tune on a trial run.
 |---|---|---|
 | Steer | Shoulder twist L/R | Analog yaw |
 | Forward | Both arms reached forward (chest height) | Analog speed |
-| Climb | Both arms up (→ combined w/ forward per Decision A) | Analog rise |
-| Reverse | Step back / shoulders narrow (Decision B) | Analog |
+| Climb | Arms raised — forward↔climb dial (Decision A, locked) | Analog rise |
+| Reverse | Pull both hands in to the waist (Decision B) | Analog |
 | Pause/resume | Arms crossed, held 0.5 s | Toggle |
 | Point | One arm raised, pointer follows | Positional |
 | Interact | Dwell 1.5 s on a sign (Decision C) | Trigger |
@@ -174,7 +184,7 @@ values to tune on a trial run.
                |
    arms DOWN ..|............... STOP (rest)
                |
-   step back / narrow shoulders = REVERSE
+   pull both hands in to waist  = REVERSE (in place)
    shoulders twisted L/R        = STEER (any time)
    arms crossed (0.5s)          = PAUSE/RESUME
 ```
@@ -247,8 +257,9 @@ No two move-poses occupy the same arm position, so the camera never guesses.
 ---
 
 ## 12. Decisions checklist (for our review)
-- [ ] **A** — Vertical arm axis (recommended) vs independent climb? (§4.3)
-- [ ] **B** — Reverse = step back (recommended) vs arms-in vs arms-back? (§4.4)
+- [x] **A** — Vertical arm-height dial (forward↔climb). ✅ LOCKED. (§4.3)
+- [ ] **B** — In-place reverse: pull both hands in to the waist (recommended)
+      vs a short step-back nudge. (§4.4)
 - [ ] **C** — Interact = dwell only (recommended) vs dwell + push? (§4.6)
 - [ ] **D** — Point/stop with either hand (recommended) vs fixed hand? (§4.6)
 - [ ] **E** — Add a one-arm reduced-gesture accessibility profile? (§9)
