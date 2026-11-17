@@ -13078,6 +13078,14 @@ define('format_mnemo/vr', [], function() {
         this.reduced = !!on;
         if (this.body) {
             this.body.reduced = this.reduced;
+            if (this.reduced && this.body.paused) {
+                // Crossing both arms (the two-arm resume gesture) is exactly what
+                // this profile avoids, so never leave the control stuck paused
+                // when switching to one-arm mode.
+                this.body.paused = false;
+                this.body.crossTime = 0;
+                this.body.crossLatched = false;
+            }
         }
     };
 
@@ -14156,7 +14164,10 @@ define('format_mnemo/vr', [], function() {
             }
         }
         var move = forward - reverse;
-        if (move === 0 && rise === 0) {
+        // Rest-to-open needs at least one tracked wrist: with no arm visible the
+        // movement values are zero only because tracking is lost, not because
+        // the presenter is resting, so it must not aim and open a sign.
+        if (f.armHhi !== null && move === 0 && rise === 0) {
             // Resting: aim with the shoulders and a centre crosshair dwells on
             // the sign straight ahead. Steering stays live (unlike normal
             // pointing) so the presenter can aim it.
