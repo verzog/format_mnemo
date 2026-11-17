@@ -7237,8 +7237,10 @@ define('format_mnemo/vr', [], function() {
     var COMFORT_SPEED = {slow: true, normal: true, fast: true};
     var COMFORT_ANGLE = {'15': true, '30': true, '45': true};
     var COMFORT_LOCOMOTION = {smooth: true, teleport: true};
+    var COMFORT_HEADSENS = {low: true, normal: true, high: true};
     var COMFORT_DEFAULT = {
-        turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal', locomotion: 'smooth'
+        turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal', locomotion: 'smooth',
+        headsens: 'normal'
     };
 
     /**
@@ -7247,7 +7249,7 @@ define('format_mnemo/vr', [], function() {
      * device's stored choice, or nothing.
      *
      * @param {Object} c A partial/untrusted comfort object, or null.
-     * @return {Object} {turn, snapangle, vignette, speed, locomotion}.
+     * @return {Object} {turn, snapangle, vignette, speed, locomotion, headsens}.
      */
     Cyberspace.prototype.normalizeComfort = function(c) {
         c = c || {};
@@ -7257,7 +7259,8 @@ define('format_mnemo/vr', [], function() {
             snapangle: COMFORT_ANGLE[String(angle)] ? angle : COMFORT_DEFAULT.snapangle,
             vignette: COMFORT_VIGNETTE[c.vignette] ? c.vignette : COMFORT_DEFAULT.vignette,
             speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed,
-            locomotion: COMFORT_LOCOMOTION[c.locomotion] ? c.locomotion : COMFORT_DEFAULT.locomotion
+            locomotion: COMFORT_LOCOMOTION[c.locomotion] ? c.locomotion : COMFORT_DEFAULT.locomotion,
+            headsens: COMFORT_HEADSENS[c.headsens] ? c.headsens : COMFORT_DEFAULT.headsens
         };
     };
 
@@ -12603,8 +12606,15 @@ define('format_mnemo/vr', [], function() {
         this.lastFireTs = 0; // Last finger-gun shot time (ms), for a fire cooldown.
         this.gunArmed = false; // A cocked finger gun (thumb up) is held, ready to fire.
         this.handLostTime = 0; // Seconds since a hand was last tracked (latch expiry).
+        this.headYawNeutral = null; // Calibrated straight-ahead head yaw.
         this.headPitchNeutral = null; // Calibrated straight-ahead head pitch.
         this.headSizeNeutral = null; // Calibrated neutral face width (lean-to-move).
+        this.headCal = null; // Running sums while the resting pose is being measured.
+        this.headCalTime = 1.5; // Seconds of face frames averaged into the neutral.
+        this.headCalMinFrames = 5; // And at least this many frames, whatever the rate.
+        this.headTurn = 0; // Smoothed head steering.
+        this.headSens = 'normal'; // Head sensitivity level (low, normal or high).
+        this.oncalibrate = null; // Optional callback(running) for the HUD to sync.
         this.havePitch = false; // A face is driving the look pitch this frame.
         this.pitchTarget = 0; // Target look pitch (radians) from head tilt.
         this.maxPitch = Math.PI / 2 - 0.05; // Clamp, matching the drag-look limit.
@@ -12827,6 +12837,69 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Start measuring the learner's resting head pose. Until it finishes (see
+     * sampleHeadCalibration) the head gives no steering, look or move input, so
+     * the learner can settle and look straight at the screen. Any earlier
+     * neutral is kept until the new one replaces it.
+     */
+    CameraNav.prototype.calibrateHead = function() {
+        this.headCal = {time: 0, frames: 0, yaw: 0, pitch: 0, size: 0};
+        this.headTurn = 0;
+        this.havePitch = false;
+        if (this.oncalibrate) {
+            this.oncalibrate(true);
+        }
+    };
+
+    /**
+     * Add one face frame to the running resting-pose measurement and, once
+     * enough time and frames have been gathered, store the averages as the
+     * neutral yaw, pitch and face width. Averaging over a second or so (rather
+     * than trusting a single frame) keeps a blink, a glance at the button or
+     * landmark noise from skewing the neutral.
+     *
+     * @param {Object} hc The current head features {yaw, pitch, size}.
+     * @param {Number} frameDt Seconds since the last processed frame.
+     * @return {Boolean} True once the measurement has finished.
+     */
+    CameraNav.prototype.sampleHeadCalibration = function(hc, frameDt) {
+        var cal = this.headCal;
+        if (!cal) {
+            return true;
+        }
+        cal.yaw += hc.yaw;
+        cal.pitch += hc.pitch;
+        cal.size += hc.size;
+        cal.frames++;
+        // A long gap (a refocused tab) counts as one ordinary frame.
+        cal.time += Math.min(Math.max(0, frameDt), this.maxFrameGap);
+        if (cal.time < this.headCalTime || cal.frames < this.headCalMinFrames) {
+            return false;
+        }
+        this.headYawNeutral = cal.yaw / cal.frames;
+        this.headPitchNeutral = cal.pitch / cal.frames;
+        this.headSizeNeutral = cal.size / cal.frames;
+        this.headCal = null;
+        if (this.oncalibrate) {
+            this.oncalibrate(false);
+        }
+        return true;
+    };
+
+    /**
+     * Set how far the head must move to steer, look and glide. Remembered here
+     * so it also applies to a face detector that finishes loading later.
+     *
+     * @param {String} level One of 'low', 'normal' or 'high'.
+     */
+    CameraNav.prototype.setHeadSensitivity = function(level) {
+        this.headSens = level;
+        if (this.head && this.head.setSensitivity) {
+            this.head.setSensitivity(level);
+        }
+    };
+
+    /**
      * Read hand and head gestures for one frame and turn them into the
      * steering/move intent:
      *   - the head steers: turning it left or right rotates the view (when the
@@ -12852,22 +12925,33 @@ define('format_mnemo/vr', [], function() {
             var hlm = this.head.detect(v, ts);
             if (hlm) {
                 var hc = this.head.classify(hlm);
-                // Calibrate the straight-ahead pitch and neutral face width on the
-                // first face seen, so the look mapping and the lean-to-move are
-                // both relative to this learner's resting pose.
-                if (this.headPitchNeutral === null) {
-                    this.headPitchNeutral = hc.pitch;
+                // Measure this learner's resting pose (straight-ahead yaw and
+                // pitch, and the neutral face width) when a face is first seen,
+                // so steering, the look mapping and the lean-to-move are all
+                // relative to it. The learner can measure it again at any time.
+                if (this.headPitchNeutral === null && !this.headCal) {
+                    this.calibrateHead();
                 }
-                if (this.headSizeNeutral === null) {
-                    this.headSizeNeutral = hc.size;
-                }
-                var hi = this.head.intent(hc, this.headPitchNeutral, this.headSizeNeutral);
-                headTurn = hi.turn;
-                headMove = hi.move;
                 haveHead = true;
-                this.pitchTarget = hi.pitch * this.maxPitch;
-                this.havePitch = true;
+                if (this.headCal) {
+                    // Measuring: the head gives no input until it is done.
+                    this.headTurn = 0;
+                    this.sampleHeadCalibration(hc, frameDt);
+                } else {
+                    var hi = this.head.intent(hc, this.headPitchNeutral, this.headSizeNeutral,
+                        this.headYawNeutral);
+                    // Ease the steering like the move signal, so landmark jitter
+                    // at the edge of the deadzone cannot flick the turn on and off.
+                    this.headTurn = this.blend(this.headTurn, hi.turn, frameDt);
+                    headTurn = this.headTurn;
+                    headMove = hi.move;
+                    this.pitchTarget = hi.pitch * this.maxPitch;
+                    this.havePitch = true;
+                }
             }
+        }
+        if (!haveHead) {
+            this.headTurn = 0;
         }
         // Hand: stop (open palm), forward (fist haul) and - only as the fallback
         // when no face steers - left/right position steering.
@@ -13129,6 +13213,7 @@ define('format_mnemo/vr', [], function() {
             }
             if (face) {
                 this.head = new HeadPose(face);
+                this.head.setSensitivity(this.headSens);
             }
             if (this.onpose) {
                 this.onpose();
@@ -13300,8 +13385,16 @@ define('format_mnemo/vr', [], function() {
         // restart may be from a different sitting distance, so a stale neutral
         // width would read as an immediate lean), and stop driving the look pitch
         // until a face is seen again.
+        this.headYawNeutral = null;
         this.headPitchNeutral = null;
         this.headSizeNeutral = null;
+        this.headTurn = 0;
+        if (this.headCal) {
+            this.headCal = null;
+            if (this.oncalibrate) {
+                this.oncalibrate(false);
+            }
+        }
         this.havePitch = false;
         this.gunArmed = false;
         this.handLostTime = 0;
@@ -13528,7 +13621,23 @@ define('format_mnemo/vr', [], function() {
         // speed; the deadzone ignores breathing / small sway around neutral.
         this.leanGain = 0.22;
         this.leanDeadzone = 0.06;
+        // Learner-chosen sensitivity: scales how far the head must move for
+        // every signal (a lower value widens the deadzones and the range).
+        this.sensitivity = 1;
     }
+
+    /** @const {Object} The sensitivity multiplier for each learner-facing level. */
+    HeadPose.SENSITIVITY = {low: 0.6, normal: 1, high: 1.5};
+
+    /**
+     * Set the sensitivity from a learner-facing level; an unknown level is
+     * treated as normal.
+     *
+     * @param {String} level One of 'low', 'normal' or 'high'.
+     */
+    HeadPose.prototype.setSensitivity = function(level) {
+        this.sensitivity = HeadPose.SENSITIVITY[level] || 1;
+    };
 
     /** @const {Number} Nose-tip landmark index in the MediaPipe face mesh. */
     HeadPose.NOSE = 1;
@@ -13580,9 +13689,13 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Map the head signals to a navigation intent. Yaw steers past a deadzone:
-     * a head turned to the user's right (a negative yaw signal) steers right (a
-     * positive turn, matching HandPose and the apply() convention). Pitch maps
+     * Map the head signals to a navigation intent. Yaw steers past a deadzone,
+     * measured from the calibrated straight-ahead yaw when there is one (so a
+     * webcam off to one side does not steer on its own): a head turned to the
+     * user's right (a negative yaw signal) steers right (a positive turn,
+     * matching HandPose and the apply() convention). The steering response is
+     * squared, so a small turn of the head steers gently and only a firm turn
+     * reaches the full rate. Pitch maps
      * absolutely to a look angle relative to a calibrated neutral: tilting the
      * head up (a smaller pitch signal than neutral) looks up. Pitch is skipped
      * when no neutral has been calibrated yet. Move is the lean-to-glide signal:
@@ -13592,21 +13705,25 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} cur The current head features {yaw, pitch, size}.
      * @param {Number} [neutralPitch] The calibrated straight-ahead pitch signal.
      * @param {Number} [neutralSize] The calibrated neutral face width.
+     * @param {Number} [neutralYaw] The calibrated straight-ahead yaw signal.
      * @return {Object} {turn, pitch, move} each in -1..1.
      */
-    HeadPose.prototype.intent = function(cur, neutralPitch, neutralSize) {
-        var mag = Math.abs(cur.yaw) - this.yawDeadzone;
+    HeadPose.prototype.intent = function(cur, neutralPitch, neutralSize, neutralYaw) {
+        var sens = this.sensitivity > 0 ? this.sensitivity : 1;
+        var yaw = cur.yaw - (typeof neutralYaw === 'number' ? neutralYaw : 0);
+        var mag = Math.abs(yaw) - this.yawDeadzone / sens;
         var turn = 0;
         if (mag > 0) {
+            var linear = Math.min(1, mag * sens / this.yawGain);
             // Negative yaw (head to the user's right) -> positive turn (steer right).
-            turn = Math.max(-1, Math.min(1, (cur.yaw < 0 ? 1 : -1) * mag / this.yawGain));
+            turn = (yaw < 0 ? 1 : -1) * linear * linear;
         }
         var pitch = 0;
         if (typeof neutralPitch === 'number') {
             var dev = neutralPitch - cur.pitch; // Head up (smaller signal) -> positive.
-            var pmag = Math.abs(dev) - this.pitchDeadzone;
+            var pmag = Math.abs(dev) - this.pitchDeadzone / sens;
             if (pmag > 0) {
-                pitch = Math.max(-1, Math.min(1, (dev < 0 ? -1 : 1) * pmag / this.pitchGain));
+                pitch = Math.max(-1, Math.min(1, (dev < 0 ? -1 : 1) * pmag * sens / this.pitchGain));
             }
         }
         // Forward/back from leaning: the fractional change of the face width from
@@ -13615,9 +13732,9 @@ define('format_mnemo/vr', [], function() {
         if (typeof neutralSize === 'number' && neutralSize > 0 &&
                 typeof cur.size === 'number') {
             var rel = (cur.size - neutralSize) / neutralSize;
-            var mmag = Math.abs(rel) - this.leanDeadzone;
+            var mmag = Math.abs(rel) - this.leanDeadzone / sens;
             if (mmag > 0) {
-                move = Math.max(-1, Math.min(1, (rel < 0 ? -1 : 1) * mmag / this.leanGain));
+                move = Math.max(-1, Math.min(1, (rel < 0 ? -1 : 1) * mmag * sens / this.leanGain));
             }
         }
         return {turn: turn, pitch: pitch, move: move};
@@ -14013,6 +14130,57 @@ define('format_mnemo/vr', [], function() {
         media.appendChild(zones);
         preview.appendChild(media);
         preview.appendChild(status);
+        // Head-tracking tools, shown only once the face detector is driving the
+        // view: measure the resting head position again, and choose how far the
+        // head must move.
+        var tools = document.createElement('div');
+        tools.className = 'format-mnemo__cam-tools';
+        tools.hidden = true;
+        var calibrate = document.createElement('button');
+        calibrate.type = 'button';
+        calibrate.className = 'format-mnemo__cam-calibrate';
+        calibrate.textContent = s.cameranav_calibrate || 'Calibrate';
+        calibrate.title = s.cameranav_calibrate_help || '';
+        tools.appendChild(calibrate);
+        var sensLabel = document.createElement('span');
+        sensLabel.className = 'format-mnemo__cam-sens-label';
+        sensLabel.id = 'format-mnemo-cam-sens-' + (this.config.courseid || 0);
+        sensLabel.textContent = s.cameranav_headsens || 'Head sensitivity';
+        tools.appendChild(sensLabel);
+        var sens = document.createElement('div');
+        sens.className = 'format-mnemo__cam-sens';
+        sens.setAttribute('role', 'group');
+        sens.setAttribute('aria-labelledby', sensLabel.id);
+        var sensButtons = [];
+        var markSens = function() {
+            var current = (self.comfort && self.comfort.headsens) || 'normal';
+            sensButtons.forEach(function(b) {
+                var on = b.getAttribute('data-headsens') === current;
+                b.classList.toggle('format-mnemo__cam-sens-opt--on', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+        };
+        [
+            ['low', s.cameranav_headsens_low || 'Low'],
+            ['normal', s.comfortnormal || 'Normal'],
+            ['high', s.cameranav_headsens_high || 'High']
+        ].forEach(function(opt) {
+            var ob = document.createElement('button');
+            ob.type = 'button';
+            ob.className = 'format-mnemo__cam-sens-opt';
+            ob.textContent = opt[1];
+            ob.setAttribute('data-headsens', opt[0]);
+            ob.addEventListener('click', function() {
+                // Saved with the learner's other comfort settings.
+                self.setComfort('headsens', opt[0]);
+                self.cameraNav.setHeadSensitivity(self.comfort.headsens);
+                markSens();
+            });
+            sensButtons.push(ob);
+            sens.appendChild(ob);
+        });
+        tools.appendChild(sens);
+        preview.appendChild(tools);
         this.root.appendChild(preview);
 
         // The analysis canvas is offscreen (never added to the DOM); its size is
@@ -14021,6 +14189,8 @@ define('format_mnemo/vr', [], function() {
         analysis.width = 48;
         analysis.height = 36;
         this.cameraNav = new CameraNav(this, {video: video, canvas: analysis});
+        this.cameraNav.setHeadSensitivity((this.comfort && this.comfort.headsens) || 'normal');
+        markSens();
 
         // Reflect the driver's live state in the button and preview, including
         // when the camera is released from elsewhere (list view, tab hidden, XR).
@@ -14043,11 +14213,28 @@ define('format_mnemo/vr', [], function() {
             // names both movement gestures (head-lean and the fist-haul) so it is
             // correct whichever loaded.
             var pose = !!(self.cameraNav.pose || self.cameraNav.head);
-            status.textContent = (pose ? s.cameranav_hint_pose : s.cameranav_hint) || '';
+            tools.hidden = !self.cameraNav.head;
             preview.classList.toggle('format-mnemo__cam-preview--pose', pose);
+            if (self.cameraNav.headCal) {
+                // The resting head position is being measured: say what to do.
+                status.textContent = s.cameranav_calibrating || '';
+                return;
+            }
+            status.textContent = (pose ? s.cameranav_hint_pose : s.cameranav_hint) || '';
         };
         // When pose detection finishes loading mid-session, swap the guidance.
         this.cameraNav.onpose = showHint;
+        // While the resting head position is measured, show the instruction and
+        // lock the button; afterwards go back to the usual guidance.
+        this.cameraNav.oncalibrate = function(running) {
+            calibrate.disabled = running;
+            showHint();
+        };
+        calibrate.addEventListener('click', function() {
+            if (self.cameraNav.active && self.cameraNav.head && !self.cameraNav.headCal) {
+                self.cameraNav.calibrateHead();
+            }
+        });
 
         button.addEventListener('click', function() {
             if (self.cameraNav.active || self.cameraNav.starting) {

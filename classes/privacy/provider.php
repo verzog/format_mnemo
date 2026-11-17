@@ -32,10 +32,10 @@ use core_privacy\local\request\writer;
  *
  * The format keeps no data in its own tables. It stores teacher-uploaded topic
  * images as course content via the files subsystem, and two per-user
- * preferences: comfort settings (VR turn mode/angle, motion vignette and
- * movement speed) and the desktop control mapping (movement keys, fire button,
- * look sensitivity and invert). All are declared here, and the preferences are
- * exported on request.
+ * preferences: comfort settings (VR turn mode/angle, motion vignette,
+ * movement speed and head-tracking sensitivity) and the desktop control
+ * mapping (movement keys, fire button, look sensitivity and invert). All are
+ * declared here, and the preferences are exported on request.
  *
  * Moodle itself sends nothing to other sites, but when an administrator or a
  * teacher points the scene at an asset hosted elsewhere (a Three.js override,

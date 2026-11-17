@@ -1102,7 +1102,7 @@ final class scene_test extends \advanced_testcase {
         // A stored preference passes through; an invalid field defaults.
         set_user_preference('format_mnemo_comfort', json_encode([
             'turn' => 'smooth', 'snapangle' => 45, 'vignette' => 'off', 'speed' => 'bogus',
-            'locomotion' => 'teleport',
+            'locomotion' => 'teleport', 'headsens' => 'low',
         ]));
         $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
         $this->assertSame('smooth', $config['comfort']['turn']);
@@ -1110,12 +1110,13 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame('off', $config['comfort']['vignette']);
         $this->assertSame('normal', $config['comfort']['speed']); // Invalid -> default.
         $this->assertSame('teleport', $config['comfort']['locomotion']);
+        $this->assertSame('low', $config['comfort']['headsens']);
 
         // A non-scalar field (a hand-edited PARAM_RAW value) must not error; it
         // just takes the defaults.
         set_user_preference('format_mnemo_comfort', json_encode([
             'turn' => [], 'snapangle' => ['x'], 'vignette' => 'light', 'speed' => 'fast',
-            'locomotion' => 'bogus',
+            'locomotion' => 'bogus', 'headsens' => ['high'],
         ]));
         $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
         $this->assertSame('snap', $config['comfort']['turn']); // Array -> default.
@@ -1123,6 +1124,7 @@ final class scene_test extends \advanced_testcase {
         $this->assertSame('light', $config['comfort']['vignette']);
         $this->assertSame('fast', $config['comfort']['speed']);
         $this->assertSame('smooth', $config['comfort']['locomotion']); // Invalid -> default.
+        $this->assertSame('normal', $config['comfort']['headsens']); // Array -> default.
     }
 
     /**

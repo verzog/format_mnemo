@@ -732,6 +732,16 @@ contacted**. With pose recognition you **turn your head to steer and tilt it to
 aim up or down**, **open your palm to stop**, and **make a fist and pull it
 toward you to glide forward** — and in the arcade game you **make a finger gun
 and drop your thumb to shoot**.
+
+Head tracking is measured against your own resting position. When your face is
+first seen the control asks you to **look straight at the screen and hold still
+for a moment** while it averages where your head sits, so a webcam off to one
+side of the monitor does not steer by itself. Press **Calibrate** under the
+camera preview to measure it again (after you move your chair, say), and pick a
+**Head sensitivity** of Low, Normal or High to set how far you have to move your
+head. The sensitivity is remembered with your other comfort settings; the
+resting position is not stored and is measured afresh each time.
+
 This adds
 CSP surface beyond `script-src 'self'`: the WASM runtime needs
 **`script-src 'wasm-unsafe-eval'`** (or `'unsafe-eval'`) to instantiate, loads
