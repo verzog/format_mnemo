@@ -1081,6 +1081,46 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * A building area holding only a file that is not a recognised full
+     * building-<modname> upload (here only a -lite copy) still moves the
+     * buildings base to the upload area, so a bundled building must be given
+     * its bundled URL or it would be requested from the upload area and 404.
+     */
+    public function test_scene_config_bundled_building_fallback_without_full_upload(): void {
+        global $PAGE;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $PAGE->set_context(context_course::instance($course->id));
+        $scene = new \format_mnemo\output\scene(course_get_format($course));
+
+        // Only a lite copy is uploaded: the area is non-empty (so the base moves
+        // to it), but it holds no full building-<modname> model to enumerate.
+        $fs = get_file_storage();
+        $fs->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => 'format_mnemo',
+            'filearea' => 'buildingassets',
+            'itemid' => 0,
+            'filepath' => '/',
+            'filename' => 'building-quiz-lite.glb',
+        ], 'x');
+
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+
+        // The base has moved to the upload area.
+        $this->assertStringContainsString('/format_mnemo/buildingassets/', $config['buildingsbaseurl']);
+        // The bundled quiz tower still resolves to its bundled URL, not the
+        // upload area (where only the lite copy lives).
+        $this->assertArrayHasKey('building-quiz', $config['modelurls']);
+        $this->assertStringEndsWith(
+            '/course/format/mnemo/models/building-quiz.glb',
+            $config['modelurls']['building-quiz']
+        );
+    }
+
+    /**
      * With no comfort preference the scene exposes the defaults; a stored
      * preference is parsed through, and invalid fields fall back to defaults.
      */
