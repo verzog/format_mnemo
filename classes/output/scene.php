@@ -404,7 +404,7 @@ class scene implements renderable, templatable {
 
     /**
      * The current user's comfort settings (turn mode/angle, motion vignette,
-     * movement speed), read from their 'format_mnemo_comfort' preference and
+     * movement speed, head-tracking sensitivity), read from their 'format_mnemo_comfort' preference and
      * validated field by field against the allowed values, each falling back to
      * the plugin default. Returns null when the user has no stored preference,
      * so the client can honour a device-local (localStorage) choice before
@@ -412,8 +412,8 @@ class scene implements renderable, templatable {
      * before use, so a hand-edited PARAM_RAW value (e.g. a nested array) cannot
      * break rendering.
      *
-     * @return array{turn: string, snapangle: int, vignette: string, speed: string,
-     *     locomotion: string}|null
+     * @return array|null The settings keyed turn, snapangle, vignette, speed,
+     *     locomotion and headsens, or null when nothing is stored.
      */
     protected function comfort(): ?array {
         $raw = get_user_preferences('format_mnemo_comfort', '');
@@ -426,6 +426,7 @@ class scene implements renderable, templatable {
         $speeds = ['slow' => true, 'normal' => true, 'fast' => true];
         $locomotions = ['smooth' => true, 'teleport' => true];
         $angles = [15 => true, 30 => true, 45 => true];
+        $headsenses = ['low' => true, 'normal' => true, 'high' => true];
         // Only a string field may index the allow-lists; a non-scalar (array,
         // object) becomes an empty string and so takes the default.
         $str = function ($value): string {
@@ -435,6 +436,7 @@ class scene implements renderable, templatable {
         $vignette = $str($stored['vignette'] ?? null);
         $speed = $str($stored['speed'] ?? null);
         $locomotion = $str($stored['locomotion'] ?? null);
+        $headsens = $str($stored['headsens'] ?? null);
         $angle = (isset($stored['snapangle']) && is_numeric($stored['snapangle'])) ? (int)$stored['snapangle'] : 0;
         return [
             'turn' => isset($turns[$turn]) ? $turn : 'snap',
@@ -442,6 +444,7 @@ class scene implements renderable, templatable {
             'vignette' => isset($vignettes[$vignette]) ? $vignette : 'full',
             'speed' => isset($speeds[$speed]) ? $speed : 'normal',
             'locomotion' => isset($locomotions[$locomotion]) ? $locomotion : 'smooth',
+            'headsens' => isset($headsenses[$headsens]) ? $headsens : 'normal',
         ];
     }
 
@@ -906,6 +909,12 @@ class scene implements renderable, templatable {
                 'closemenu' => get_string('closemenu', 'format_mnemo'),
                 'cameranav' => get_string('cameranav', 'format_mnemo'),
                 'cameranav_hint' => get_string('cameranav_hint', 'format_mnemo'),
+                'cameranav_calibrate' => get_string('cameranav_calibrate', 'format_mnemo'),
+                'cameranav_calibrate_help' => get_string('cameranav_calibrate_help', 'format_mnemo'),
+                'cameranav_calibrating' => get_string('cameranav_calibrating', 'format_mnemo'),
+                'cameranav_headsens' => get_string('cameranav_headsens', 'format_mnemo'),
+                'cameranav_headsens_high' => get_string('cameranav_headsens_high', 'format_mnemo'),
+                'cameranav_headsens_low' => get_string('cameranav_headsens_low', 'format_mnemo'),
                 'cameranav_hint_pose' => get_string('cameranav_hint_pose', 'format_mnemo'),
                 'cameranav_denied' => get_string('cameranav_denied', 'format_mnemo'),
                 'cameranav_insecure' => get_string('cameranav_insecure', 'format_mnemo'),

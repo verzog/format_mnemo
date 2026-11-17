@@ -2996,8 +2996,15 @@ const scenarios = [
                 intent: () => ({turn: 1, pitch: 0})};
             nav.pose = {detect: () => [1], classify: () => ({open: false, fist: false}),
                 intent: () => ({stop: false, turn: -0.5, moveTarget: 0})};
-            nav.samplePose({}, 0.033);
-            const headWins = Math.abs(nav.intent.turn - 1) < 1e-9;
+            // Already calibrated, so the head drives from the first frame. Its
+            // steering eases in, so sample long enough for it to settle.
+            nav.headYawNeutral = 0;
+            nav.headPitchNeutral = 0;
+            nav.headSizeNeutral = 0.4;
+            for (let i = 0; i < 60; i++) {
+                nav.samplePose({}, 0.033);
+            }
+            const headWins = Math.abs(nav.intent.turn - 1) < 1e-3;
             // With no face, the hand's own steering is used instead.
             nav.head = null;
             nav.samplePose({}, 0.033);
@@ -3011,6 +3018,126 @@ const scenarios = [
             const stops = nav.intent.turn === 0 && nav.intent.move === 0;
             return {pass: headWins && handFallback && stops,
                 detail: `head=${headWins} hand=${handFallback} stop=${stops}`};
+        }
+    },
+    {
+        name: 'cameranav: the resting head pose is averaged, then steering is relative to it',
+        fn: () => {
+            const CN = window.__mnemoModule._CameraNav;
+            const HeP = window.__mnemoModule._HeadPose;
+            const nav = new CN(null);
+            const events = [];
+            nav.oncalibrate = (running) => events.push(running);
+            // An off-centre webcam: the resting yaw reads 0.3, well past the
+            // deadzone, with a little frame noise around it.
+            let frame = 0;
+            let yaw = 0.3;
+            const hp = new HeP(null);
+            nav.head = {detect: () => [1],
+                classify: () => ({yaw: yaw + (frame++ % 2 ? 0.02 : -0.02), pitch: 0.2, size: 0.4}),
+                intent: (c, p, s, y) => hp.intent(c, p, s, y)};
+            // While measuring (1.5 s of frames) the head gives no input.
+            let quiet = true;
+            for (let i = 0; i < 30; i++) {
+                nav.samplePose({}, 0.033);
+                quiet = quiet && nav.intent.turn === 0 && nav.intent.move === 0 && !nav.havePitch;
+            }
+            const measuring = nav.headCal !== null && nav.headYawNeutral === null;
+            for (let i = 0; i < 30; i++) {
+                nav.samplePose({}, 0.033);
+            }
+            const done = nav.headCal === null && Math.abs(nav.headYawNeutral - 0.3) < 0.01 &&
+                Math.abs(nav.headPitchNeutral - 0.2) < 1e-9 && Math.abs(nav.headSizeNeutral - 0.4) < 1e-9;
+            // Looking straight ahead no longer steers, despite the offset.
+            for (let i = 0; i < 30; i++) {
+                nav.samplePose({}, 0.033);
+            }
+            const centred = Math.abs(nav.intent.turn) < 1e-6;
+            // Turning right of the resting pose (a lower yaw signal) steers right.
+            yaw = -0.3;
+            for (let i = 0; i < 60; i++) {
+                nav.samplePose({}, 0.033);
+            }
+            const steers = nav.intent.turn > 0.9;
+            // Calibrating again measures afresh; stop() forgets the neutral.
+            nav.calibrateHead();
+            const again = nav.headCal !== null && nav.intent.turn >= 0;
+            nav.stop();
+            const reset = nav.headCal === null && nav.headYawNeutral === null && nav.headPitchNeutral === null;
+            const pass = quiet && measuring && done && centred && steers && again && reset &&
+                events.join() === 'true,false,true,false';
+            return {pass, detail: `quiet=${quiet} measuring=${measuring} done=${done} centred=${centred} ` +
+                `steers=${steers} again=${again} reset=${reset} events=${events.join()}`};
+        }
+    },
+    {
+        name: 'cameranav: head sensitivity scales how far the head must turn',
+        fn: () => {
+            const HeP = window.__mnemoModule._HeadPose;
+            const turnAt = (level, yaw) => {
+                const hp = new HeP(null);
+                hp.setSensitivity(level);
+                return hp.intent({yaw: yaw, pitch: 0, size: 0.4}, 0, 0.4, 0).turn;
+            };
+            // A modest right turn: low ignores it, high steers harder than normal.
+            const low = turnAt('low', -0.15);
+            const normal = turnAt('normal', -0.15);
+            const high = turnAt('high', -0.15);
+            // A small turn steers gently (the response is squared), a firm turn
+            // still reaches the full rate, and an unknown level means normal.
+            const gentle = normal > 0 && normal < 0.05;
+            const full = turnAt('normal', -0.7) === 1 && turnAt('normal', 0.7) === -1;
+            const unknown = turnAt('bogus', -0.15) === normal;
+            // The calibrated neutral yaw is subtracted before the deadzone.
+            const hp = new HeP(null);
+            const offset = hp.intent({yaw: 0.3, pitch: 0, size: 0.4}, 0, 0.4, 0.3).turn === 0;
+            const pass = low === 0 && gentle && high > normal && full && unknown && offset;
+            return {pass, detail: `low=${low} normal=${normal.toFixed(3)} high=${high.toFixed(3)} ` +
+                `full=${full} unknown=${unknown} offset=${offset}`};
+        }
+    },
+    {
+        name: 'cameranav: the preview offers Calibrate and a sensitivity choice once a face is tracked',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const root = document.createElement('div');
+            const bar = document.createElement('div');
+            const saved = [];
+            const cs = {
+                config: {courseid: 7, strings: {cameranav_calibrating: 'CAL', cameranav_hint_pose: 'HINT'}},
+                root: root, controlsRight: bar, comfort: {headsens: 'low'},
+                setComfort: function(field, value) {
+                    this.comfort[field] = value;
+                    saved.push(field + '=' + value);
+                }
+            };
+            CS.prototype.buildCameraNav.call(cs);
+            const nav = cs.cameraNav;
+            const tools = root.querySelector('.format-mnemo__cam-tools');
+            const calibrate = root.querySelector('.format-mnemo__cam-calibrate');
+            const status = root.querySelector('.format-mnemo__cam-status');
+            const pressed = () => Array.from(root.querySelectorAll('.format-mnemo__cam-sens-opt'))
+                .filter((b) => b.getAttribute('aria-pressed') === 'true')
+                .map((b) => b.getAttribute('data-headsens')).join();
+            // Hidden until the face detector is driving; the saved level is shown.
+            const hiddenFirst = tools.hidden && pressed() === 'low' && nav.headSens === 'low';
+            nav.active = true;
+            nav.applyPoseModels(null, {});
+            const shown = !tools.hidden && nav.head.sensitivity === 0.6;
+            // Calibrate starts a measurement, says so, and locks the button.
+            calibrate.click();
+            const running = nav.headCal !== null && calibrate.disabled && status.textContent === 'CAL';
+            for (let i = 0; i < 60; i++) {
+                nav.sampleHeadCalibration({yaw: 0.1, pitch: 0.2, size: 0.4}, 0.033);
+            }
+            const finished = nav.headCal === null && !calibrate.disabled && status.textContent === 'HINT' &&
+                Math.abs(nav.headYawNeutral - 0.1) < 1e-9;
+            // Picking a level saves it with the comfort settings and applies it live.
+            root.querySelector('[data-headsens="high"]').click();
+            const picked = saved.join() === 'headsens=high' && pressed() === 'high' && nav.head.sensitivity === 1.5;
+            const pass = hiddenFirst && shown && running && finished && picked;
+            return {pass, detail: `hidden=${hiddenFirst} shown=${shown} running=${running} ` +
+                `finished=${finished} picked=${picked}`};
         }
     },
     {
@@ -3051,10 +3178,12 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const norm = CS.prototype.normalizeComfort;
             const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast',
-                locomotion: 'teleport'});
-            const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z', locomotion: 'q'});
+                locomotion: 'teleport', headsens: 'low'});
+            const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z', locomotion: 'q',
+                headsens: 'w'});
             const empty = norm(null);
             const pass = valid.turn === 'smooth' && valid.snapangle === 45 &&
+                valid.headsens === 'low' && bad.headsens === 'normal' && empty.headsens === 'normal' &&
                 valid.vignette === 'off' && valid.speed === 'fast' &&
                 valid.locomotion === 'teleport' &&
                 bad.turn === 'snap' && bad.snapangle === 30 &&
