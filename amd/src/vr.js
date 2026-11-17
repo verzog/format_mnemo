@@ -12624,7 +12624,9 @@ define('format_mnemo/vr', [], function() {
         this.bodyMode = !!(dom && dom.body);
         this.body = null; // A BodyPose once the pose landmarker has loaded.
         this.bodyStatus = ''; // Last body status (lost, calibrating, paused, tracking).
+        this.reduced = !!(dom && dom.reduced); // One-arm accessibility profile.
         this.onstatus = null; // Optional callback(status) when the body status changes.
+        this.onintent = null; // Optional callback(intent, status, pointer) each sampled frame.
         this.onposefail = null; // Optional callback when body detection cannot load.
         this.pointer = null; // Body mode: where an outstretched arm points, or null.
         // Tunables (the one place to adjust the feel): a deadzone that ignores
@@ -13030,16 +13032,25 @@ define('format_mnemo/vr', [], function() {
         var it = this.body.update(this.body.detect(v, ts), Math.min(frameDt, this.maxFrameGap));
         this.setBodyStatus(it.status);
         this.pointer = it.pointer || null;
-        if (this.pointer) {
-            // Pointing holds the scene still at once (no easing out), so the
-            // sign stays under the pointer while it is held.
+        if (this.pointer && !it.aim) {
+            // Normal pointing holds the scene still at once (no easing out), so
+            // the sign stays under the pointer while it is held.
             this.poseMove = 0;
             this.intent = {turn: 0, move: 0, rise: 0};
-            return;
+        } else if (this.pointer && it.aim) {
+            // One-arm aim: hold forward/rise but keep steering, so the presenter
+            // can aim the centre crosshair with their shoulders.
+            this.poseMove = 0;
+            this.intent = {turn: this.blend(this.intent.turn || 0, it.turn, frameDt), move: 0, rise: 0};
+        } else {
+            this.poseMove = this.blend(this.poseMove, it.move, frameDt);
+            this.intent = {turn: this.blend(this.intent.turn || 0, it.turn, frameDt),
+                move: this.poseMove, rise: it.rise};
         }
-        this.poseMove = this.blend(this.poseMove, it.move, frameDt);
-        var turn = this.blend(this.intent.turn || 0, it.turn, frameDt);
-        this.intent = {turn: turn, move: this.poseMove, rise: it.rise};
+        // Report the live intent to the on-screen gesture/speed indicator.
+        if (this.onintent) {
+            this.onintent(this.intent, it.status, this.pointer);
+        }
     };
 
     /**
@@ -13054,6 +13065,27 @@ define('format_mnemo/vr', [], function() {
         this.bodyStatus = status;
         if (this.onstatus) {
             this.onstatus(status);
+        }
+    };
+
+    /**
+     * Turn the one-arm (reduced) accessibility profile on or off, live: the
+     * loaded BodyPose, if any, switches at once, and a later (re)load keeps it.
+     *
+     * @param {Boolean} on Whether to use the one-arm profile.
+     */
+    CameraNav.prototype.setReduced = function(on) {
+        this.reduced = !!on;
+        if (this.body) {
+            this.body.reduced = this.reduced;
+            if (this.reduced && this.body.paused) {
+                // Crossing both arms (the two-arm resume gesture) is exactly what
+                // this profile avoids, so never leave the control stuck paused
+                // when switching to one-arm mode.
+                this.body.paused = false;
+                this.body.crossTime = 0;
+                this.body.crossLatched = false;
+            }
         }
     };
 
@@ -13180,6 +13212,7 @@ define('format_mnemo/vr', [], function() {
             self.poseLoading = false;
             if (self.active) {
                 self.body = new BodyPose(lm);
+                self.body.reduced = !!self.reduced;
                 if (self.onpose) {
                     self.onpose();
                 }
@@ -13803,7 +13836,17 @@ define('format_mnemo/vr', [], function() {
         this.pointRangeX = 1.5; // Hand offset from the body's middle (x width) to a screen edge.
         this.pointCentreY = 0.6; // Hand height above the shoulders (x width) = screen middle.
         this.pointRangeY = 0.6; // Hand height change (x width) to the top or bottom edge.
-        this.pointEase = 0.35; // Pointer smoothing per frame (0..1; 1 = none).
+        this.pointEase = 0.35; // Legacy fixed pointer smoothing (kept for reference).
+        // Adaptive pointer smoothing: damp hard when the hand is nearly still
+        // (kills landmark jitter so the dot does not waver), ease faster the
+        // further the hand has genuinely moved (so it stays responsive).
+        this.pointDead = 0.02; // Hand movement (screen fraction) treated as jitter.
+        this.pointSpan = 0.3; // Movement for the fastest easing.
+        this.pointEaseMin = 0.06; // Easing at/below the jitter radius (heavy damping).
+        this.pointEaseMax = 0.5; // Easing at/above pointSpan (responsive).
+        // The one-arm (reduced) accessibility profile: only one raised arm plus
+        // shoulder steering, no two-arm gestures. Set by the control.
+        this.reduced = false;
         this.reset();
     }
 
@@ -13834,6 +13877,66 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The wrist-derived features of one person: the average and single-arm wrist
+     * height above the shoulders (the forward/climb dial, two-arm and one-arm),
+     * the average and single-hand draw-in from the body's middle (the pull-in
+     * reverse), and whether the arms are crossed. Heights are in widths (up
+     * positive) and draw-in in widths. The single-arm values are present with
+     * either arm; the averages and crossed need both.
+     *
+     * @param {Object} mid The shoulder midpoint.
+     * @param {Number} width The shoulder width.
+     * @param {Object} ls The left shoulder landmark.
+     * @param {Object} rs The right shoulder landmark.
+     * @param {Object} lw The left wrist landmark.
+     * @param {Object} rw The right wrist landmark.
+     * @return {Object} {armH, handClose, armHhi, handCloseMin, crossed}.
+     */
+    BodyPose.prototype.wristFeatures = function(mid, width, ls, rs, lw, rw) {
+        var out = {armH: null, handClose: null, armHhi: null, handCloseMin: null, crossed: false};
+        var lseen = this.seen(lw);
+        var rseen = this.seen(rw);
+        if (!lseen && !rseen) {
+            return out;
+        }
+        var lh = lseen ? (mid.y - lw.y) / width : null;
+        var rh = rseen ? (mid.y - rw.y) / width : null;
+        var lc = lseen ? Math.abs(lw.x - mid.x) / width : null;
+        var rc = rseen ? Math.abs(rw.x - mid.x) / width : null;
+        out.armHhi = Math.max(lh === null ? -Infinity : lh, rh === null ? -Infinity : rh);
+        out.handCloseMin = Math.min(lc === null ? Infinity : lc, rc === null ? Infinity : rc);
+        if (lseen && rseen) {
+            out.armH = (lh + rh) / 2;
+            out.handClose = (lc + rc) / 2;
+            out.crossed = this.armsCrossed(mid, width, ls, rs, lw, rw);
+        }
+        return out;
+    };
+
+    /**
+     * Whether both arms are crossed over the chest: each wrist past the middle,
+     * on the other shoulder's side, at chest height.
+     *
+     * @param {Object} mid The shoulder midpoint.
+     * @param {Number} width The shoulder width.
+     * @param {Object} ls The left shoulder landmark.
+     * @param {Object} rs The right shoulder landmark.
+     * @param {Object} lw The left wrist landmark.
+     * @param {Object} rw The right wrist landmark.
+     * @return {Boolean} True when the arms are crossed.
+     */
+    BodyPose.prototype.armsCrossed = function(mid, width, ls, rs, lw, rw) {
+        var margin = 0.1 * width;
+        var chest = function(wr) {
+            return wr.y > mid.y - 0.2 * width && wr.y < mid.y + 2.2 * width;
+        };
+        var across = function(wr, s) {
+            return (wr.x - mid.x) * (s.x - mid.x) < 0 && Math.abs(wr.x - mid.x) > margin;
+        };
+        return across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
+    };
+
+    /**
      * The gesture features of one person: shoulder midpoint and width (a proxy
      * for distance from the camera), shoulder twist, the average height of the
      * wrists above the shoulders (the forward/climb dial) and how far in from the
@@ -13861,33 +13964,12 @@ define('format_mnemo/vr', [], function() {
         // Turning to the presenter's right sends the right shoulder back (larger
         // z) and the left one forward, so this is positive for a right turn.
         var twist = ((rs.z || 0) - (ls.z || 0)) / width;
-        var lw = lm[15];
-        var rw = lm[16];
-        var armH = null;
-        var handClose = null;
-        var crossed = false;
-        if (this.seen(lw) && this.seen(rw)) {
-            // The wrists' average height above the shoulders (in widths, up is
-            // positive) drives the forward/climb dial; their average distance in
-            // from the body's middle drives the pull-in reverse.
-            armH = (mid.y - (lw.y + rw.y) / 2) / width;
-            handClose = (Math.abs(lw.x - mid.x) + Math.abs(rw.x - mid.x)) / 2 / width;
-            // Crossed: each wrist past the middle, on the other shoulder's side,
-            // at chest height.
-            var margin = 0.1 * width;
-            var chest = function(w) {
-                return w.y > mid.y - 0.2 * width && w.y < mid.y + 2.2 * width;
-            };
-            var across = function(w, s) {
-                return (w.x - mid.x) * (s.x - mid.x) < 0 && Math.abs(w.x - mid.x) > margin;
-            };
-            crossed = across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
-        }
+        var w = this.wristFeatures(mid, width, ls, rs, lm[15], lm[16]);
         // Pointing is one hand raised with the other lowered, so both arms raised
         // (the dial) never reads as pointing; crossed arms (pause) never do either.
-        var point = crossed ? null : this.pointing(lm, mid, width);
-        return {mid: mid, width: width, twist: twist, armH: armH, handClose: handClose,
-            crossed: crossed, point: point};
+        var point = w.crossed ? null : this.pointing(lm, mid, width);
+        return {mid: mid, width: width, twist: twist, armH: w.armH, handClose: w.handClose,
+            armHhi: w.armHhi, handCloseMin: w.handCloseMin, crossed: w.crossed, point: point};
     };
 
     /**
@@ -14035,6 +14117,68 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Smooth the pointer toward a new hand position, damping hard when the hand
+     * is nearly still (so landmark jitter does not make the dot waver) and
+     * easing faster the further the hand has genuinely moved (so a deliberate
+     * move stays responsive). Returns the new pointer.
+     *
+     * @param {Object|null} prev The current pointer {x, y}, or null.
+     * @param {Object} target The hand's raw pointer {x, y}.
+     * @return {Object} The smoothed pointer {x, y}.
+     */
+    BodyPose.prototype.smoothPoint = function(prev, target) {
+        if (!prev) {
+            return target;
+        }
+        var dx = target.x - prev.x;
+        var dy = target.y - prev.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        var a = this.pointEaseMin + (this.pointEaseMax - this.pointEaseMin) *
+            this.ramp(d, this.pointDead, this.pointSpan);
+        return {x: prev.x + dx * a, y: prev.y + dy * a};
+    };
+
+    /**
+     * The one-arm (reduced) accessibility profile: a single raised arm is the
+     * forward/climb height dial and a single hand drawn in to the waist is
+     * reverse, while the shoulders steer. There are no two-arm gestures. When
+     * the arm is resting (not flying), a centre crosshair appears and the
+     * shoulders aim it: resting on a sign (holding still) opens it, so no
+     * separate pointing gesture is needed. Steering stays live while aiming.
+     *
+     * @param {Object} f The followed person's features.
+     * @return {Object} {move, turn, rise, pointer, aim, status}.
+     */
+    BodyPose.prototype.updateReduced = function(f) {
+        var turn = this.axis(f.twist - this.neutral.twist, this.turnDead, this.turnFull);
+        var forward = 0;
+        var rise = 0;
+        var reverse = 0;
+        if (f.armHhi !== null) {
+            var lift = this.ramp(f.armHhi, this.liftDead, this.liftFull);
+            var climb = this.ramp(f.armHhi, this.climbStart, this.climbFull);
+            forward = lift * (1 - climb);
+            rise = lift * climb;
+            if (lift < this.reverseLiftGate && f.handCloseMin !== null) {
+                reverse = this.ramp(this.reverseClose - f.handCloseMin, 0, this.reverseClose - this.reverseFull);
+            }
+        }
+        var move = forward - reverse;
+        // Rest-to-open needs at least one tracked wrist: with no arm visible the
+        // movement values are zero only because tracking is lost, not because
+        // the presenter is resting, so it must not aim and open a sign.
+        if (f.armHhi !== null && move === 0 && rise === 0) {
+            // Resting: aim with the shoulders and a centre crosshair dwells on
+            // the sign straight ahead. Steering stays live (unlike normal
+            // pointing) so the presenter can aim it.
+            this.pointer = {x: 0, y: 0};
+            return {move: 0, turn: turn, rise: 0, pointer: this.pointer, aim: true, status: 'pointing'};
+        }
+        this.pointer = null;
+        return {move: move, turn: turn, rise: rise, pointer: null, status: 'tracking'};
+    };
+
+    /**
      * Turn one frame's people into the navigation intent and a status for the
      * on-screen banner: 'lost' (no one seen), 'calibrating' (learning the
      * presenter's normal stance), 'paused' (arms crossed to pause), 'pointing'
@@ -14082,11 +14226,13 @@ define('format_mnemo/vr', [], function() {
             still.status = this.paused ? 'paused' : 'tracking';
             return still;
         }
+        // One-arm accessibility profile: only one raised arm plus steering.
+        if (this.reduced) {
+            return this.updateReduced(f);
+        }
         // Pointing: the scene holds still while the pointer follows the hand.
         if (f.point) {
-            var p = this.pointer;
-            var a = this.pointEase;
-            this.pointer = p ? {x: p.x + (f.point.x - p.x) * a, y: p.y + (f.point.y - p.y) * a} : f.point;
+            this.pointer = this.smoothPoint(this.pointer, f.point);
             still.pointer = this.pointer;
             still.status = 'pointing';
             return still;
@@ -14348,6 +14494,43 @@ define('format_mnemo/vr', [], function() {
         hint.className = 'format-mnemo__presenter-hint';
         text.appendChild(status);
         text.appendChild(hint);
+
+        // The live gesture/speed indicator: a labelled bar showing what the
+        // scene is being told to do, so the presenter (and audience) can see
+        // when a gesture registers and how strong it is.
+        var meter = document.createElement('div');
+        meter.className = 'format-mnemo__presenter-meter';
+        meter.setAttribute('aria-hidden', 'true');
+        var meterLabel = document.createElement('span');
+        meterLabel.className = 'format-mnemo__presenter-meter-label';
+        var meterTrack = document.createElement('span');
+        meterTrack.className = 'format-mnemo__presenter-meter-track';
+        var meterFill = document.createElement('span');
+        meterFill.className = 'format-mnemo__presenter-meter-fill';
+        meterTrack.appendChild(meterFill);
+        meter.appendChild(meterLabel);
+        meter.appendChild(meterTrack);
+        text.appendChild(meter);
+
+        // The one-arm accessibility toggle, remembered on this device. Read
+        // before the control is built so it starts in the chosen mode.
+        var reduced = false;
+        try {
+            reduced = window.localStorage.getItem('format_mnemo_presenterreduced') === '1';
+        } catch (e) {
+            reduced = false;
+        }
+        var onearm = document.createElement('label');
+        onearm.className = 'format-mnemo__presenter-onearm';
+        var onearmBox = document.createElement('input');
+        onearmBox.type = 'checkbox';
+        onearmBox.checked = reduced;
+        var onearmText = document.createElement('span');
+        onearmText.textContent = s.presenter_onearm || 'One-arm mode';
+        onearm.appendChild(onearmBox);
+        onearm.appendChild(onearmText);
+        text.appendChild(onearm);
+
         panel.appendChild(video);
         panel.appendChild(text);
         this.root.appendChild(panel);
@@ -14363,7 +14546,7 @@ define('format_mnemo/vr', [], function() {
         var analysis = document.createElement('canvas');
         analysis.width = 48;
         analysis.height = 36;
-        this.presenterNav = new CameraNav(this, {video: video, canvas: analysis, body: true});
+        this.presenterNav = new CameraNav(this, {video: video, canvas: analysis, body: true, reduced: reduced});
 
         // The banner: a status line, and the gesture guide while tracking.
         var show = function(statusText, hintText) {
@@ -14375,7 +14558,8 @@ define('format_mnemo/vr', [], function() {
             if (state === 'calibrating') {
                 show(s.presenter_calibrating);
             } else if (state === 'tracking') {
-                show(s.presenter_tracking, s.presenter_hint);
+                show(s.presenter_tracking, self.presenterNav.reduced ?
+                    (s.presenter_hint_reduced || s.presenter_hint) : s.presenter_hint);
             } else if (state === 'pointing') {
                 show(s.presenter_pointing);
             } else if (state === 'paused') {
@@ -14385,6 +14569,55 @@ define('format_mnemo/vr', [], function() {
             }
         };
         this.presenterNav.onstatus = describe;
+        // Live gesture/speed indicator: pick the strongest current gesture and
+        // show it with a proportional bar.
+        var gesture = function(intent, state) {
+            if (state === 'paused') {
+                return {label: s.presenter_gesture_paused || 'Paused', mag: 0};
+            }
+            if (state === 'pointing') {
+                return {label: s.presenter_gesture_point || 'Pointing', mag: 0};
+            }
+            if (state !== 'tracking') {
+                return {label: '', mag: 0};
+            }
+            var move = intent.move || 0;
+            var turn = intent.turn || 0;
+            var opts = [
+                {label: s.presenter_gesture_forward || 'Forward', mag: move > 0 ? move : 0},
+                {label: s.presenter_gesture_climb || 'Climb', mag: intent.rise || 0},
+                {label: s.presenter_gesture_reverse || 'Reverse', mag: move < 0 ? -move : 0},
+                {label: turn < 0 ? (s.presenter_gesture_steerleft || 'Steer left') :
+                    (s.presenter_gesture_steerright || 'Steer right'), mag: Math.abs(turn)}
+            ];
+            var best = opts[0];
+            opts.forEach(function(o) {
+                if (o.mag > best.mag) {
+                    best = o;
+                }
+            });
+            if (best.mag < 0.05) {
+                return {label: s.presenter_gesture_stop || 'Stop', mag: 0};
+            }
+            return best;
+        };
+        this.presenterNav.onintent = function(intent, state) {
+            var g = gesture(intent, state);
+            meterLabel.textContent = g.label;
+            meterFill.style.width = Math.round(Math.min(1, g.mag) * 100) + '%';
+        };
+        onearmBox.addEventListener('change', function() {
+            var on = onearmBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_presenterreduced', on ? '1' : '0');
+            } catch (e) {
+                // Device storage unavailable; the toggle still applies this session.
+            }
+            self.presenterNav.setReduced(on);
+            if (self.presenterNav.bodyStatus === 'tracking') {
+                describe('tracking'); // Swap the hint immediately.
+            }
+        });
         this.presenterNav.onpose = function() {
             show(s.presenter_lost);
         };
