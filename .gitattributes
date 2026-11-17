@@ -1,0 +1,17 @@
+# LF line endings everywhere (Windows checkouts otherwise add CRLF).
+* text=auto eol=lf
+
+# Binary assets: never convert line endings.
+*.glb binary
+*.wasm binary
+*.task binary
+*.png binary
+*.jpg binary
+*.ktx2 binary
+*.woff2 binary
+
+# Kept out of release zips (git archive) and GitHub's source archives.
+/.github export-ignore
+/tests export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
