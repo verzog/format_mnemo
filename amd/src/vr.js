@@ -13869,6 +13869,66 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The wrist-derived features of one person: the average and single-arm wrist
+     * height above the shoulders (the forward/climb dial, two-arm and one-arm),
+     * the average and single-hand draw-in from the body's middle (the pull-in
+     * reverse), and whether the arms are crossed. Heights are in widths (up
+     * positive) and draw-in in widths. The single-arm values are present with
+     * either arm; the averages and crossed need both.
+     *
+     * @param {Object} mid The shoulder midpoint.
+     * @param {Number} width The shoulder width.
+     * @param {Object} ls The left shoulder landmark.
+     * @param {Object} rs The right shoulder landmark.
+     * @param {Object} lw The left wrist landmark.
+     * @param {Object} rw The right wrist landmark.
+     * @return {Object} {armH, handClose, armHhi, handCloseMin, crossed}.
+     */
+    BodyPose.prototype.wristFeatures = function(mid, width, ls, rs, lw, rw) {
+        var out = {armH: null, handClose: null, armHhi: null, handCloseMin: null, crossed: false};
+        var lseen = this.seen(lw);
+        var rseen = this.seen(rw);
+        if (!lseen && !rseen) {
+            return out;
+        }
+        var lh = lseen ? (mid.y - lw.y) / width : null;
+        var rh = rseen ? (mid.y - rw.y) / width : null;
+        var lc = lseen ? Math.abs(lw.x - mid.x) / width : null;
+        var rc = rseen ? Math.abs(rw.x - mid.x) / width : null;
+        out.armHhi = Math.max(lh === null ? -Infinity : lh, rh === null ? -Infinity : rh);
+        out.handCloseMin = Math.min(lc === null ? Infinity : lc, rc === null ? Infinity : rc);
+        if (lseen && rseen) {
+            out.armH = (lh + rh) / 2;
+            out.handClose = (lc + rc) / 2;
+            out.crossed = this.armsCrossed(mid, width, ls, rs, lw, rw);
+        }
+        return out;
+    };
+
+    /**
+     * Whether both arms are crossed over the chest: each wrist past the middle,
+     * on the other shoulder's side, at chest height.
+     *
+     * @param {Object} mid The shoulder midpoint.
+     * @param {Number} width The shoulder width.
+     * @param {Object} ls The left shoulder landmark.
+     * @param {Object} rs The right shoulder landmark.
+     * @param {Object} lw The left wrist landmark.
+     * @param {Object} rw The right wrist landmark.
+     * @return {Boolean} True when the arms are crossed.
+     */
+    BodyPose.prototype.armsCrossed = function(mid, width, ls, rs, lw, rw) {
+        var margin = 0.1 * width;
+        var chest = function(wr) {
+            return wr.y > mid.y - 0.2 * width && wr.y < mid.y + 2.2 * width;
+        };
+        var across = function(wr, s) {
+            return (wr.x - mid.x) * (s.x - mid.x) < 0 && Math.abs(wr.x - mid.x) > margin;
+        };
+        return across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
+    };
+
+    /**
      * The gesture features of one person: shoulder midpoint and width (a proxy
      * for distance from the camera), shoulder twist, the average height of the
      * wrists above the shoulders (the forward/climb dial) and how far in from the
@@ -13896,49 +13956,12 @@ define('format_mnemo/vr', [], function() {
         // Turning to the presenter's right sends the right shoulder back (larger
         // z) and the left one forward, so this is positive for a right turn.
         var twist = ((rs.z || 0) - (ls.z || 0)) / width;
-        var lw = lm[15];
-        var rw = lm[16];
-        var lseen = this.seen(lw);
-        var rseen = this.seen(rw);
-        // Per-arm wrist height (in widths above the shoulders, up positive) and
-        // draw-in (distance in from the body's middle, in widths).
-        var lh = lseen ? (mid.y - lw.y) / width : null;
-        var rh = rseen ? (mid.y - rw.y) / width : null;
-        var lc = lseen ? Math.abs(lw.x - mid.x) / width : null;
-        var rc = rseen ? Math.abs(rw.x - mid.x) / width : null;
-        var armH = null;
-        var handClose = null;
-        // The single raised arm / drawn-in hand, used by the one-arm (reduced)
-        // profile: available with either arm, so it works for a presenter who
-        // cannot raise both.
-        var armHhi = null;
-        var handCloseMin = null;
-        if (lseen || rseen) {
-            armHhi = Math.max(lh === null ? -Infinity : lh, rh === null ? -Infinity : rh);
-            handCloseMin = Math.min(lc === null ? Infinity : lc, rc === null ? Infinity : rc);
-        }
-        var crossed = false;
-        if (lseen && rseen) {
-            // Both wrists tracked: their average height drives the two-arm
-            // forward/climb dial, and their average draw-in the pull-in reverse.
-            armH = (lh + rh) / 2;
-            handClose = (lc + rc) / 2;
-            // Crossed: each wrist past the middle, on the other shoulder's side,
-            // at chest height.
-            var margin = 0.1 * width;
-            var chest = function(w) {
-                return w.y > mid.y - 0.2 * width && w.y < mid.y + 2.2 * width;
-            };
-            var across = function(w, s) {
-                return (w.x - mid.x) * (s.x - mid.x) < 0 && Math.abs(w.x - mid.x) > margin;
-            };
-            crossed = across(lw, ls) && across(rw, rs) && chest(lw) && chest(rw);
-        }
+        var w = this.wristFeatures(mid, width, ls, rs, lm[15], lm[16]);
         // Pointing is one hand raised with the other lowered, so both arms raised
         // (the dial) never reads as pointing; crossed arms (pause) never do either.
-        var point = crossed ? null : this.pointing(lm, mid, width);
-        return {mid: mid, width: width, twist: twist, armH: armH, handClose: handClose,
-            armHhi: armHhi, handCloseMin: handCloseMin, crossed: crossed, point: point};
+        var point = w.crossed ? null : this.pointing(lm, mid, width);
+        return {mid: mid, width: width, twist: twist, armH: w.armH, handClose: w.handClose,
+            armHhi: w.armHhi, handCloseMin: w.handCloseMin, crossed: w.crossed, point: point};
     };
 
     /**
