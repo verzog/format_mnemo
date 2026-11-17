@@ -1,6 +1,6 @@
 # Presenter-mode gesture spec (draft for sign-off)
 
-Status: **DRAFT — for review**. Nothing here is implemented yet.
+Status: **SIGNED OFF** — all decisions (A–E) locked; implementation to follow.
 Scope: the teacher "presenter mode" camera navigation in `format_mnemo`,
 driven by the MediaPipe **PoseLandmarker** (`BodyPose` in `amd/src/vr.js`).
 Goal: replace the current gesture set with controls that are *physically
@@ -134,7 +134,7 @@ values to tune on a trial run.
   needs to be a short "back off a step", not a fast long-haul control — which
   also makes the in-place pull-back gesture perfectly sufficient.
 - **Descend:** lowering both arms below the forward position sinks gently toward
-  neutral; an explicit "come down" can be added if wanted. *(Flag if so.)*
+  neutral. Settled: no separate "come down" gesture — lowering the arms is enough.
 
 ### 4.5 Stop / pause / resume
 - **Stop (continuous):** the **rest state** — arms down, standing normally.
@@ -152,11 +152,10 @@ values to tune on a trial run.
 - **Interact:** **dwell** — hold the pointer on a sign ~1.5 s to open it
   (current `presenterDwell`). This replaces "finger gun + thumb", which the
   camera can't see.
-- ⭐ **DECISION C — is there a faster "click" than dwell?** Options: keep dwell
-  only (calmest, most reliable); or add a deliberate "push" (raised hand jabs
-  forward) as an immediate select. Dwell-only is the safe default.
-- ⭐ **DECISION D — handedness.** Point/【stop】 should work with **either** hand,
-  not "right", for left-handers. Recommended: either hand.
+- ✅ **Interact = dwell only (Decision C, LOCKED).** Calmest and most reliable;
+  no "push to click" (a forward jab is too easy to trigger by accident).
+- ✅ **Either hand (Decision D, LOCKED).** Pointing works with the left or right
+  hand, for left-handers.
 
 ### 4.7 Summary table
 
@@ -231,9 +230,9 @@ No two move-poses occupy the same arm position, so the camera never guesses.
   accessible **list view** remain fully functional and equal.
 - All point/stop controls work with **either** hand (Decision D).
 - Nothing here changes the learner (non-presenter) experience.
-- ⭐ **DECISION E — reduced-gesture profile?** Optional: a mode that needs only
-  *one* arm + steering (no two-arm raises) for presenters who can't raise both
-  arms. Worth it? (Recommended: yes, as a follow-up.)
+- ✅ **Reduced-gesture profile (Decision E, LOCKED).** A mode that needs only
+  *one* arm + steering (no two-arm raises), for presenters who can't raise both
+  arms. May land as a fast-follow if it risks delaying the main work.
 
 ---
 
@@ -258,10 +257,11 @@ No two move-poses occupy the same arm position, so the camera never guesses.
 
 ## 12. Decisions checklist (for our review)
 - [x] **A** — Vertical arm-height dial (forward↔climb). ✅ LOCKED. (§4.3)
-- [ ] **B** — In-place reverse: pull both hands in to the waist (recommended)
-      vs a short step-back nudge. (§4.4)
-- [ ] **C** — Interact = dwell only (recommended) vs dwell + push? (§4.6)
-- [ ] **D** — Point/stop with either hand (recommended) vs fixed hand? (§4.6)
-- [ ] **E** — Add a one-arm reduced-gesture accessibility profile? (§9)
-- [ ] Any explicit "descend / come down" control wanted? (§4.4)
-- [ ] Thresholds in §7 acceptable as starting points to tune?
+- [x] **B** — In-place reverse: pull both hands in to the waist. ✅ LOCKED. (§4.4)
+- [x] **C** — Interact = dwell only. ✅ LOCKED. (§4.6)
+- [x] **D** — Point works with either hand. ✅ LOCKED. (§4.6)
+- [x] **E** — One-arm reduced-gesture accessibility profile included. ✅ LOCKED. (§9)
+- [x] **Descend** — no separate control; lowering the arms is enough. ✅ LOCKED. (§4.4)
+- [x] Thresholds in §7 accepted as starting points, to tune on a trial run.
+
+**All decisions signed off. Spec is locked for implementation.**
