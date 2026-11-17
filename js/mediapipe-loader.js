@@ -14,8 +14,8 @@
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
 //
-// Native ES module loader for MediaPipe Tasks Vision (hand/face landmarkers),
-// used by the optional pose-based camera navigation.
+// Native ES module loader for MediaPipe Tasks Vision (hand/face/pose
+// landmarkers), used by the optional pose-based camera navigation.
 //
 // Like three-esm-loader.js, this file is deliberately NOT under amd/src: Moodle's
 // JS build (rollup) rewrites a literal import() into a RequireJS call, which
@@ -59,6 +59,7 @@ const src = sameSite(params.get('src'));
         FilesetResolver: vision.FilesetResolver,
         HandLandmarker: vision.HandLandmarker,
         FaceLandmarker: vision.FaceLandmarker,
+        PoseLandmarker: vision.PoseLandmarker,
     }}));
 }).catch((error) => {
     window.dispatchEvent(new CustomEvent('format_mnemo:mediapipe-error', {detail: error}));

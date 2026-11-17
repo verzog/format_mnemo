@@ -1194,11 +1194,16 @@ class scene implements renderable, templatable {
                 }
             }
         }
-        // Once any building is uploaded the buildings base is the upload area, so
-        // a bundled building with no upload of its own (a slot left on Default)
-        // gets its bundled URL here.
-        $uploaded = $this->uploaded_building_modnames();
-        if ($uploaded) {
+        // Once anything is uploaded to the building area the buildings base moves
+        // to that area, so a bundled building with no upload of its own (a slot
+        // left on Default) gets its bundled URL here, otherwise the client would
+        // request it from the upload area and 404. This is gated on the base
+        // having actually moved (the area holding any file), not on a recognised
+        // building-<modname> upload existing: the two differ when the area holds
+        // only, say, a lite or non-building file, and a bundled building must
+        // still resolve in that case.
+        if ($this->uploaded_pack_base_url('buildingassets') !== null) {
+            $uploaded = $this->uploaded_building_modnames();
             foreach (array_diff($this->bundled_building_modnames(), $uploaded) as $modname) {
                 $name = 'building-' . $modname;
                 if (!isset($out[$name])) {
