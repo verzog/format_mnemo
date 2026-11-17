@@ -5272,6 +5272,59 @@ const scenarios = [
         }
     },
     {
+        name: 'bodypose: one-arm (reduced) profile flies on one arm, steers while aiming, rests to aim',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            bp.reduced = true;
+            const base = window.__mnemoTest.mkBody;
+            const w = 0.2;
+            // A one-arm pose: the left wrist (15) raised to height h (widths above
+            // the shoulders) and drawn in to x-offset cxOff (widths); the right
+            // arm stays resting at the side.
+            const oneArm = (h, cxOff) => {
+                const lm = base({});
+                lm[15] = {x: 0.5 + (cxOff === undefined ? 0.5 : cxOff) * w, y: 0.5 - h * w, z: 0, visibility: 1};
+                return lm;
+            };
+            const run = (lm, secs) => {
+                let it = null;
+                for (let t = 0; t < secs; t += 0.05) {
+                    it = bp.update([lm], 0.05);
+                }
+                return it;
+            };
+            run(base({}), 1.6); // Calibrate.
+            const rest = run(base({}), 0.1); // Both arms down: idle -> centre aim.
+            const fwd = run(oneArm(0), 0.1); // One arm at shoulder height: forward.
+            const climb = run(oneArm(1.3), 0.1); // One arm overhead: climb.
+            const rev = run(oneArm(-1.0, 0.1), 0.1); // One hand low and drawn in: reverse.
+            const aim = run(base({rz: 0.1}), 0.1); // Arms down, shoulders twisted: steer while aiming.
+            const pass = rest.status === 'pointing' && rest.aim === true &&
+                rest.pointer && rest.pointer.x === 0 && rest.pointer.y === 0 && rest.move === 0 &&
+                fwd.status === 'tracking' && fwd.move > 0.8 && fwd.rise === 0 &&
+                climb.rise > 0.8 && Math.abs(climb.move) < 0.2 &&
+                rev.move < -0.5 &&
+                aim.aim === true && aim.turn > 0 && aim.pointer.x === 0;
+            return {pass, detail: `rest=${rest.status}/${rest.aim} fwd=${fwd.move.toFixed(2)} ` +
+                `climb=${climb.rise.toFixed(2)} rev=${rev.move.toFixed(2)} aimTurn=${aim.turn.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'bodypose: adaptive pointer smoothing damps jitter but stays responsive',
+        fn: () => {
+            const BP = window.__mnemoModule._BodyPose;
+            const bp = new BP(null);
+            const first = bp.smoothPoint(null, {x: 0.3, y: 0.2}); // No previous: snaps to the hand.
+            const jitter = bp.smoothPoint({x: 0, y: 0}, {x: 0.01, y: 0}); // Tiny move: barely follows.
+            const move = bp.smoothPoint({x: 0, y: 0}, {x: 0.5, y: 0}); // Big move: follows strongly.
+            const pass = first.x === 0.3 && first.y === 0.2 &&
+                Math.abs(jitter.x) < 0.002 &&
+                move.x > 0.2;
+            return {pass, detail: `first=${first.x} jitter=${jitter.x.toFixed(4)} move=${move.x.toFixed(2)}`};
+        }
+    },
+    {
         name: 'bodypose: crossed arms held pause, and crossing again resumes',
         fn: () => {
             const BP = window.__mnemoModule._BodyPose;

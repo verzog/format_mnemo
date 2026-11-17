@@ -465,6 +465,56 @@
     color: #9fe6ff;
 }
 
+/* Live gesture/speed indicator: a label plus a bar that fills with the
+   strength of the current gesture. */
+.format-mnemo__presenter-meter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    min-height: 8px;
+}
+
+.format-mnemo__presenter-meter-label {
+    flex: 0 0 auto;
+    min-width: 7em;
+    font-size: 1.1rem;
+    color: #cfefff;
+}
+
+.format-mnemo__presenter-meter-track {
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.18);
+    overflow: hidden;
+}
+
+.format-mnemo__presenter-meter-fill {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: 4px;
+    background: #3ad0ff;
+    transition: width 100ms linear;
+}
+
+/* The one-arm (reduced) accessibility toggle. */
+.format-mnemo__presenter-onearm {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 1.05rem;
+    color: #cfefff;
+    cursor: pointer;
+}
+
+.format-mnemo__presenter-onearm input {
+    width: 16px;
+    height: 16px;
+}
+
 /* Presenter mode pointer: a ring that follows the presenter's pointing hand
    and fills while it rests on a sign (--mnemo-dwell is 0..100). */
 .format-mnemo__presenter-ring {
