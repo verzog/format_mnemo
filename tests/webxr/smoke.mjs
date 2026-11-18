@@ -356,7 +356,7 @@ const scenarios = [
         }
     },
     {
-        name: 'intro: the sky-drop lifts the rig and lands it at the start',
+        name: 'intro: the warp-in rushes the rig forward and lands it at the start',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
@@ -376,23 +376,27 @@ const scenarios = [
                     finishIntro: CS.prototype.finishIntro
                 };
                 self.startIntro();
-                const lifted = self.introActive === true && player.position.y > 100 &&
-                    self.pitch < 0;
+                // Starts far back down the avenue with a widened (warp) FOV.
+                const warped = self.introActive === true && player.position.z > 100 &&
+                    self.camera.fov > 90 && self.pitch < 0;
                 for (let i = 0; i < 300 && self.introActive; i++) {
                     self.updateIntro(0.05);
                 }
                 const landed = self.introActive === false &&
                     Math.abs(player.position.y) < 1e-6 &&
                     Math.abs(player.position.z - 12) < 1e-6 &&
-                    Math.abs(self.pitch) < 1e-6;
-                return {pass: lifted && landed, detail: `lifted=${lifted} landed=${landed} y=${player.position.y.toFixed(2)}`};
+                    Math.abs(self.pitch) < 1e-6 &&
+                    Math.abs(self.camera.fov - 70) < 1e-6;
+                return {pass: warped && landed,
+                    detail: `warped=${warped} landed=${landed} ` +
+                        `z=${player.position.z.toFixed(2)} fov=${self.camera.fov.toFixed(1)}`};
             } finally {
                 window.matchMedia = origMM;
             }
         }
     },
     {
-        name: 'intro: a press skips the drop straight to the start position',
+        name: 'intro: a press skips the warp-in straight to the start position',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
@@ -411,12 +415,15 @@ const scenarios = [
                     finishIntro: CS.prototype.finishIntro
                 };
                 self.startIntro();
-                self.updateIntro(0.1); // A few frames into the descent.
-                const midair = player.position.y > 100;
+                self.updateIntro(0.1); // A few frames into the rush.
+                const midrush = player.position.z > 100 && self.camera.fov > 90;
                 self.finishIntro(); // Skip.
-                const pass = midair && self.introActive === false &&
-                    Math.abs(player.position.y) < 1e-6 && Math.abs(player.position.z - 12) < 1e-6;
-                return {pass, detail: `midair=${midair} y=${player.position.y.toFixed(2)}`};
+                const pass = midrush && self.introActive === false &&
+                    Math.abs(player.position.y) < 1e-6 &&
+                    Math.abs(player.position.z - 12) < 1e-6 &&
+                    Math.abs(self.camera.fov - 70) < 1e-6;
+                return {pass, detail: `midrush=${midrush} ` +
+                    `z=${player.position.z.toFixed(2)} fov=${self.camera.fov.toFixed(1)}`};
             } finally {
                 window.matchMedia = origMM;
             }
@@ -3181,15 +3188,16 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const norm = CS.prototype.normalizeComfort;
             const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast',
-                locomotion: 'teleport', headsens: 'low', detail: 'high'});
+                locomotion: 'teleport', headsens: 'low', detail: 'high', signtext: 'ultra'});
             const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z', locomotion: 'q',
-                headsens: 'w', detail: 'ultra'});
+                headsens: 'w', detail: 'ultra', signtext: 'bogus'});
             const empty = norm(null);
             const pass = valid.turn === 'smooth' && valid.snapangle === 45 &&
                 valid.headsens === 'low' && bad.headsens === 'normal' && empty.headsens === 'normal' &&
                 valid.vignette === 'off' && valid.speed === 'fast' &&
                 valid.locomotion === 'teleport' &&
                 valid.detail === 'high' && bad.detail === 'standard' && empty.detail === 'standard' &&
+                valid.signtext === 'ultra' && bad.signtext === 'normal' && empty.signtext === 'normal' &&
                 bad.turn === 'snap' && bad.snapangle === 30 &&
                 bad.vignette === 'full' && bad.speed === 'normal' &&
                 bad.locomotion === 'smooth' &&
@@ -3215,21 +3223,28 @@ const scenarios = [
         }
     },
     {
-        name: 'comfort: sign-text resolution is a fixed flat-screen boost, capped on a headset',
+        name: 'comfort: sign-text resolution is x2 flat, x4 Ultra, capped on a headset',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const self = Object.create(CS.prototype);
-            // Fixed on flat screens (not tied to the Detail toggle, so no stale
-            // sign textures), and 1x on a headset where texture memory is tight.
+            // Flat screen default is x2; the opt-in Ultra mode jumps to x4; the
+            // Detail toggle does not affect it (so no stale sign textures); and a
+            // headset stays at 1x where texture memory is tight (Ultra included).
             self.isHeadsetBrowser = () => false;
-            self.comfort = {detail: 'standard'};
+            self.comfort = {detail: 'standard', signtext: 'normal'};
             const std = self.signTextScale();
-            self.comfort = {detail: 'high'};
+            self.comfort = {detail: 'high', signtext: 'normal'};
             const high = self.signTextScale();
+            self.comfort = {detail: 'standard', signtext: 'ultra'};
+            const ultra = self.signTextScale();
             self.isHeadsetBrowser = () => true;
             const headset = self.signTextScale();
-            const pass = std === 2 && high === 2 && headset === 1;
-            return {pass, detail: `flat=${std} flatHigh=${high} headset=${headset}`};
+            self.comfort = {detail: 'standard', signtext: 'ultra'};
+            const headsetUltra = self.signTextScale();
+            const pass = std === 2 && high === 2 && ultra === 4 &&
+                headset === 1 && headsetUltra === 1;
+            return {pass, detail: `flat=${std} flatHigh=${high} ultra=${ultra} ` +
+                `headset=${headset} headsetUltra=${headsetUltra}`};
         }
     },
     {

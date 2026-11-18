@@ -6746,7 +6746,14 @@ define('format_mnemo/vr', [], function() {
      * @return {Number} The sign-text resolution multiplier.
      */
     Cyberspace.prototype.signTextScale = function() {
-        return this.isHeadsetBrowser() ? 1 : 2;
+        // Headsets keep a modest multiplier (texture memory is tight there). On
+        // a flat screen the default is x2; the opt-in "Ultra" sign-text mode
+        // jumps to x4, a large step up in texel density that needs more memory
+        // and a heavier build, hence the loading screen when it is switched on.
+        if (this.isHeadsetBrowser()) {
+            return 1;
+        }
+        return (this.comfort && this.comfort.signtext === 'ultra') ? 4 : 2;
     };
 
     /**
@@ -6810,14 +6817,14 @@ define('format_mnemo/vr', [], function() {
         var cx = canvas.width / 2;
         var startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
 
-        // Pass 1: a soft neon glow (a blurred halo around the letters).
+        // Pass 1: a tight neon glow (a small blurred halo, drawn once). The old
+        // 16px halo drawn twice bled into the letters and softened their edges;
+        // a tighter single halo keeps the neon look without blurring the text.
         ctx.shadowColor = hex;
-        ctx.shadowBlur = 16 * ss;
+        ctx.shadowBlur = 7 * ss;
         ctx.fillStyle = hex;
         for (var l = 0; l < lines.length; l++) {
-            var gy = startY + l * lineHeight;
-            ctx.fillText(lines[l], cx, gy);
-            ctx.fillText(lines[l], cx, gy);
+            ctx.fillText(lines[l], cx, startY + l * lineHeight);
         }
         // Pass 2: a crisp core with no blur, so the letters read sharply on top
         // of their own glow instead of smearing into it.
@@ -7257,9 +7264,10 @@ define('format_mnemo/vr', [], function() {
     var COMFORT_LOCOMOTION = {smooth: true, teleport: true};
     var COMFORT_HEADSENS = {low: true, normal: true, high: true};
     var COMFORT_DETAIL = {standard: true, high: true};
+    var COMFORT_SIGNTEXT = {normal: true, ultra: true};
     var COMFORT_DEFAULT = {
         turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal', locomotion: 'smooth',
-        headsens: 'normal', detail: 'standard'
+        headsens: 'normal', detail: 'standard', signtext: 'normal'
     };
 
     /**
@@ -7269,7 +7277,7 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Object} c A partial/untrusted comfort object, or null.
      * @return {Object} {turn, snapangle, vignette, speed, locomotion, headsens,
-     *     detail}.
+     *     detail, signtext}.
      */
     Cyberspace.prototype.normalizeComfort = function(c) {
         c = c || {};
@@ -7281,7 +7289,8 @@ define('format_mnemo/vr', [], function() {
             speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed,
             locomotion: COMFORT_LOCOMOTION[c.locomotion] ? c.locomotion : COMFORT_DEFAULT.locomotion,
             headsens: COMFORT_HEADSENS[c.headsens] ? c.headsens : COMFORT_DEFAULT.headsens,
-            detail: COMFORT_DETAIL[c.detail] ? c.detail : COMFORT_DEFAULT.detail
+            detail: COMFORT_DETAIL[c.detail] ? c.detail : COMFORT_DEFAULT.detail,
+            signtext: COMFORT_SIGNTEXT[c.signtext] ? c.signtext : COMFORT_DEFAULT.signtext
         };
     };
 
@@ -7404,33 +7413,42 @@ define('format_mnemo/vr', [], function() {
      * @return {Array} The row definitions {field, label, options}.
      */
     Cyberspace.prototype.comfortRows = function(s) {
+        // Resolve a localised label with an English fallback. Kept in a helper so
+        // the many fallbacks count against its complexity, not comfortRows'.
+        var t = function(key, dflt) {
+            return s[key] || dflt;
+        };
         return [
-            {field: 'turn', label: s.comfortturn || 'Turning', options: [
-                {value: 'snap', label: s.comfortturnsnap || 'Snap'},
-                {value: 'smooth', label: s.comfortturnsmooth || 'Smooth'}
+            {field: 'turn', label: t('comfortturn', 'Turning'), options: [
+                {value: 'snap', label: t('comfortturnsnap', 'Snap')},
+                {value: 'smooth', label: t('comfortturnsmooth', 'Smooth')}
             ]},
-            {field: 'snapangle', label: s.comfortangle || 'Snap angle', options: [
+            {field: 'snapangle', label: t('comfortangle', 'Snap angle'), options: [
                 {value: 15, label: '15°'},
                 {value: 30, label: '30°'},
                 {value: 45, label: '45°'}
             ]},
-            {field: 'vignette', label: s.comfortvignette || 'Motion vignette', options: [
-                {value: 'off', label: s.comfortoff || 'Off'},
-                {value: 'light', label: s.comfortlight || 'Light'},
-                {value: 'full', label: s.comfortfull || 'Full'}
+            {field: 'vignette', label: t('comfortvignette', 'Motion vignette'), options: [
+                {value: 'off', label: t('comfortoff', 'Off')},
+                {value: 'light', label: t('comfortlight', 'Light')},
+                {value: 'full', label: t('comfortfull', 'Full')}
             ]},
-            {field: 'speed', label: s.comfortspeed || 'Movement speed', options: [
-                {value: 'slow', label: s.comfortslow || 'Slow'},
-                {value: 'normal', label: s.comfortnormal || 'Normal'},
-                {value: 'fast', label: s.comfortfast || 'Fast'}
+            {field: 'speed', label: t('comfortspeed', 'Movement speed'), options: [
+                {value: 'slow', label: t('comfortslow', 'Slow')},
+                {value: 'normal', label: t('comfortnormal', 'Normal')},
+                {value: 'fast', label: t('comfortfast', 'Fast')}
             ]},
-            {field: 'locomotion', label: s.comfortmovement || 'Moving in VR', options: [
-                {value: 'smooth', label: s.comfortglide || 'Glide'},
-                {value: 'teleport', label: s.comfortteleport || 'Teleport'}
+            {field: 'locomotion', label: t('comfortmovement', 'Moving in VR'), options: [
+                {value: 'smooth', label: t('comfortglide', 'Glide')},
+                {value: 'teleport', label: t('comfortteleport', 'Teleport')}
             ]},
-            {field: 'detail', label: s.comfortdetail || 'Detail', options: [
-                {value: 'standard', label: s.comfortstandard || 'Standard'},
-                {value: 'high', label: s.comforthigh || 'High'}
+            {field: 'detail', label: t('comfortdetail', 'Detail'), options: [
+                {value: 'standard', label: t('comfortstandard', 'Standard')},
+                {value: 'high', label: t('comforthigh', 'High')}
+            ]},
+            {field: 'signtext', label: t('comfortsigntext', 'Sign text'), options: [
+                {value: 'normal', label: t('comfortnormal', 'Normal')},
+                {value: 'ultra', label: t('comfortultra', 'Ultra')}
             ]}
         ];
     };
@@ -7507,6 +7525,7 @@ define('format_mnemo/vr', [], function() {
      * @param {String|Number} value The new value for that field.
      */
     Cyberspace.prototype.setComfort = function(field, value) {
+        var previous = this.comfort[field];
         this.comfort[field] = value;
         this.comfort = this.normalizeComfort(this.comfort);
         this.markComfortActive();
@@ -7518,6 +7537,72 @@ define('format_mnemo/vr', [], function() {
             this.onResize();
         }
         this.saveComfort();
+        // Sign-text resolution is baked into each sign's texture when the scene
+        // is built, so a real change can only take effect by rebuilding. With no
+        // in-place teardown, the cleanest path is to reload: the saved choice is
+        // read back on the fresh load, and the digital-noise loading screen
+        // covers the heavier Ultra build. Guarded so it only fires on an actual
+        // change and never in the headless test harness.
+        if (field === 'signtext' && this.comfort.signtext !== previous) {
+            this.reloadForSignText();
+        }
+    };
+
+    /**
+     * Reload the page so a new sign-text resolution is rebuilt from scratch,
+     * showing the loading screen while it happens. Split out so the test harness
+     * can stub it and so the reload is skipped where there is no real browser
+     * location to reload.
+     */
+    Cyberspace.prototype.reloadForSignText = function() {
+        this.showLoading(true);
+        try {
+            if (typeof window !== 'undefined' && window.location &&
+                    typeof window.location.reload === 'function') {
+                window.location.reload();
+            }
+        } catch (e) {
+            // No reloadable location (e.g. a test environment): leave the saved
+            // choice to take effect on the learner's next visit.
+            this.showLoading(false);
+        }
+    };
+
+    /**
+     * Show or hide the loading screen over the stage. The scene build removes
+     * the original element once it is up, so showing it again re-creates the
+     * same markup (the digital-noise backdrop is pure CSS). Used to flash the
+     * loading screen the instant the learner switches sign-text mode, before the
+     * page reloads into the rebuilt scene.
+     *
+     * @param {Boolean} on True to show, false to remove.
+     */
+    Cyberspace.prototype.showLoading = function(on) {
+        if (!this.root) {
+            return;
+        }
+        var el = this.root.querySelector('[data-mnemo-loading]');
+        if (!on) {
+            if (el) {
+                el.remove();
+            }
+            return;
+        }
+        if (!el) {
+            var s = (this.config && this.config.strings) || {};
+            el = document.createElement('div');
+            el.className = 'format-mnemo__loading';
+            el.setAttribute('data-mnemo-loading', '');
+            var spinner = document.createElement('span');
+            spinner.className = 'format-mnemo__spinner';
+            spinner.setAttribute('aria-hidden', 'true');
+            el.appendChild(spinner);
+            var label = document.createElement('span');
+            label.textContent = s.loading || 'Entering cyberspace…';
+            el.appendChild(label);
+            this.root.appendChild(el);
+        }
+        el.hidden = false;
     };
 
     /**
@@ -11504,9 +11589,11 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Set up the cinematic entry: start the rig high above the avenue mouth,
-     * pitched down at the city, so the first frame looks like a descent into
-     * cyberspace. Flat screen only (a forced move in a headset is nauseating),
+     * Set up the cinematic entry: a Johnny Mnemonic-style headlong rush into
+     * cyberspace. The rig starts far back down the avenue, a little high and
+     * looking in, with a widened field of view; it then races forward into the
+     * resting pose as the FOV eases back to normal, so the arrival "zooms in"
+     * and settles. Flat screen only (a forced move in a headset is nauseating),
      * and skipped entirely when the viewer prefers reduced motion.
      */
     Cyberspace.prototype.startIntro = function() {
@@ -11524,32 +11611,40 @@ define('format_mnemo/vr', [], function() {
         }
         var THREE = this.THREE;
         this.introEnd = this.player.position.clone();
-        // High up and a little further back, so the descent also sweeps forward
-        // down the avenue as it drops in.
-        this.introStart = new THREE.Vector3(this.introEnd.x, this.introEnd.y + 280, this.introEnd.z + 30);
+        // Far back down the avenue (+z is behind the resting pose) and a little
+        // high, so the entry is a forward dive through the city rather than a
+        // drop onto it.
+        this.introStart = new THREE.Vector3(this.introEnd.x, this.introEnd.y + 45, this.introEnd.z + 170);
         this.introEndPitch = this.pitch; // The resting look (level).
-        this.introStartPitch = -0.55; // Looking down at the city.
-        this.introDuration = 2.8;
+        this.introStartPitch = -0.12; // Looking in, slightly down the avenue.
+        this.introEndFov = this.camera.fov; // The resting field of view.
+        this.introStartFov = 108; // Widened for the warp-in; eases back to rest.
+        this.introDuration = 2.2;
         this.introTime = 0;
         this.introActive = true;
         this.player.position.copy(this.introStart);
         this.pitch = this.introStartPitch;
+        this.camera.fov = this.introStartFov;
+        this.camera.updateProjectionMatrix();
     };
 
     /**
-     * Advance the sky-drop intro: ease the rig from the sky down to the avenue
-     * mouth and level the look out, accelerating off the top and settling at the
-     * end (ease-in-out). User movement is suspended until it finishes.
+     * Advance the warp-in intro: race the rig forward from far down the avenue
+     * into the resting pose, levelling the look and easing the widened FOV back
+     * to normal. Ease-out so it rushes in fast and decelerates into place. User
+     * movement is suspended until it finishes.
      *
      * @param {Number} dt Delta time in seconds.
      */
     Cyberspace.prototype.updateIntro = function(dt) {
         this.introTime += dt;
         var t = Math.min(1, this.introTime / this.introDuration);
-        // Ease-in-out cubic: hang, accelerate down, then settle.
-        var e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        // Ease-out quint: a fast headlong rush that decelerates into place.
+        var e = 1 - Math.pow(1 - t, 5);
         this.player.position.lerpVectors(this.introStart, this.introEnd, e);
         this.pitch = this.introStartPitch + (this.introEndPitch - this.introStartPitch) * e;
+        this.camera.fov = this.introStartFov + (this.introEndFov - this.introStartFov) * e;
+        this.camera.updateProjectionMatrix();
         this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
         if (t >= 1) {
             this.finishIntro();
@@ -11558,7 +11653,8 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * End the intro immediately (it completed, or the viewer skipped it or
-     * entered a headset), snapping the rig to the resting start position.
+     * entered a headset), snapping the rig to the resting pose and restoring the
+     * resting field of view.
      */
     Cyberspace.prototype.finishIntro = function() {
         if (!this.introActive) {
@@ -11568,6 +11664,10 @@ define('format_mnemo/vr', [], function() {
         if (this.introEnd) {
             this.player.position.copy(this.introEnd);
             this.pitch = this.introEndPitch;
+        }
+        if (typeof this.introEndFov === 'number' && this.camera) {
+            this.camera.fov = this.introEndFov;
+            this.camera.updateProjectionMatrix();
         }
     };
 
@@ -16607,14 +16707,19 @@ define('format_mnemo/vr', [], function() {
             var loaded = null;
             loadThree(config).then(function(three) {
                 loaded = three;
-                var loading = root.querySelector('[data-mnemo-loading]');
-                if (loading) {
-                    loading.remove();
-                }
                 return loadSceneAssets(config, three.THREE);
             }).then(function(assets) {
                 try {
                     new Cyberspace(loaded.THREE, root, config, loaded, assets);
+                    // Remove the loading screen only once the scene is built. On
+                    // the Ultra sign-text path the build is heavier, so the
+                    // digital-noise loading screen (a composited CSS animation,
+                    // so it keeps moving even while the build blocks the main
+                    // thread) stays up until the crisp scene is ready.
+                    var loading = root.querySelector('[data-mnemo-loading]');
+                    if (loading) {
+                        loading.remove();
+                    }
                 } catch (e) {
                     failGracefully(container, root, config.strings.failed);
                     if (window.console) {
