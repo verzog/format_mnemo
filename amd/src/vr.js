@@ -6737,16 +6737,16 @@ define('format_mnemo/vr', [], function() {
      * The resolution multiplier for sign lettering: the text canvas is drawn at
      * this many times the base size so the letters read crisply when a sign
      * fills much of the screen, instead of magnifying a small canvas into a
-     * blur. Flat screens get a generous boost (more on High detail); a headset
-     * stays at 1x, where texture memory is tight.
+     * blur. A fixed flat-screen boost (headset stays at 1x, where texture memory
+     * is tight) - not tied to the Detail toggle, because sign textures are built
+     * once when the scene is built, so keying them to a live setting would leave
+     * stale textures until a reload; the Detail setting still sharpens the
+     * lettering through the scene supersample.
      *
      * @return {Number} The sign-text resolution multiplier.
      */
     Cyberspace.prototype.signTextScale = function() {
-        if (this.isHeadsetBrowser()) {
-            return 1;
-        }
-        return (this.comfort && this.comfort.detail === 'high') ? 3 : 2;
+        return this.isHeadsetBrowser() ? 1 : 2;
     };
 
     /**
@@ -6768,8 +6768,8 @@ define('format_mnemo/vr', [], function() {
         // instead of magnifying a small canvas into a blur. The per-sign ss (2
         // for large topic nameplates, 1 for activity signs) is multiplied by
         // signTextScale(), which raises the text resolution well above the old
-        // 512x128 on flat screens - more so on High detail - while capping it on
-        // a headset, where texture memory is tight.
+        // 512x128 on flat screens while capping it on a headset, where texture
+        // memory is tight.
         ss = (ss || 1) * this.signTextScale();
         var canvas = document.createElement('canvas');
         canvas.width = 512 * ss;
