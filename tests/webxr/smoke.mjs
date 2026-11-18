@@ -3179,19 +3179,37 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             const norm = CS.prototype.normalizeComfort;
             const valid = norm({turn: 'smooth', snapangle: 45, vignette: 'off', speed: 'fast',
-                locomotion: 'teleport', headsens: 'low'});
+                locomotion: 'teleport', headsens: 'low', detail: 'high'});
             const bad = norm({turn: 'x', snapangle: 99, vignette: 'y', speed: 'z', locomotion: 'q',
-                headsens: 'w'});
+                headsens: 'w', detail: 'ultra'});
             const empty = norm(null);
             const pass = valid.turn === 'smooth' && valid.snapangle === 45 &&
                 valid.headsens === 'low' && bad.headsens === 'normal' && empty.headsens === 'normal' &&
                 valid.vignette === 'off' && valid.speed === 'fast' &&
                 valid.locomotion === 'teleport' &&
+                valid.detail === 'high' && bad.detail === 'standard' && empty.detail === 'standard' &&
                 bad.turn === 'snap' && bad.snapangle === 30 &&
                 bad.vignette === 'full' && bad.speed === 'normal' &&
                 bad.locomotion === 'smooth' &&
                 empty.speed === 'normal' && empty.locomotion === 'smooth';
             return {pass, detail: `valid=${JSON.stringify(valid)} bad=${JSON.stringify(bad)}`};
+        }
+    },
+    {
+        name: 'comfort: High detail supersamples the scene target (capped)',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.renderer = {getPixelRatio: () => 1};
+            self.comfort = {detail: 'standard'};
+            const std = self.sceneScale();
+            self.comfort = {detail: 'high'};
+            const high = self.sceneScale();
+            // At a 2x device pixel ratio, High (x1.5 -> 3) is capped at 2.5.
+            self.renderer = {getPixelRatio: () => 2};
+            const capped = self.sceneScale();
+            const pass = std === 1 && high === 1.5 && capped === 2.5;
+            return {pass, detail: `std=${std} high=${high} capped=${capped}`};
         }
     },
     {
@@ -3353,6 +3371,7 @@ const scenarios = [
                 markComfortActive: CS.prototype.markComfortActive,
                 controlsRight: document.createElement('div'),
                 buildPanelClose: CS.prototype.buildPanelClose,
+                comfortRows: CS.prototype.comfortRows,
                 buildComfort: CS.prototype.buildComfort
             };
             self.buildComfort();
