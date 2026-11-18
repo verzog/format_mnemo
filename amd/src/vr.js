@@ -7238,9 +7238,10 @@ define('format_mnemo/vr', [], function() {
     var COMFORT_ANGLE = {'15': true, '30': true, '45': true};
     var COMFORT_LOCOMOTION = {smooth: true, teleport: true};
     var COMFORT_HEADSENS = {low: true, normal: true, high: true};
+    var COMFORT_DETAIL = {standard: true, high: true};
     var COMFORT_DEFAULT = {
         turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal', locomotion: 'smooth',
-        headsens: 'normal'
+        headsens: 'normal', detail: 'standard'
     };
 
     /**
@@ -7249,7 +7250,8 @@ define('format_mnemo/vr', [], function() {
      * device's stored choice, or nothing.
      *
      * @param {Object} c A partial/untrusted comfort object, or null.
-     * @return {Object} {turn, snapangle, vignette, speed, locomotion, headsens}.
+     * @return {Object} {turn, snapangle, vignette, speed, locomotion, headsens,
+     *     detail}.
      */
     Cyberspace.prototype.normalizeComfort = function(c) {
         c = c || {};
@@ -7260,8 +7262,24 @@ define('format_mnemo/vr', [], function() {
             vignette: COMFORT_VIGNETTE[c.vignette] ? c.vignette : COMFORT_DEFAULT.vignette,
             speed: COMFORT_SPEED[c.speed] ? c.speed : COMFORT_DEFAULT.speed,
             locomotion: COMFORT_LOCOMOTION[c.locomotion] ? c.locomotion : COMFORT_DEFAULT.locomotion,
-            headsens: COMFORT_HEADSENS[c.headsens] ? c.headsens : COMFORT_DEFAULT.headsens
+            headsens: COMFORT_HEADSENS[c.headsens] ? c.headsens : COMFORT_DEFAULT.headsens,
+            detail: COMFORT_DETAIL[c.detail] ? c.detail : COMFORT_DEFAULT.detail
         };
+    };
+
+    /**
+     * The scene render target's resolution scale (supersampling): the device
+     * pixel ratio, raised by the "High" detail setting so the whole scene - and
+     * the text on its signs - is rendered above the display resolution and
+     * downsampled for a sharper image. Capped so a high-DPI screen on High does
+     * not allocate an enormous buffer.
+     *
+     * @return {Number} The linear scale applied to the canvas size.
+     */
+    Cyberspace.prototype.sceneScale = function() {
+        var pr = this.renderer ? this.renderer.getPixelRatio() : 1;
+        var q = (this.comfort && this.comfort.detail === 'high') ? 1.5 : 1;
+        return Math.min(pr * q, 2.5);
     };
 
     /**
@@ -7360,6 +7378,46 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The comfort panel's rows: each a field, a label and its segmented options.
+     * Kept separate from buildComfort so the localisation fallbacks do not push
+     * that method's complexity over the linter's limit.
+     *
+     * @param {Object} s The localised strings.
+     * @return {Array} The row definitions {field, label, options}.
+     */
+    Cyberspace.prototype.comfortRows = function(s) {
+        return [
+            {field: 'turn', label: s.comfortturn || 'Turning', options: [
+                {value: 'snap', label: s.comfortturnsnap || 'Snap'},
+                {value: 'smooth', label: s.comfortturnsmooth || 'Smooth'}
+            ]},
+            {field: 'snapangle', label: s.comfortangle || 'Snap angle', options: [
+                {value: 15, label: '15°'},
+                {value: 30, label: '30°'},
+                {value: 45, label: '45°'}
+            ]},
+            {field: 'vignette', label: s.comfortvignette || 'Motion vignette', options: [
+                {value: 'off', label: s.comfortoff || 'Off'},
+                {value: 'light', label: s.comfortlight || 'Light'},
+                {value: 'full', label: s.comfortfull || 'Full'}
+            ]},
+            {field: 'speed', label: s.comfortspeed || 'Movement speed', options: [
+                {value: 'slow', label: s.comfortslow || 'Slow'},
+                {value: 'normal', label: s.comfortnormal || 'Normal'},
+                {value: 'fast', label: s.comfortfast || 'Fast'}
+            ]},
+            {field: 'locomotion', label: s.comfortmovement || 'Moving in VR', options: [
+                {value: 'smooth', label: s.comfortglide || 'Glide'},
+                {value: 'teleport', label: s.comfortteleport || 'Teleport'}
+            ]},
+            {field: 'detail', label: s.comfortdetail || 'Detail', options: [
+                {value: 'standard', label: s.comfortstandard || 'Standard'},
+                {value: 'high', label: s.comforthigh || 'High'}
+            ]}
+        ];
+    };
+
+    /**
      * Build the comfort settings control: a gear button (shown to every learner)
      * that opens a small panel of segmented controls for turn mode, snap angle,
      * motion vignette and movement speed. Changes apply live and are saved per
@@ -7386,31 +7444,7 @@ define('format_mnemo/vr', [], function() {
 
         // Each row: a label and a set of segmented option buttons. Picking one
         // updates that comfort field, applies it live and persists.
-        var rows = [
-            {field: 'turn', label: s.comfortturn || 'Turning', options: [
-                {value: 'snap', label: s.comfortturnsnap || 'Snap'},
-                {value: 'smooth', label: s.comfortturnsmooth || 'Smooth'}
-            ]},
-            {field: 'snapangle', label: s.comfortangle || 'Snap angle', options: [
-                {value: 15, label: '15°'},
-                {value: 30, label: '30°'},
-                {value: 45, label: '45°'}
-            ]},
-            {field: 'vignette', label: s.comfortvignette || 'Motion vignette', options: [
-                {value: 'off', label: s.comfortoff || 'Off'},
-                {value: 'light', label: s.comfortlight || 'Light'},
-                {value: 'full', label: s.comfortfull || 'Full'}
-            ]},
-            {field: 'speed', label: s.comfortspeed || 'Movement speed', options: [
-                {value: 'slow', label: s.comfortslow || 'Slow'},
-                {value: 'normal', label: s.comfortnormal || 'Normal'},
-                {value: 'fast', label: s.comfortfast || 'Fast'}
-            ]},
-            {field: 'locomotion', label: s.comfortmovement || 'Moving in VR', options: [
-                {value: 'smooth', label: s.comfortglide || 'Glide'},
-                {value: 'teleport', label: s.comfortteleport || 'Teleport'}
-            ]}
-        ];
+        var rows = this.comfortRows(s);
 
         rows.forEach(function(row) {
             var wrap = document.createElement('div');
@@ -7460,6 +7494,11 @@ define('format_mnemo/vr', [], function() {
         this.markComfortActive();
         this.markVrComfortActive();
         this.applyComfort();
+        // The detail level changes the scene render target's resolution, so
+        // reallocate it (and the rest of the size-dependent pipeline) at once.
+        if (field === 'detail' && this.postfx) {
+            this.onResize();
+        }
         this.saveComfort();
     };
 
@@ -11137,10 +11176,10 @@ define('format_mnemo/vr', [], function() {
         }
         var w = Math.max(1, this.root.clientWidth);
         var h = Math.max(1, this.root.clientHeight || 480);
-        // The scene target matches the canvas's device pixels, so high-DPI
-        // screens stay sharp; the bloom targets stay at half the CSS size so the
-        // glow keeps the same on-screen spread at any pixel ratio.
-        var pr = this.renderer.getPixelRatio();
+        // The scene target is rendered at sceneScale() times the CSS size (device
+        // pixels, raised by the High detail setting) and downsampled on composite,
+        // so high-DPI screens - and High detail - stay sharp; the bloom targets
+        // stay at half the CSS size so the glow keeps the same on-screen spread.
         // Multisample the scene target so geometry/neon edges stay smooth; the
         // plain default framebuffer's antialias no longer applies once we render
         // through an offscreen target.
@@ -11150,7 +11189,8 @@ define('format_mnemo/vr', [], function() {
         // All post targets stay linear: tone mapping is applied writing the
         // scene here, bloom is summed in linear light, and the final composite
         // encodes to sRGB for display (see compositeMat).
-        var scene = new THREE.WebGLRenderTarget(Math.round(w * pr), Math.round(h * pr), full);
+        var scale = this.sceneScale();
+        var scene = new THREE.WebGLRenderTarget(Math.round(w * scale), Math.round(h * scale), full);
         var bright = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurA = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
         var blurB = new THREE.WebGLRenderTarget(w / 2, h / 2, half);
@@ -11685,8 +11725,8 @@ define('format_mnemo/vr', [], function() {
         this.renderer.setSize(w, h, false);
         if (this.postfx) {
             var fx = this.postfx;
-            var pr = this.renderer.getPixelRatio();
-            fx.scene.setSize(Math.round(w * pr), Math.round(h * pr));
+            var scale = this.sceneScale();
+            fx.scene.setSize(Math.round(w * scale), Math.round(h * scale));
             fx.bright.setSize(w / 2, h / 2);
             fx.blurA.setSize(w / 2, h / 2);
             fx.blurB.setSize(w / 2, h / 2);

@@ -427,6 +427,7 @@ class scene implements renderable, templatable {
         $locomotions = ['smooth' => true, 'teleport' => true];
         $angles = [15 => true, 30 => true, 45 => true];
         $headsenses = ['low' => true, 'normal' => true, 'high' => true];
+        $details = ['standard' => true, 'high' => true];
         // Only a string field may index the allow-lists; a non-scalar (array,
         // object) becomes an empty string and so takes the default.
         $str = function ($value): string {
@@ -437,6 +438,7 @@ class scene implements renderable, templatable {
         $speed = $str($stored['speed'] ?? null);
         $locomotion = $str($stored['locomotion'] ?? null);
         $headsens = $str($stored['headsens'] ?? null);
+        $detail = $str($stored['detail'] ?? null);
         $angle = (isset($stored['snapangle']) && is_numeric($stored['snapangle'])) ? (int)$stored['snapangle'] : 0;
         return [
             'turn' => isset($turns[$turn]) ? $turn : 'snap',
@@ -445,6 +447,7 @@ class scene implements renderable, templatable {
             'speed' => isset($speeds[$speed]) ? $speed : 'normal',
             'locomotion' => isset($locomotions[$locomotion]) ? $locomotion : 'smooth',
             'headsens' => isset($headsenses[$headsens]) ? $headsens : 'normal',
+            'detail' => isset($details[$detail]) ? $detail : 'standard',
         ];
     }
 
@@ -970,6 +973,9 @@ class scene implements renderable, templatable {
                 'comfortmovement' => get_string('comfortmovement', 'format_mnemo'),
                 'comfortglide' => get_string('comfortglide', 'format_mnemo'),
                 'comfortteleport' => get_string('comfortteleport', 'format_mnemo'),
+                'comfortdetail' => get_string('comfortdetail', 'format_mnemo'),
+                'comfortstandard' => get_string('comfortstandard', 'format_mnemo'),
+                'comforthigh' => get_string('comforthigh', 'format_mnemo'),
                 'keybinds' => get_string('keybinds', 'format_mnemo'),
                 'keybindhint' => get_string('keybindhint', 'format_mnemo'),
                 'keybindforward' => get_string('keybindforward', 'format_mnemo'),
