@@ -3248,6 +3248,46 @@ const scenarios = [
         }
     },
     {
+        name: 'comfort: switching sign-text flushes the server pref, then reloads',
+        fn: async () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.root = document.createElement('div');
+            self.config = {strings: {}};
+            self.comfort = {signtext: 'ultra'};
+            // A pending debounced save that the reload must flush, not drop.
+            self.comfortSaveTimer = window.setTimeout(() => {}, 100000);
+            const order = [];
+            let posted = null;
+            const origRequire = window.require;
+            // Stub the AMD loader so the preference write settles at once.
+            window.require = (deps, cb) => {
+                order.push('post');
+                cb({call: (reqs) => {
+                    posted = reqs[0].args.preferences[0].value;
+                    return [Promise.resolve()];
+                }});
+            };
+            self.doReload = () => { order.push('reload'); };
+            try {
+                self.reloadForSignText();
+                const timerCleared = self.comfortSaveTimer === null;
+                // The reload is awaited on the preference write; drain the
+                // microtask queue (a macrotask tick) so the chain settles.
+                await new Promise((r) => setTimeout(r, 0));
+                const flushedFirst = order.length === 2 &&
+                    order[0] === 'post' && order[1] === 'reload';
+                const sentUltra = typeof posted === 'string' && posted.indexOf('ultra') !== -1;
+                const shownLoading = !!self.root.querySelector('[data-mnemo-loading]');
+                return {pass: timerCleared && flushedFirst && sentUltra && shownLoading,
+                    detail: `order=${order.join(',')} cleared=${timerCleared} ` +
+                        `posted=${posted} loading=${shownLoading}`};
+            } finally {
+                window.require = origRequire;
+            }
+        }
+    },
+    {
         name: 'comfort: applyComfort maps settings onto the gesture manager',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

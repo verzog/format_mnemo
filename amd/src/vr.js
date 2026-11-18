@@ -7381,16 +7381,45 @@ define('format_mnemo/vr', [], function() {
         }
         this.comfortSaveTimer = window.setTimeout(function() {
             self.comfortSaveTimer = null;
-            var json = JSON.stringify(self.comfort);
-            window.require(['core/ajax'], function(ajax) {
-                ajax.call([{
-                    methodname: 'core_user_set_user_preferences',
-                    args: {preferences: [{name: 'format_mnemo_comfort', value: json}]}
-                }])[0].catch(function() {
-                    // Not logged in, or the preference is not writable; ignore.
-                });
-            });
+            self.postComfortPref();
         }, 400);
+    };
+
+    /**
+     * Write the current comfort settings to the Moodle user preference now,
+     * returning a promise that resolves once the request has settled (whether it
+     * succeeded, failed, or there is no AJAX loader). Shared by the debounced
+     * saveComfort and by the sign-text reload, which must wait for the write
+     * before reloading (the rebuilt page reads the server preference ahead of
+     * localStorage, so an un-flushed write would let the old value win).
+     *
+     * @return {Promise} Resolves when the save has settled.
+     */
+    Cyberspace.prototype.postComfortPref = function() {
+        var self = this;
+        if (!window.require) {
+            return Promise.resolve();
+        }
+        return new Promise(function(resolve) {
+            window.require(['core/ajax'], function(ajax) {
+                resolve(ajax);
+            }, function() {
+                // The AJAX module failed to load; proceed without a server write.
+                resolve(null);
+            });
+        }).then(function(ajax) {
+            if (!ajax) {
+                return null;
+            }
+            var json = JSON.stringify(self.comfort);
+            return ajax.call([{
+                methodname: 'core_user_set_user_preferences',
+                args: {preferences: [{name: 'format_mnemo_comfort', value: json}]}
+            }])[0];
+        }).catch(function() {
+            // Not logged in, or the preference is not writable; ignore.
+            return null;
+        });
     };
 
     /**
@@ -7555,15 +7584,50 @@ define('format_mnemo/vr', [], function() {
      * location to reload.
      */
     Cyberspace.prototype.reloadForSignText = function() {
+        var self = this;
         this.showLoading(true);
+        // The debounced server write would be dropped by an immediate reload,
+        // and the rebuilt page reads the server preference ahead of this
+        // device's localStorage - so flush the preference now and reload only
+        // once it has been sent, else the old value overrides the new choice.
+        if (this.comfortSaveTimer) {
+            window.clearTimeout(this.comfortSaveTimer);
+            this.comfortSaveTimer = null;
+        }
+        var done = false;
+        var settle = function() {
+            if (done) {
+                return;
+            }
+            done = true;
+            self.doReload();
+        };
+        // Failsafe: reload anyway if the save stalls, so the learner is never
+        // stuck behind the loading screen.
+        window.setTimeout(settle, 2500);
+        this.postComfortPref().then(function() {
+            settle();
+            return null;
+        }).catch(function() {
+            settle();
+            return null;
+        });
+    };
+
+    /**
+     * Reload the current page. Wrapped in its own method so it can be stubbed in
+     * tests and so a missing/locked location (e.g. a test environment) is a
+     * no-op rather than an error.
+     */
+    Cyberspace.prototype.doReload = function() {
         try {
             if (typeof window !== 'undefined' && window.location &&
                     typeof window.location.reload === 'function') {
                 window.location.reload();
+            } else {
+                this.showLoading(false);
             }
         } catch (e) {
-            // No reloadable location (e.g. a test environment): leave the saved
-            // choice to take effect on the learner's next visit.
             this.showLoading(false);
         }
     };
