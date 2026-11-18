@@ -6734,6 +6734,22 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The resolution multiplier for sign lettering: the text canvas is drawn at
+     * this many times the base size so the letters read crisply when a sign
+     * fills much of the screen, instead of magnifying a small canvas into a
+     * blur. A fixed flat-screen boost (headset stays at 1x, where texture memory
+     * is tight) - not tied to the Detail toggle, because sign textures are built
+     * once when the scene is built, so keying them to a live setting would leave
+     * stale textures until a reload; the Detail setting still sharpens the
+     * lettering through the scene supersample.
+     *
+     * @return {Number} The sign-text resolution multiplier.
+     */
+    Cyberspace.prototype.signTextScale = function() {
+        return this.isHeadsetBrowser() ? 1 : 2;
+    };
+
+    /**
      * Build a horizontal neon text texture for a signboard. The text is wrapped
      * on word boundaries and the font auto-shrinks so the whole name fits the
      * sign face; a name too long even at the smallest size is clipped to the
@@ -6741,18 +6757,20 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {String} text The label text.
      * @param {Number} colour Hex int colour.
-     * @param {Number} [ss] Supersample factor (1 default, 2 for large signs).
+     * @param {Number} [ss] Per-sign supersample (1 default, 2 for large signs);
+     *     multiplied by signTextScale().
      * @return {Object} Three.CanvasTexture.
      */
     Cyberspace.prototype.makeTextTexture = function(text, colour, ss) {
         var THREE = this.THREE;
-        // Optional supersample: the sign plane is a fixed size in the world but
-        // can be drawn very large on screen, so more texels keep the letters
-        // crisp instead of magnifying a small canvas into a blur. Doubling the
-        // canvas quadruples its memory, though, so this is opt-in (ss = 2) for
-        // the few large topic nameplates only; the many activity signs stay 1x
-        // and rely on the crisp core pass below, keeping headset memory in check.
-        ss = ss || 1;
+        // Supersample: the sign plane is a fixed size in the world but can be
+        // drawn very large on screen, so more texels keep the letters crisp
+        // instead of magnifying a small canvas into a blur. The per-sign ss (2
+        // for large topic nameplates, 1 for activity signs) is multiplied by
+        // signTextScale(), which raises the text resolution well above the old
+        // 512x128 on flat screens while capping it on a headset, where texture
+        // memory is tight.
+        ss = (ss || 1) * this.signTextScale();
         var canvas = document.createElement('canvas');
         canvas.width = 512 * ss;
         canvas.height = 128 * ss;

@@ -1304,6 +1304,8 @@ const scenarios = [
                 const self = {
                     THREE, interactive: [], signTexture, signFontFamily: null,
                     makeTextTexture: CS.prototype.makeTextTexture,
+                    signTextScale: CS.prototype.signTextScale,
+                    isHeadsetBrowser: CS.prototype.isHeadsetBrowser,
                     maxAnisotropy: CS.prototype.maxAnisotropy,
                     signFontStack: CS.prototype.signFontStack,
                     wrapLines: CS.prototype.wrapLines,
@@ -3213,6 +3215,24 @@ const scenarios = [
         }
     },
     {
+        name: 'comfort: sign-text resolution is a fixed flat-screen boost, capped on a headset',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            // Fixed on flat screens (not tied to the Detail toggle, so no stale
+            // sign textures), and 1x on a headset where texture memory is tight.
+            self.isHeadsetBrowser = () => false;
+            self.comfort = {detail: 'standard'};
+            const std = self.signTextScale();
+            self.comfort = {detail: 'high'};
+            const high = self.signTextScale();
+            self.isHeadsetBrowser = () => true;
+            const headset = self.signTextScale();
+            const pass = std === 2 && high === 2 && headset === 1;
+            return {pass, detail: `flat=${std} flatHigh=${high} headset=${headset}`};
+        }
+    },
+    {
         name: 'comfort: applyComfort maps settings onto the gesture manager',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
@@ -3527,6 +3547,8 @@ const scenarios = [
                 comfort: {turn: 'snap', snapangle: 30, vignette: 'full', speed: 'normal',
                     locomotion: 'teleport'},
                 makeTextTexture: CS.prototype.makeTextTexture,
+                signTextScale: CS.prototype.signTextScale,
+                isHeadsetBrowser: CS.prototype.isHeadsetBrowser,
                 maxAnisotropy: CS.prototype.maxAnisotropy,
                 wrapLines: CS.prototype.wrapLines,
                 signFontStack: CS.prototype.signFontStack,
