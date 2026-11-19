@@ -1843,6 +1843,7 @@ const scenarios = [
                 propLabel: CS.prototype.propLabel,
                 setShadow: CS.prototype.setShadow,
                 addLampLight: CS.prototype.addLampLight,
+                lampLocalBox: CS.prototype.lampLocalBox,
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
@@ -3842,14 +3843,21 @@ const scenarios = [
             const THREE = window.__mnemoTest.THREE;
             const CS = window.__mnemoModule._Cyberspace;
             const self = {THREE, lampLights: 0, palette: {primary: 0x00e5ff},
-                addLampLight: CS.prototype.addLampLight};
+                addLampLight: CS.prototype.addLampLight, lampLocalBox: CS.prototype.lampLocalBox};
             const g = new THREE.Group();
+            // A 6-tall body (spans y 0..6) so the head height is derived as
+            // 0.92 x 6 = 5.52 instead of a fixed value.
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6, 0.5),
+                new THREE.MeshBasicMaterial());
+            body.position.y = 3;
+            g.add(body);
             self.addLampLight(g);
             const light = g.children.filter(function(c) {
                 return c.isLight;
             })[0];
             const added = !!light && light.isPointLight && self.lampLights === 1 &&
-                Math.abs(light.position.y - 3.4) < 1e-6 && light.castShadow === false;
+                Math.abs(light.position.y - 5.52) < 1e-6 && light.position.x === 0 &&
+                light.castShadow === false;
             // At the cap, no further light is attached.
             const g2 = new THREE.Group();
             self.lampLights = 24;
@@ -4118,7 +4126,7 @@ const scenarios = [
                 isHidden: CS.prototype.isHidden,
                 snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord,
                 gridStep: 2, footprintClear: CS.prototype.footprintClear,
-                addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
+                addLampLight: CS.prototype.addLampLight, lampLocalBox: CS.prototype.lampLocalBox, setShadow: CS.prototype.setShadow,
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
@@ -4864,7 +4872,7 @@ const scenarios = [
                 footprints: [], surfaces: [], surfaceHeightAt: CS.prototype.surfaceHeightAt,
                 snapBase: CS.prototype.snapBase, snapCoord: CS.prototype.snapCoord, gridStep: 2,
                 footprintClear: CS.prototype.footprintClear, isHidden: CS.prototype.isHidden,
-                addLampLight: CS.prototype.addLampLight, setShadow: CS.prototype.setShadow,
+                addLampLight: CS.prototype.addLampLight, lampLocalBox: CS.prototype.lampLocalBox, setShadow: CS.prototype.setShadow,
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness,
