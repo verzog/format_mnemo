@@ -226,8 +226,9 @@ class scene implements renderable, templatable {
         if ($conditions === '') {
             return $none;
         }
-        // $section->available reflects the conditions for this viewer; staff
-        // pass regardless. A learner who has met the conditions sees no barrier.
+        // The section's own availability for this viewer reflects the
+        // conditions; staff pass regardless, and a learner who has met the
+        // conditions sees no barrier.
         $met = (bool)$section->available;
         if ($met && !$isstaff) {
             return $none;

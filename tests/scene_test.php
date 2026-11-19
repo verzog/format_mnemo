@@ -318,8 +318,7 @@ final class scene_test extends \advanced_testcase {
             'c' => [(object)['type' => 'date', 'd' => '>=', 't' => time() + DAYSECS]],
             'showc' => [true],
         ]);
-        $sectionid = $DB->get_field('course_sections', 'id',
-            ['course' => $course->id, 'section' => 1]);
+        $sectionid = $DB->get_field('course_sections', 'id', ['course' => $course->id, 'section' => 1]);
         $DB->set_field('course_sections', 'availability', $availability, ['id' => $sectionid]);
         rebuild_course_cache($course->id, true);
         $format = course_get_format($course);
