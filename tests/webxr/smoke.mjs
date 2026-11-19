@@ -1317,6 +1317,9 @@ const scenarios = [
                     signFontStack: CS.prototype.signFontStack,
                     wrapLines: CS.prototype.wrapLines,
                     frameMaterial: CS.prototype.frameMaterial,
+                    makeSignText: CS.prototype.makeSignText,
+                    makeCanvasTextPlane: CS.prototype.makeCanvasTextPlane,
+                    wantsSdfText: CS.prototype.wantsSdfText,
                     makeSign: CS.prototype.makeSign
                 };
                 return self.makeSign(
@@ -3285,6 +3288,63 @@ const scenarios = [
             } finally {
                 window.require = origRequire;
             }
+        }
+    },
+    {
+        name: 'sign: SDF text is gated on Ultra + troika loaded + Latin name + flat screen',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.isHeadsetBrowser = () => false;
+            self.loaders = {Text: function() {}};
+            self.config = {sdffonturl: '/font.woff'};
+            self.comfort = {signtext: 'ultra'};
+            const onUltra = self.wantsSdfText('Algebra');
+            self.comfort = {signtext: 'normal'};
+            const offNormal = self.wantsSdfText('Algebra');
+            self.comfort = {signtext: 'ultra'};
+            self.loaders = {};
+            const offNoTroika = self.wantsSdfText('Algebra');
+            self.loaders = {Text: function() {}};
+            // A non-Latin name (CJK) is outside the bundled font, so canvas.
+            const nonLatin = self.wantsSdfText(String.fromCharCode(0x65E5, 0x672C));
+            self.isHeadsetBrowser = () => true;
+            const offHeadset = self.wantsSdfText('Algebra');
+            const pass = onUltra === true && offNormal === false && offNoTroika === false &&
+                nonLatin === false && offHeadset === false;
+            return {pass, detail: `ultra=${onUltra} normal=${offNormal} noTroika=${offNoTroika} ` +
+                `nonLatin=${nonLatin} headset=${offHeadset}`};
+        }
+    },
+    {
+        name: 'sign: makeSdfText builds a troika mesh and scales it to fit, else null',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            let synced = false;
+            function FakeText() {
+                this.material = {};
+                this.userData = {};
+                this.scale = {v: 1, setScalar(s) { this.v = s; }};
+            }
+            FakeText.prototype.sync = function(cb) {
+                this.textRenderInfo = {blockBounds: [0, 0, 4, 1]};
+                synced = true;
+                if (cb) {
+                    cb();
+                }
+            };
+            self.loaders = {Text: FakeText};
+            self.config = {sdffonturl: '/f.woff'};
+            const mesh = self.makeSdfText({text: 'Algebra', colour: 0x39d0ff}, 3, 1.4);
+            const built = mesh instanceof FakeText && mesh.text === 'Algebra' &&
+                mesh.maxWidth > 0 && mesh.userData.mnemoSdf === true;
+            // faceW=2.76, faceH=1.0, block 4x1 -> s=min(0.69,1)=0.69 (<=2.8 cap).
+            const scaled = mesh.scale.v > 0.6 && mesh.scale.v < 0.8;
+            self.loaders = {};
+            const none = self.makeSdfText({text: 'Algebra', colour: 0x39d0ff}, 3, 1.4);
+            return {pass: built && synced && scaled && none === null,
+                detail: `built=${built} synced=${synced} scale=${mesh.scale.v.toFixed(2)} none=${none}`};
         }
     },
     {

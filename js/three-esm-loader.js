@@ -58,6 +58,29 @@ const sameSite = (url) => {
 };
 const src = sameSite(params.get('src'));
 const addonsBase = sameSite(params.get('addons'));
+const textUrl = sameSite(params.get('text'));
+
+/**
+ * Try to load the troika SDF text builder (for the opt-in Ultra crisp sign
+ * lettering). Vendored to import three by a relative path to the same bundled
+ * three.module.min.js, so it shares the single three instance and needs no
+ * import map. Resolves to the troika exports, or an empty object when it is
+ * unavailable (not vendored, or a custom three override is in use) so the
+ * client simply falls back to canvas sign text.
+ *
+ * @returns {Promise<Object>}
+ */
+async function loadText() {
+    if (!textUrl) {
+        return {};
+    }
+    try {
+        const mod = await import(textUrl);
+        return {Text: mod.Text, preloadFont: mod.preloadFont};
+    } catch (e) {
+        return {};
+    }
+}
 
 /**
  * Try to load the addon glTF loader stack from the explicit addons base URL
@@ -99,8 +122,8 @@ async function loadAddons() {
 }
 
 (src ? import(src) : Promise.reject(new Error('format_mnemo: Three.js must load from this site'))).then(async(three) => {
-    const addons = await loadAddons();
-    const detail = Object.assign({THREE: three}, addons);
+    const [addons, text] = await Promise.all([loadAddons(), loadText()]);
+    const detail = Object.assign({THREE: three}, addons, text);
     window.dispatchEvent(new CustomEvent('format_mnemo:three-ready', {detail: detail}));
 }).catch((error) => {
     window.dispatchEvent(new CustomEvent('format_mnemo:three-error', {detail: error}));

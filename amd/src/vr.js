@@ -511,6 +511,9 @@ define('format_mnemo/vr', [], function() {
 
         this.buildEnvironment();
         this.buildRaycaster();
+        // Warm the SDF glyph cache before the signs are built (no-op unless the
+        // opt-in Ultra sign text is active).
+        this.preloadSdfFont();
         this.buildCity();
         // Wet palettes: reflect the finished city in the puddles.
         this.applyWetReflections();
@@ -6329,20 +6332,14 @@ define('format_mnemo/vr', [], function() {
             });
         }
 
-        // Text plane. Topic nameplates (opts.hires) are large on screen and few
-        // in number, so they get a supersampled, extra-crisp texture; the many
-        // activity signs stay at the base resolution to bound memory.
-        var textMat = new THREE.MeshBasicMaterial({
-            map: this.makeTextTexture(opts.text, opts.colour, opts.hires ? 2 : 1),
-            transparent: true,
-            depthWrite: false
-        });
-        var textPlane = new THREE.Mesh(
-            new THREE.PlaneGeometry(w * 0.92, Math.min(h, 1.0)),
-            textMat
-        );
-        textPlane.position.set(0, hasimage ? -h * 0.3 : 0, 0.05);
-        panel.add(textPlane);
+        // Sign text. The opt-in Ultra mode renders crisp-at-any-zoom SDF text
+        // (troika) when it is available and the name is within the bundled
+        // font's range; otherwise a supersampled canvas texture (hi-res for the
+        // large, few topic nameplates; base resolution for the many activity
+        // signs, to bound texture memory).
+        var textObj = this.makeSignText(opts, w, h);
+        textObj.position.set(0, hasimage ? -h * 0.3 : 0, 0.05);
+        panel.add(textObj);
 
         // Optional support post down to the ground (used by free-standing signs;
         // facade-mounted signs on buildings pass post:false).
@@ -6373,6 +6370,189 @@ define('format_mnemo/vr', [], function() {
             this.interactive.push(panel);
         }
         return {group: group, panel: panel};
+    };
+
+    /**
+     * Build the text object for a sign face: a crisp-at-any-zoom SDF text mesh
+     * (troika) when the opt-in Ultra mode is on and available, otherwise a
+     * supersampled canvas texture plane. Both are positioned by the caller.
+     *
+     * @param {Object} opts The sign options (text, colour, hires).
+     * @param {Number} w The sign face width.
+     * @param {Number} h The sign face height.
+     * @return {Object} A Three.Object3D (troika Text or textured plane).
+     */
+    Cyberspace.prototype.makeSignText = function(opts, w, h) {
+        if (this.wantsSdfText(opts.text)) {
+            var sdf = this.makeSdfText(opts, w, h);
+            if (sdf) {
+                return sdf;
+            }
+        }
+        return this.makeCanvasTextPlane(opts, w, h);
+    };
+
+    /**
+     * A textured plane carrying the sign's neon canvas text (the default and the
+     * fallback when SDF text is unavailable).
+     *
+     * @param {Object} opts The sign options (text, colour, hires).
+     * @param {Number} w The sign face width.
+     * @param {Number} h The sign face height.
+     * @return {Object} A Three.Mesh.
+     */
+    Cyberspace.prototype.makeCanvasTextPlane = function(opts, w, h) {
+        var THREE = this.THREE;
+        var textMat = new THREE.MeshBasicMaterial({
+            map: this.makeTextTexture(opts.text, opts.colour, opts.hires ? 2 : 1),
+            transparent: true,
+            depthWrite: false
+        });
+        return new THREE.Mesh(
+            new THREE.PlaneGeometry(w * 0.92, Math.min(h, 1.0)),
+            textMat
+        );
+    };
+
+    /**
+     * Whether a sign's text should render as SDF (troika): the opt-in Ultra mode
+     * is on, it is not a headset (texture/worker budget is tight there), the
+     * troika builder loaded, and the name is within the bundled font's range.
+     *
+     * @param {String} text The sign label.
+     * @return {Boolean} True to use SDF text.
+     */
+    Cyberspace.prototype.wantsSdfText = function(text) {
+        if (this.isHeadsetBrowser()) {
+            return false;
+        }
+        if (!(this.comfort && this.comfort.signtext === 'ultra')) {
+            return false;
+        }
+        if (!(this.loaders && this.loaders.Text) || !this.config.sdffonturl) {
+            return false;
+        }
+        return this.fontCoversText(text);
+    };
+
+    /**
+     * Whether the bundled SDF font (Share Tech Mono) covers every character in a
+     * name. It carries Basic Latin, the Latin-1 Supplement / Latin Extended-A
+     * range and common punctuation; anything outside that (e.g. non-Latin
+     * scripts) would render as blanks in SDF, so such names fall back to the
+     * canvas text, which uses the system font stack.
+     *
+     * @param {String} text The sign label.
+     * @return {Boolean} True when the font covers the whole string.
+     */
+    Cyberspace.prototype.fontCoversText = function(text) {
+        var s = String(text);
+        for (var i = 0; i < s.length; i++) {
+            var c = s.charCodeAt(i);
+            var ok = (c >= 0x20 && c <= 0x7E) || // Basic Latin (printable).
+                (c >= 0xA0 && c <= 0x24F) || // Latin-1 Supplement + Latin Extended-A.
+                (c >= 0x2010 && c <= 0x205E) || // Common punctuation, dashes, ellipsis.
+                c === 0x09 || c === 0x0A || c === 0x0D; // Tab, newline, carriage return.
+            if (!ok) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /**
+     * Build an SDF text mesh for a sign face: wrapped to the face width, centred,
+     * in the sign's neon colour with a soft coloured halo (the neon glow), and
+     * scaled after layout to fit the face. Returns null if troika is unavailable
+     * or throws, so the caller can fall back to canvas text.
+     *
+     * @param {Object} opts The sign options (text, colour).
+     * @param {Number} w The sign face width.
+     * @param {Number} h The sign face height.
+     * @return {Object|null} A troika Text mesh, or null to fall back.
+     */
+    Cyberspace.prototype.makeSdfText = function(opts, w, h) {
+        var Text = this.loaders && this.loaders.Text;
+        var fontUrl = this.config.sdffonturl;
+        if (!Text || !fontUrl) {
+            return null;
+        }
+        try {
+            var faceW = w * 0.92;
+            var faceH = Math.min(h, 1.0);
+            var self = this;
+            var text = new Text();
+            text.text = String(opts.text);
+            text.font = fontUrl;
+            text.anchorX = 'center';
+            text.anchorY = 'middle';
+            text.textAlign = 'center';
+            text.maxWidth = faceW;
+            text.fontSize = faceH * 0.42;
+            text.lineHeight = 1.15;
+            text.color = opts.colour;
+            text.material.transparent = true;
+            text.material.depthWrite = false;
+            // Neon glow: a soft coloured halo around the crisp core letters.
+            text.outlineColor = opts.colour;
+            text.outlineWidth = '5%';
+            text.outlineBlur = '28%';
+            text.outlineOpacity = 0.55;
+            text.sdfGlyphSize = 128;
+            text.userData.mnemoSdf = true;
+            text.sync(function() {
+                self.fitSdfText(text, faceW, faceH);
+            });
+            return text;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * After an SDF text layout settles, scale the whole mesh uniformly so the
+     * laid-out block fills the sign face (SDF stays crisp at any scale), bounded
+     * so a single short word cannot blow up absurdly.
+     *
+     * @param {Object} text The troika Text mesh.
+     * @param {Number} faceW The sign face width.
+     * @param {Number} faceH The sign face height.
+     */
+    Cyberspace.prototype.fitSdfText = function(text, faceW, faceH) {
+        var info = text.textRenderInfo;
+        var b = info && info.blockBounds;
+        if (!b) {
+            return;
+        }
+        var bw = b[2] - b[0];
+        var bh = b[3] - b[1];
+        if (bw <= 0 || bh <= 0) {
+            return;
+        }
+        var s = Math.min(faceW / bw, faceH / bh);
+        s = Math.max(0.05, Math.min(s, 2.8));
+        text.scale.setScalar(s);
+    };
+
+    /**
+     * Warm the SDF glyph cache for the common Latin characters once, before the
+     * city's signs are built, so Ultra sign text appears with less first-glyph
+     * delay. Best effort and a no-op unless SDF text is active.
+     */
+    Cyberspace.prototype.preloadSdfFont = function() {
+        try {
+            var preload = this.loaders && this.loaders.preloadFont;
+            if (!preload || !this.config.sdffonturl || !this.wantsSdfText('A')) {
+                return;
+            }
+            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz' +
+                '0123456789 .,:;!?-&()\'’/…';
+            preload({font: this.config.sdffonturl, characters: chars}, function() {
+                // Warmed; nothing to do.
+            });
+        } catch (e) {
+            // Best effort; signs still render, with a brief first-glyph delay.
+        }
     };
 
     /**
@@ -15558,7 +15738,8 @@ define('format_mnemo/vr', [], function() {
             var script = document.createElement('script');
             script.type = 'module';
             script.src = config.loaderurl + separator + 'src=' + encodeURIComponent(config.threeurl) +
-                '&addons=' + encodeURIComponent(config.addonsbaseurl || '');
+                '&addons=' + encodeURIComponent(config.addonsbaseurl || '') +
+                '&text=' + encodeURIComponent(config.troikaurl || '');
             script.onerror = function() {
                 if (!settled) {
                     settled = true;

@@ -732,6 +732,12 @@ class scene implements renderable, templatable {
         $addonsbaseurl = $customthree
             ? ''
             : (new moodle_url('/course/format/mnemo/thirdparty/jsm/'))->out(false);
+        // The troika SDF text builder shares the bundled three via a relative
+        // import, so it is only offered alongside the bundled three (not a
+        // custom override, which would resolve to a second three instance).
+        $troikaurl = $customthree
+            ? ''
+            : (new moodle_url('/course/format/mnemo/thirdparty/troika/troika-three-text.module.js'))->out(false);
 
         return [
             'courseid' => (int)$course->id,
@@ -772,6 +778,10 @@ class scene implements renderable, templatable {
             // Draco/KTX2/meshopt decoders) so compressed glTF asset packs load.
             // Empty when a custom threeurl is set (see above).
             'addonsbaseurl' => $addonsbaseurl,
+            // The troika SDF text builder (empty with a custom three override)
+            // and the bundled font it renders, for the opt-in Ultra sign text.
+            'troikaurl' => $troikaurl,
+            'sdffonturl' => (new moodle_url('/course/format/mnemo/thirdparty/fonts/share-tech-mono.woff'))->out(false),
             'environment' => $env,
             'palette' => $envconfig('palette', 'cyan'),
             'invertlook' => !empty($envconfig('invertlook', 0)),
