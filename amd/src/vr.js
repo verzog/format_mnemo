@@ -385,6 +385,7 @@ define('format_mnemo/vr', [], function() {
         // ground and sidewalk textures. Any may be null.
         this.signFontFamily = assets.signFontFamily || null;
         this.signTexture = assets.signTexture || null;
+        this.gateTexture = assets.gateTexture || null;
         this.roadTexture = assets.roadTexture || null;
         this.groundTexture = assets.groundTexture || null;
         this.sidewalkTexture = assets.sidewalkTexture || null;
@@ -5735,6 +5736,11 @@ define('format_mnemo/vr', [], function() {
         var postMat = new THREE.MeshBasicMaterial({
             color: colour, transparent: true, opacity: 0.85
         });
+        // Optional site-wide gate texture skins the posts and crossbar; the
+        // topic's neon colour multiplies over it (as for the sign frame).
+        if (this.gateTexture) {
+            postMat.map = this.gateTexture;
+        }
         var top = 7.5;
         // Two posts either side of the street.
         [-streetHalf - 0.6, streetHalf + 0.6].forEach(function(zoff) {
@@ -15969,7 +15975,7 @@ define('format_mnemo/vr', [], function() {
      */
     function loadSceneAssets(config, THREE) {
         var assets = {
-            signFontFamily: null, signTexture: null,
+            signFontFamily: null, signTexture: null, gateTexture: null,
             roadTexture: null, groundTexture: null, sidewalkTexture: null,
             spaceTexture: null, planetTextures: [], ringTexture: null,
             sunTexture: null, moonTexture: null
@@ -16001,6 +16007,11 @@ define('format_mnemo/vr', [], function() {
         if (config.signtextureurl) {
             jobs.push(loadBoundedTexture(config.signtextureurl, THREE, false, function(tex) {
                 assets.signTexture = tex;
+            }));
+        }
+        if (config.gatetextureurl) {
+            jobs.push(loadBoundedTexture(config.gatetextureurl, THREE, false, function(tex) {
+                assets.gateTexture = tex;
             }));
         }
         if (config.roadtextureurl) {

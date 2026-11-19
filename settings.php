@@ -174,6 +174,31 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
+    // Topic gate texture. Left blank, the gate arches are drawn as a flat neon
+    // glow. Point this at a hosted image to skin every topic gate's posts and
+    // crossbar with a texture (e.g. dark metal); the topic's neon colour
+    // multiplies over it. The uploaded texture below is used if this is blank;
+    // this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/gatetextureurl',
+        get_string('setting_gatetextureurl', 'format_mnemo'),
+        get_string('setting_gatetextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a topic gate texture straight into Moodle instead of hosting it at
+    // a URL. The file lands in the 'gatetexture' file area at system context and
+    // is served via pluginfile. The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/gatetexture',
+        get_string('setting_gatetexture', 'format_mnemo'),
+        get_string('setting_gatetexture_desc', 'format_mnemo'),
+        'gatetexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
     // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
     // steering and moving. On by default; the camera is only used when the
     // learner turns it on, is processed on the device and never uploaded. Untick
