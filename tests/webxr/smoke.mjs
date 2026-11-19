@@ -3415,6 +3415,163 @@ const scenarios = [
         }
     },
     {
+        name: 'barrier: structureMaterial prefers the uploaded texture, else the alloy fallback',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (uploaded) => {
+                const self = {
+                    THREE, wetMaterials: [], wetEnv: null,
+                    structureTexture: uploaded,
+                    maxAnisotropy: () => 8,
+                    drawRivet: CS.prototype.drawRivet,
+                    structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                    structureMaterial: CS.prototype.structureMaterial
+                };
+                const mat = self.structureMaterial(0x8ea0b6, 1, 2);
+                return {mat, registered: self.wetMaterials.length};
+            };
+            const up = new THREE.Texture();
+            const withUp = mk(up);
+            const withFallback = mk(null);
+            // The uploaded texture is cloned (its image is shared), the fallback
+            // is a generated canvas texture; both end up as a repeating map, and
+            // the metal is registered for the wet reflection.
+            const usesUpload = withUp.mat.map && withUp.mat.map.image === up.image;
+            const usesFallback = !!(withFallback.mat.map && withFallback.mat.map.image);
+            const metal = withUp.mat.metalness > 0.5 && withUp.registered === 1;
+            return {pass: usesUpload && usesFallback && metal,
+                detail: `upload=${usesUpload} fallback=${usesFallback} metal=${metal}`};
+        }
+    },
+    {
+        name: 'barrier: buildEnergyBarrier assembles posts, field, beacons and sparks',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, wetMaterials: [], wetEnv: null, structureTexture: null,
+                maxAnisotropy: () => 8,
+                makeTextTexture: () => new THREE.Texture(),
+                structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                structureMaterial: CS.prototype.structureMaterial,
+                barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                drawRivet: CS.prototype.drawRivet,
+                buildBarrierPost: CS.prototype.buildBarrierPost,
+                radialTexture: CS.prototype.radialTexture,
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                buildBarrierField: CS.prototype.buildBarrierField,
+                addBarrierDecal: CS.prototype.addBarrierDecal,
+                buildEnergyBarrier: CS.prototype.buildEnergyBarrier
+            };
+            const g = self.buildEnergyBarrier({width: 3.4, height: 3.1, behaviour: 'auto'});
+            const b = g.userData.barrier;
+            const ok = b && b.strips.length === 2 && b.beacons.length === 2 &&
+                b.field && b.field.pivot && b.sparks && b.sparks.points &&
+                b.sparks.points.visible === false && b.deployT === 1;
+            return {pass: !!ok,
+                detail: ok ? `state=${b.state} strips=${b.strips.length}` : 'assembly failed'};
+        }
+    },
+    {
+        name: 'barrier: auto lane retracts when the learner nears it and redeploys when they leave',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, wetMaterials: [], wetEnv: null, structureTexture: null,
+                maxAnisotropy: () => 8,
+                makeTextTexture: () => new THREE.Texture(),
+                player: {position: new THREE.Vector3(0, 0, 60)},
+                structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                structureMaterial: CS.prototype.structureMaterial,
+                barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                drawRivet: CS.prototype.drawRivet,
+                buildBarrierPost: CS.prototype.buildBarrierPost,
+                radialTexture: CS.prototype.radialTexture,
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                buildBarrierField: CS.prototype.buildBarrierField,
+                addBarrierDecal: CS.prototype.addBarrierDecal,
+                buildEnergyBarrier: CS.prototype.buildEnergyBarrier,
+                tickBarrier: CS.prototype.tickBarrier,
+                tickBarrierIdle: CS.prototype.tickBarrierIdle,
+                tickBarrierAlert: CS.prototype.tickBarrierAlert,
+                tickBarrierDamaged: CS.prototype.tickBarrierDamaged,
+                setBarrierColour: CS.prototype.setBarrierColour,
+                setBeacon: CS.prototype.setBeacon,
+                updateSparks: CS.prototype.updateSparks
+            };
+            const g = self.buildEnergyBarrier({width: 3.4, height: 3.1, behaviour: 'auto'});
+            g.position.set(0, 0, 2);
+            // Far away: the field stays up and idles.
+            let i;
+            for (i = 0; i < 20; i++) {
+                self.tickBarrier(g, 0.1);
+            }
+            const up = g.userData.barrier.deployT > 0.99 &&
+                g.userData.barrier.state === 'Idle_BeaconFlash';
+            // Walk right up to it: the field retracts (opens).
+            self.player.position.set(0, 0, 2);
+            for (i = 0; i < 20; i++) {
+                self.tickBarrier(g, 0.1);
+            }
+            const down = g.userData.barrier.deployT < 0.01 &&
+                g.userData.barrier.field.mesh.visible === false;
+            return {pass: up && down, detail: `up=${up} down=${down} t=${g.userData.barrier.deployT.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'barrier: alert lane locks red and strobes; damaged lane sparks',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const build = (behaviour) => {
+                const self = {
+                    THREE, wetMaterials: [], wetEnv: null, structureTexture: null,
+                    maxAnisotropy: () => 8,
+                    makeTextTexture: () => new THREE.Texture(),
+                    player: {position: new THREE.Vector3(0, 0, 60)},
+                    structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                    structureMaterial: CS.prototype.structureMaterial,
+                    barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                    drawRivet: CS.prototype.drawRivet,
+                    buildBarrierPost: CS.prototype.buildBarrierPost,
+                    radialTexture: CS.prototype.radialTexture,
+                    newCanvasCtx: CS.prototype.newCanvasCtx,
+                    buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                    buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                    buildBarrierField: CS.prototype.buildBarrierField,
+                    addBarrierDecal: CS.prototype.addBarrierDecal,
+                    buildEnergyBarrier: CS.prototype.buildEnergyBarrier,
+                    tickBarrier: CS.prototype.tickBarrier,
+                    tickBarrierIdle: CS.prototype.tickBarrierIdle,
+                    tickBarrierAlert: CS.prototype.tickBarrierAlert,
+                    tickBarrierDamaged: CS.prototype.tickBarrierDamaged,
+                    setBarrierColour: CS.prototype.setBarrierColour,
+                    setBeacon: CS.prototype.setBeacon,
+                    updateSparks: CS.prototype.updateSparks
+                };
+                const g = self.buildEnergyBarrier({width: 3.4, height: 3.1, behaviour});
+                for (let i = 0; i < 5; i++) {
+                    self.tickBarrier(g, 0.1);
+                }
+                return g.userData.barrier;
+            };
+            const alert = build('alert');
+            const damaged = build('damaged');
+            // Alert tints the field to the alert red; damaged turns the sparks on.
+            const red = alert.field.mat.color.getHex() === alert.alertColour;
+            const sparking = damaged.sparks.points.visible === true;
+            const deadBeacon = damaged.beacons[0].light.intensity < 1;
+            return {pass: red && sparking && deadBeacon,
+                detail: `red=${red} sparking=${sparking} deadBeacon=${deadBeacon}`};
+        }
+    },
+    {
         name: 'comfort: applyComfort maps settings onto the gesture manager',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

@@ -199,6 +199,31 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
     ));
 
+    // Shared structure texture. A single tileable image used as the metal/alloy
+    // surface of the plugin's own procedural structures (currently the energy
+    // security barriers' frames). Left blank, those structures use a plain
+    // blue-black alloy. The uploaded texture below is used if this is blank;
+    // this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/structuretextureurl',
+        get_string('setting_structuretextureurl', 'format_mnemo'),
+        get_string('setting_structuretextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a shared structure texture straight into Moodle instead of hosting
+    // it at a URL. The file lands in the 'structuretexture' file area at system
+    // context and is served via pluginfile. The URL setting above, if set, wins.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/structuretexture',
+        get_string('setting_structuretexture', 'format_mnemo'),
+        get_string('setting_structuretexture_desc', 'format_mnemo'),
+        'structuretexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
     // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
     // steering and moving. On by default; the camera is only used when the
     // learner turns it on, is processed on the device and never uploaded. Untick
