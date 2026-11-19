@@ -2339,6 +2339,7 @@ const scenarios = [
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
+                nearestRoadPoint: CS.prototype.nearestRoadPoint,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
                 trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
@@ -2371,6 +2372,7 @@ const scenarios = [
                 modelCfg: CS.prototype.modelCfg,
                 modelBehaviour: CS.prototype.modelBehaviour,
                 trafficClearance: CS.prototype.trafficClearance,
+                nearestRoadPoint: CS.prototype.nearestRoadPoint,
                 pickTrafficDest: CS.prototype.pickTrafficDest,
                 trafficCruiseBand: CS.prototype.trafficCruiseBand,
                 makeTrafficCar: CS.prototype.makeTrafficCar
@@ -2378,6 +2380,112 @@ const scenarios = [
             const car = new THREE.Group();
             const rec = self.makeTrafficCar(car, {model: 'dropship', speed: 12, height: 20, land: 'none'}, 1, box, 0);
             return {pass: rec.land === 'ground', detail: `land=${rec.land}`};
+        }
+    },
+    {
+        name: 'layout: nearestRoadPoint clamps a point onto the nearest corridor',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                roads: [
+                    {xMin: -7.9, xMax: 7.9, zMin: -100, zMax: 12},
+                    {xMin: 0, xMax: 40, zMin: -24, zMax: -16}
+                ],
+                nearestRoadPoint: CS.prototype.nearestRoadPoint
+            };
+            // Off to the right of the avenue: snaps to its kerb, z kept.
+            const a = self.nearestRoadPoint(20, -40);
+            // Deep down the side street: snaps onto that corridor.
+            const b = self.nearestRoadPoint(30, -30);
+            const pass = Math.abs(a.x - 7.9) < 1e-6 && Math.abs(a.z + 40) < 1e-6 &&
+                Math.abs(b.x - 30) < 1e-6 && Math.abs(b.z + 24) < 1e-6;
+            return {pass, detail: `a=(${a.x},${a.z}) b=(${b.x},${b.z})`};
+        }
+    },
+    {
+        name: 'editor: a ground structure footprint is clamped out of the road',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const g = new THREE.Group();
+            const ed = {
+                group: g, baseX: 12, baseY: 0, baseZ: -20, baseRotY: 0, baseScale: 1,
+                footprintBase: {w: 6, d: 6, h: 10},
+                transform: {scale: 1, sx: 1, sy: 1, sz: 1, x: 0, y: 0, z: 0, rot: 0}
+            };
+            const self = {
+                roads: [{xMin: -7.9, xMax: 7.9, zMin: -100, zMax: 12}],
+                renderer: null, selBox: null, selLabel: null, selected: null,
+                clampFootprintFromRoads: CS.prototype.clampFootprintFromRoads,
+                applyTransform: CS.prototype.applyTransform
+            };
+            // Clear of the avenue by default (centre x=12, half-width 3).
+            self.applyTransform(ed);
+            const clearStart = Math.abs(g.position.x - 12) < 1e-6;
+            // Shove it 8 units into the avenue: it is pushed back to the kerb so
+            // its footprint's near edge rests on the road boundary (7.9).
+            ed.transform.x = -8;
+            self.applyTransform(ed);
+            const nearEdge = g.position.x - 3;
+            const pass = clearStart && nearEdge >= 7.9 - 1e-6 && ed.transform.x > -8;
+            return {pass, detail: `x=${g.position.x.toFixed(2)} nearEdge=${nearEdge.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'traffic: a ground-level car starts and roams on the road network',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const box = {xMin: -50, xMax: 50, zMin: -50, zMax: 50, avHalfX: 20};
+            const self = {
+                THREE, footprints: [],
+                roads: [{xMin: -7.9, xMax: 7.9, zMin: -100, zMax: 12}],
+                config: {},
+                modelCfg: CS.prototype.modelCfg,
+                modelBehaviour: CS.prototype.modelBehaviour,
+                trafficClearance: CS.prototype.trafficClearance,
+                trafficCruiseBand: CS.prototype.trafficCruiseBand,
+                nearestRoadPoint: CS.prototype.nearestRoadPoint,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                makeTrafficCar: CS.prototype.makeTrafficCar
+            };
+            // Run several so a random off-road start/dest can't pass by luck.
+            let worstStart = 0;
+            let worstDest = 0;
+            for (let n = 0; n < 40; n++) {
+                const rec = self.makeTrafficCar(new THREE.Group(),
+                    {model: 'rover', speed: 12, land: 'ground'}, 1, box, 0, 0);
+                worstStart = Math.max(worstStart, Math.abs(rec.mesh.position.x));
+                worstDest = Math.max(worstDest, Math.abs(rec.dest.x));
+            }
+            const pass = worstStart <= 7.9 + 1e-6 && worstDest <= 7.9 + 1e-6;
+            return {pass, detail: `start|x|<=${worstStart.toFixed(2)} dest|x|<=${worstDest.toFixed(2)}`};
+        }
+    },
+    {
+        name: 'traffic: updateTraffic holds a ground-level car on the road',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const car = new THREE.Group();
+            car.position.set(20, 1, -20); // Off-road, out on the open ground.
+            const box = {xMin: -100, xMax: 100, zMin: -100, zMax: 100};
+            const self = {
+                time: 0, footprints: [],
+                roads: [{xMin: -7.9, xMax: 7.9, zMin: -100, zMax: 12}],
+                traffic: [{mesh: car, box, speed: 10, yawOffset: 0, cruiseY: 1,
+                    dest: {x: 40, z: -20}, low: 1, land: 'none', grounded: true,
+                    bob: 0, landPhase: 0, landPeriod: 20, avoid: true, face: true}],
+                trafficClearance: CS.prototype.trafficClearance,
+                pickTrafficDest: CS.prototype.pickTrafficDest,
+                trafficLandingY: CS.prototype.trafficLandingY,
+                nearestRoadPoint: CS.prototype.nearestRoadPoint,
+                updateTraffic: CS.prototype.updateTraffic
+            };
+            self.updateTraffic(0.1);
+            // It tried to drive further out (+x) but is snapped back to the kerb.
+            const pass = Math.abs(car.position.x - 7.9) < 1e-6 && Math.abs(car.position.z + 20) < 1e-6;
+            return {pass, detail: `pos=(${car.position.x.toFixed(2)},${car.position.z.toFixed(2)})`};
         }
     },
     {
