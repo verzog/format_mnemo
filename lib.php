@@ -432,14 +432,15 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
     // Site-wide assets uploaded in the plugin's admin settings, served from the
     // system context: the prop asset pack ('assetpack'), the neon sign webfont
     // ('signfont'), the sign frame texture ('signtexture'), the topic gate
-    // texture ('gatetexture'), and the road, ground and sidewalk textures
-    // ('roadtexture', 'groundtexture',
+    // texture ('gatetexture'), the shared structure texture used by the
+    // plugin's own procedural props ('structuretexture'), and the road, ground
+    // and sidewalk textures ('roadtexture', 'groundtexture',
     // 'sidewalktexture'). These are all decorative, served like the plugin's
     // bundled static files (which are already public), so they need no login,
     // even on a site that forces login. Only the file types the scene loads are
     // served (see \format_mnemo\local\public_files).
     $siteareas = ['assetpack', 'vehicleassets', 'buildingassets', 'signfont', 'signtexture',
-        'gatetexture', 'roadtexture', 'groundtexture',
+        'gatetexture', 'structuretexture', 'roadtexture', 'groundtexture',
         'sidewalktexture', 'spacetexture', 'planettextures', 'ringtexture', 'sunasset', 'moonasset'];
     if (in_array($filearea, $siteareas, true)) {
         if ($context->contextlevel != CONTEXT_SYSTEM) {

@@ -893,6 +893,10 @@ class scene implements renderable, templatable {
             'signfonturl' => $this->resolve_asset_url('signfonturl', 'signfont'),
             'signtextureurl' => $this->resolve_asset_url('signtextureurl', 'signtexture'),
             'gatetextureurl' => $this->resolve_asset_url('gatetextureurl', 'gatetexture'),
+            // Shared "structure" texture for the plugin's own procedural
+            // structures (currently the energy security barriers' frames). Any
+            // prop that reads it skins its metal/alloy surfaces with this image.
+            'structuretextureurl' => $this->resolve_asset_url('structuretextureurl', 'structuretexture'),
             'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
             'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
             'sidewalktextureurl' => $this->resolve_asset_url('sidewalktextureurl', 'sidewalktexture'),

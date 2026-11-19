@@ -348,6 +348,7 @@ define('format_mnemo/vr', [], function() {
         this.wetCaptureTimer = null; // Pending reflection re-capture.
         this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
+        this.energyBarriers = []; // Animated energy security barriers (see buildCheckpoint).
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
@@ -386,6 +387,10 @@ define('format_mnemo/vr', [], function() {
         this.signFontFamily = assets.signFontFamily || null;
         this.signTexture = assets.signTexture || null;
         this.gateTexture = assets.gateTexture || null;
+        // Shared structure texture: skins the metal/alloy frames of the plugin's
+        // own procedural props (currently the energy security barriers). Null
+        // keeps the plain blue-black alloy.
+        this.structureTexture = assets.structureTexture || null;
         this.roadTexture = assets.roadTexture || null;
         this.groundTexture = assets.groundTexture || null;
         this.sidewalkTexture = assets.sidewalkTexture || null;
@@ -5182,6 +5187,10 @@ define('format_mnemo/vr', [], function() {
             self.wetStreak(sx, (12 + endZ) / 2 + (Math.random() - 0.5) * 40, 0.5 + Math.random());
         }
 
+        // A three-lane energy security checkpoint just inside the avenue mouth,
+        // showing the barriers' five states (see buildCheckpoint).
+        this.buildCheckpoint(2, roadHalf);
+
         sections.forEach(function(section, i) {
             var z = startZ - i * spacing;
             var side = (i % 2 === 0) ? -1 : 1;
@@ -5907,6 +5916,639 @@ define('format_mnemo/vr', [], function() {
         group.position.set(x, 0, z);
         this.scene.add(group);
         this.registerSceneEditable(objkey, name + ' pylon', group, x, 0, z, true);
+    };
+
+    /**
+     * The shared "structure" texture: a tileable blue-black brushed-alloy canvas
+     * (panel seams, rivets, scratches and edge wear) used to skin the metal
+     * frames of the plugin's own procedural props. An admin-set structure
+     * texture (this.structureTexture) overrides it; this is the bundled
+     * fallback, generated once and cached.
+     *
+     * @return {Object} A Three.CanvasTexture (RepeatWrapping), cached.
+     */
+    Cyberspace.prototype.structureFallbackTexture = function() {
+        if (this.structureFallbackTex_) {
+            return this.structureFallbackTex_;
+        }
+        var THREE = this.THREE;
+        var size = 512;
+        var canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        var ctx = canvas.getContext('2d');
+        // Base alloy: a vertical blue-black gradient with a faint brushed grain.
+        var grad = ctx.createLinearGradient(0, 0, 0, size);
+        grad.addColorStop(0, '#1a2230');
+        grad.addColorStop(0.5, '#10151e');
+        grad.addColorStop(1, '#161d28');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        var i;
+        ctx.globalAlpha = 0.05;
+        for (i = 0; i < 240; i++) {
+            var gy = Math.random() * size;
+            ctx.strokeStyle = (i % 2) ? '#2b3850' : '#070a0f';
+            ctx.beginPath();
+            ctx.moveTo(0, gy);
+            ctx.lineTo(size, gy + (Math.random() - 0.5) * 2);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        // Panel seams: a grid of recessed dark lines with a light top highlight.
+        var cells = 4;
+        var step = size / cells;
+        for (i = 0; i <= cells; i++) {
+            var p = Math.round(i * step);
+            ctx.strokeStyle = 'rgba(4,7,11,0.9)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(p, 0);
+            ctx.lineTo(p, size);
+            ctx.moveTo(0, p);
+            ctx.lineTo(size, p);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(70,92,120,0.35)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p + 1, 0);
+            ctx.lineTo(p + 1, size);
+            ctx.moveTo(0, p + 1);
+            ctx.lineTo(size, p + 1);
+            ctx.stroke();
+        }
+        // Rivets at the seam intersections.
+        for (var rx = 0; rx <= cells; rx++) {
+            for (var ry = 0; ry <= cells; ry++) {
+                this.drawRivet(ctx, rx * step, ry * step);
+            }
+        }
+        // Scratches and edge wear so the alloy reads as used, not pristine.
+        ctx.globalAlpha = 0.5;
+        for (i = 0; i < 40; i++) {
+            var sx = Math.random() * size;
+            var sy = Math.random() * size;
+            var len = 8 + Math.random() * 60;
+            var ang = Math.random() * Math.PI;
+            ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(150,170,200,0.4)' : 'rgba(0,0,0,0.5)';
+            ctx.lineWidth = Math.random() < 0.8 ? 1 : 2;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + Math.cos(ang) * len, sy + Math.sin(ang) * len);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = this.maxAnisotropy();
+        this.structureFallbackTex_ = tex;
+        return tex;
+    };
+
+    /**
+     * Draw a single rivet (a small raised metal stud) centred at x,y.
+     *
+     * @param {Object} ctx A 2D canvas context.
+     * @param {Number} x Centre x.
+     * @param {Number} y Centre y.
+     */
+    Cyberspace.prototype.drawRivet = function(ctx, x, y) {
+        var r = 4;
+        var g = ctx.createRadialGradient(x - 1, y - 1, 0.5, x, y, r);
+        g.addColorStop(0, 'rgba(150,170,200,0.9)');
+        g.addColorStop(0.6, 'rgba(60,78,104,0.7)');
+        g.addColorStop(1, 'rgba(4,7,11,0.0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+    };
+
+    /**
+     * A textured metal material for a prop's structure (frame, posts): the
+     * shared structure texture (admin-set or the bundled alloy fallback) on a
+     * dark, fairly metallic MeshStandardMaterial. Registered for the city's wet
+     * reflection so the metal catches the skyline.
+     *
+     * @param {Number} tint A colour multiplied over the texture.
+     * @param {Number} repx Texture repeats across the surface's width.
+     * @param {Number} repy Texture repeats up the surface's height.
+     * @return {Object} A Three.MeshStandardMaterial.
+     */
+    Cyberspace.prototype.structureMaterial = function(tint, repx, repy) {
+        var THREE = this.THREE;
+        var base = this.structureTexture || this.structureFallbackTexture();
+        var map = base.clone();
+        map.wrapS = THREE.RepeatWrapping;
+        map.wrapT = THREE.RepeatWrapping;
+        map.repeat.set(Math.max(1, repx || 1), Math.max(1, repy || 1));
+        map.needsUpdate = true;
+        var mat = new THREE.MeshStandardMaterial({
+            color: tint || 0x8899aa,
+            map: map,
+            metalness: 0.85,
+            roughness: 0.5,
+        });
+        if (this.wetEnv) {
+            mat.envMap = this.wetEnv.texture;
+            mat.envMapIntensity = 1;
+        }
+        mat.needsUpdate = true;
+        this.wetMaterials.push(mat);
+        return mat;
+    };
+
+    /**
+     * The energy-field texture: a tileable cyan scanline/hex pattern on black,
+     * drawn once and cached. It is tinted per barrier via the material colour
+     * and scrolled by offsetting its V, and blended additively so black reads
+     * as transparent.
+     *
+     * @return {Object} A Three.CanvasTexture (RepeatWrapping), cached.
+     */
+    Cyberspace.prototype.barrierFieldTexture = function() {
+        if (this.barrierFieldTex_) {
+            return this.barrierFieldTex_;
+        }
+        var THREE = this.THREE;
+        var w = 256;
+        var h = 256;
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, w, h);
+        // Horizontal scanlines of varying brightness.
+        var y;
+        for (y = 0; y < h; y += 4) {
+            var b = 0.25 + 0.35 * Math.abs(Math.sin(y * 0.3));
+            ctx.fillStyle = 'rgba(180,240,255,' + b.toFixed(3) + ')';
+            ctx.fillRect(0, y, w, 1);
+        }
+        // Faint vertical bars for a woven, containment-field feel.
+        var x;
+        for (x = 0; x < w; x += 16) {
+            ctx.fillStyle = 'rgba(120,220,255,0.12)';
+            ctx.fillRect(x, 0, 2, h);
+        }
+        // A few brighter drifting data motes.
+        for (var i = 0; i < 24; i++) {
+            ctx.fillStyle = 'rgba(230,255,255,0.8)';
+            ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+        }
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        this.barrierFieldTex_ = tex;
+        return tex;
+    };
+
+    /**
+     * Build one chamfered barrier post on a foot, with a bright edge trim and a
+     * cyan emissive light strip up its inner face.
+     *
+     * @param {Number} x The post's local x (±half-width).
+     * @param {Number} height The post height.
+     * @param {Number} colour The field/strip neon colour.
+     * @param {Object} mats Shared materials {frame, trim}.
+     * @return {Object} {group, strip} where strip is the emissive strip material.
+     */
+    Cyberspace.prototype.buildBarrierPost = function(x, height, colour, mats) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        // Foot.
+        var foot = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.9), mats.frame);
+        foot.position.set(0, 0.09, 0);
+        group.add(foot);
+        // Chamfered column: an octagonal prism reads as a bevelled alloy post.
+        var col = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.28, 0.32, height, 8),
+            mats.frame
+        );
+        col.position.set(0, 0.18 + height / 2, 0);
+        col.rotation.y = Math.PI / 8;
+        group.add(col);
+        // Bright metal cap trim.
+        var cap = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.12, 8), mats.trim);
+        cap.position.set(0, 0.18 + height + 0.06, 0);
+        cap.rotation.y = Math.PI / 8;
+        group.add(cap);
+        // Cyan emissive strip up the inner face (toward the field, at x=0 side).
+        var inner = x < 0 ? 0.26 : -0.26;
+        var stripMat = new THREE.MeshStandardMaterial({
+            color: colour, emissive: colour, emissiveIntensity: 1.4,
+            metalness: 0.2, roughness: 0.4,
+        });
+        var strip = new THREE.Mesh(new THREE.BoxGeometry(0.06, height * 0.82, 0.12), stripMat);
+        strip.position.set(inner, 0.18 + height / 2, 0);
+        group.add(strip);
+        group.position.x = x;
+        return {group: group, strip: stripMat};
+    };
+
+    /**
+     * Build a warning beacon: an amber emissive dome, an additive halo that
+     * faces the camera, and a point light, all flashed together in the tick.
+     *
+     * @param {Number} y The beacon's local y (top of a post).
+     * @return {Object} {group, mat, halo, light} for animation.
+     */
+    Cyberspace.prototype.buildBarrierBeacon = function(y) {
+        var THREE = this.THREE;
+        var group = new THREE.Group();
+        var amber = 0xffb020;
+        var mat = new THREE.MeshStandardMaterial({
+            color: amber, emissive: amber, emissiveIntensity: 2,
+            metalness: 0.1, roughness: 0.3,
+        });
+        var dome = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), mat);
+        group.add(dome);
+        // A soft round glow that always faces the camera (a sprite, not a flat
+        // card), blended additively so only the glow shows.
+        var halo = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: this.radialTexture(amber), color: amber, transparent: true,
+            opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+        }));
+        halo.scale.set(1.3, 1.3, 1);
+        group.add(halo);
+        var light = new THREE.PointLight(amber, 6, 9, 2);
+        group.add(light);
+        group.position.y = y;
+        return {group: group, mat: mat, halo: halo.material, light: light};
+    };
+
+    /**
+     * Build an additive spark burst (a small Points cloud) used by the damaged
+     * barrier state. Particles are recycled in the tick; it starts hidden.
+     *
+     * @param {Number} x Local x of the spark origin (a damaged post).
+     * @param {Number} y Local y of the spark origin.
+     * @return {Object} {points, positions, velocities, life} for animation.
+     */
+    Cyberspace.prototype.buildBarrierSparks = function(x, y) {
+        var THREE = this.THREE;
+        var count = 40;
+        var positions = new Float32Array(count * 3);
+        var velocities = [];
+        var life = [];
+        for (var i = 0; i < count; i++) {
+            positions[i * 3] = x;
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = 0;
+            velocities.push(new THREE.Vector3());
+            life.push(0);
+        }
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        var mat = new THREE.PointsMaterial({
+            color: 0xfff2c0, size: 0.09, transparent: true, opacity: 0.95,
+            depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+        });
+        var points = new THREE.Points(geo, mat);
+        points.visible = false;
+        return {points: points, positions: positions, velocities: velocities, life: life, origin: {x: x, y: y}};
+    };
+
+    /**
+     * Build an energy security barrier: two chamfered alloy posts, a textured
+     * header crossbar with an illuminated "BARRIER" decal, a cyan containment
+     * field between the posts, cyan light strips, and twin amber beacons (plus a
+     * spark emitter for the damaged state). The group's userData.barrier holds
+     * everything the tick animates. The barrier is built centred at the origin,
+     * spanning local X, with the field facing up and down the avenue (±Z).
+     *
+     * @param {Object} opts {width, height, behaviour, colour}. behaviour is
+     *     'auto' (deploy/retract on approach), 'alert' (locked red) or
+     *     'damaged' (flickering, sparking).
+     * @return {Object} The barrier Three.Group.
+     */
+    Cyberspace.prototype.buildEnergyBarrier = function(opts) {
+        var THREE = this.THREE;
+        var width = opts.width || 3.4;
+        var height = opts.height || 3.1;
+        var colour = (opts.colour === undefined) ? 0x27e0ff : opts.colour;
+        var alertColour = 0xff2a3a;
+        var group = new THREE.Group();
+        var half = width / 2;
+        var mats = {
+            frame: this.structureMaterial(0x8ea0b6, 1, 2),
+            trim: new THREE.MeshStandardMaterial({color: 0xcdd8e6, metalness: 1, roughness: 0.25}),
+        };
+        if (this.wetEnv) {
+            mats.trim.envMap = this.wetEnv.texture;
+            mats.trim.envMapIntensity = 1;
+        }
+        this.wetMaterials.push(mats.trim);
+        // Posts and their emissive strips.
+        var left = this.buildBarrierPost(-half, height, colour, mats);
+        var right = this.buildBarrierPost(half, height, colour, mats);
+        group.add(left.group);
+        group.add(right.group);
+        // Header crossbar (textured frame) with a bright trim lip.
+        var headY = 0.18 + height + 0.18;
+        var header = new THREE.Mesh(new THREE.BoxGeometry(width + 0.7, 0.4, 0.42), this.structureMaterial(0x8ea0b6, 3, 1));
+        header.position.set(0, headY, 0);
+        group.add(header);
+        var lip = new THREE.Mesh(new THREE.BoxGeometry(width + 0.74, 0.08, 0.46), mats.trim);
+        lip.position.set(0, headY - 0.24, 0);
+        group.add(lip);
+        // Illuminated "BARRIER" decal on both faces of the header.
+        this.addBarrierDecal(group, width, headY, colour);
+        // Containment field between the posts, in a pivot so it rises from the
+        // ground when deployed.
+        var field = this.buildBarrierField(width, height, colour);
+        group.add(field.pivot);
+        // Twin beacons on the post caps.
+        var beaconY = 0.18 + height + 0.18;
+        var b1 = this.buildBarrierBeacon(beaconY);
+        var b2 = this.buildBarrierBeacon(beaconY);
+        b1.group.position.x = -half;
+        b2.group.position.x = half;
+        group.add(b1.group);
+        group.add(b2.group);
+        // Spark emitter at the right post's mid-height (used when damaged).
+        var sparks = this.buildBarrierSparks(half - 0.26, 0.18 + height * 0.55);
+        group.add(sparks.points);
+        group.userData.barrier = {
+            behaviour: opts.behaviour || 'auto',
+            state: 'Idle_BeaconFlash',
+            colour: colour,
+            alertColour: alertColour,
+            deployT: 1,
+            phase: Math.random() * 6.28,
+            field: field,
+            strips: [left.strip, right.strip],
+            beacons: [b1, b2],
+            sparks: sparks,
+            height: height,
+        };
+        return group;
+    };
+
+    /**
+     * Add the illuminated "BARRIER" decal to both faces of a barrier's header.
+     *
+     * @param {Object} group The barrier group.
+     * @param {Number} width The barrier width.
+     * @param {Number} headY The header centre height.
+     * @param {Number} colour The neon colour.
+     */
+    Cyberspace.prototype.addBarrierDecal = function(group, width, headY, colour) {
+        var THREE = this.THREE;
+        var tex = this.makeTextTexture('BARRIER', colour, 1);
+        [0.22, -0.22].forEach(function(z) {
+            var plate = new THREE.Mesh(
+                new THREE.PlaneGeometry(width * 0.8, width * 0.8 * 0.25),
+                new THREE.MeshBasicMaterial({
+                    map: tex, transparent: true, depthWrite: false,
+                    blending: THREE.AdditiveBlending, fog: false,
+                    side: THREE.DoubleSide,
+                })
+            );
+            plate.position.set(0, headY, z);
+            if (z < 0) {
+                plate.rotation.y = Math.PI;
+            }
+            group.add(plate);
+        });
+    };
+
+    /**
+     * Build the containment field quad inside a ground-anchored pivot, so that
+     * scaling the pivot's Y raises the field up from the roadway on deploy.
+     *
+     * @param {Number} width The barrier width.
+     * @param {Number} height The post height.
+     * @param {Number} colour The field colour.
+     * @return {Object} {pivot, mesh, mat, tex, h} for animation.
+     */
+    Cyberspace.prototype.buildBarrierField = function(width, height, colour) {
+        var THREE = this.THREE;
+        var fh = height * 0.92;
+        var tex = this.barrierFieldTexture().clone();
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(Math.max(1, Math.round(width)), Math.max(2, Math.round(fh)));
+        tex.needsUpdate = true;
+        var mat = new THREE.MeshBasicMaterial({
+            color: colour, map: tex, transparent: true, opacity: 0.55,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide, fog: false,
+        });
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(width - 0.2, fh), mat);
+        mesh.position.set(0, fh / 2, 0);
+        var pivot = new THREE.Group();
+        pivot.position.set(0, 0.18, 0);
+        pivot.add(mesh);
+        return {pivot: pivot, mesh: mesh, mat: mat, tex: tex, h: fh};
+    };
+
+    /**
+     * Place a three-lane security checkpoint across the avenue at the given z,
+     * one barrier per lane, each showing a different behaviour so every state is
+     * on display: the centre lane auto-deploys and retracts as the learner nears
+     * it (Deploy / Retract / Idle_BeaconFlash), the left lane is locked in
+     * Alert_Mode, and the right lane is Damaged_Spark. The barriers are tracked
+     * in this.energyBarriers for the tick.
+     *
+     * @param {Number} z The avenue z the checkpoint spans.
+     * @param {Number} roadHalf The avenue half-width.
+     */
+    Cyberspace.prototype.buildCheckpoint = function(z, roadHalf) {
+        var lanes = [
+            {x: -roadHalf * 0.62, behaviour: 'alert'},
+            {x: 0, behaviour: 'auto'},
+            {x: roadHalf * 0.62, behaviour: 'damaged'},
+        ];
+        var laneW = (roadHalf * 2) / 3 - 0.3;
+        for (var i = 0; i < lanes.length; i++) {
+            var bar = this.buildEnergyBarrier({
+                width: laneW, height: 3.1, behaviour: lanes[i].behaviour,
+            });
+            bar.position.set(lanes[i].x, 0, z);
+            this.scene.add(bar);
+            this.energyBarriers.push(bar);
+        }
+    };
+
+    /**
+     * Advance every energy barrier's animation: the auto lanes deploy/retract by
+     * proximity, the alert lane strobes red and locked, and the damaged lane
+     * flickers and throws sparks. A no-op when no checkpoint was built.
+     *
+     * @param {Number} dt Seconds since the last frame.
+     */
+    Cyberspace.prototype.updateEnergyBarriers = function(dt) {
+        for (var i = 0; i < this.energyBarriers.length; i++) {
+            this.tickBarrier(this.energyBarriers[i], dt);
+        }
+    };
+
+    /**
+     * Animate one barrier for a frame: resolve its deploy target, raise or lower
+     * the field, scroll it, and drive the beacons, strips and sparks for its
+     * behaviour.
+     *
+     * @param {Object} group The barrier Three.Group.
+     * @param {Number} dt Seconds since the last frame.
+     */
+    Cyberspace.prototype.tickBarrier = function(group, dt) {
+        var b = group.userData.barrier;
+        b.phase += dt;
+        // Resolve the deploy target (1 = field up, 0 = open) and the state label.
+        var target = 1;
+        if (b.behaviour === 'auto') {
+            var dx = this.player.position.x - group.position.x;
+            var dz = this.player.position.z - group.position.z;
+            var near = (dx * dx + dz * dz) < 49; // Within ~7 units.
+            target = near ? 0 : 1;
+        }
+        var prev = b.deployT;
+        var speed = 1.6 * dt; // Full deploy/retract in ~0.6s.
+        b.deployT += Math.max(-speed, Math.min(speed, target - b.deployT));
+        b.deployT = Math.max(0, Math.min(1, b.deployT));
+        if (b.behaviour === 'auto') {
+            if (b.deployT > prev + 1e-4) {
+                b.state = 'Deploy';
+            } else if (b.deployT < prev - 1e-4) {
+                b.state = 'Retract';
+            } else {
+                b.state = b.deployT > 0.5 ? 'Idle_BeaconFlash' : 'Open';
+            }
+        }
+        // Raise/lower the field and fade it out as it drops.
+        b.field.pivot.scale.y = Math.max(0.0001, b.deployT);
+        b.field.mat.opacity = 0.55 * b.deployT;
+        b.field.mesh.visible = b.deployT > 0.02;
+        // Scroll the field upward; faster when alert.
+        var scroll = (b.behaviour === 'alert') ? 0.9 : 0.4;
+        b.field.tex.offset.y -= scroll * dt;
+        // Per-behaviour colour, beacons and sparks.
+        if (b.behaviour === 'alert') {
+            this.tickBarrierAlert(b);
+        } else if (b.behaviour === 'damaged') {
+            this.tickBarrierDamaged(b, dt);
+        } else {
+            this.tickBarrierIdle(b);
+        }
+    };
+
+    /**
+     * The calm idle look: cyan field and strips, amber beacons flashing slowly
+     * and in antiphase, sparks off.
+     *
+     * @param {Object} b The barrier's userData.barrier state.
+     */
+    Cyberspace.prototype.tickBarrierIdle = function(b) {
+        this.setBarrierColour(b, b.colour);
+        var flash = 0.5 + 0.5 * Math.sin(b.phase * 2.2);
+        this.setBeacon(b.beacons[0], flash);
+        this.setBeacon(b.beacons[1], 1 - flash);
+        b.sparks.points.visible = false;
+    };
+
+    /**
+     * The alert look: the field and strips turn red and every beacon strobes
+     * together, hard on/off.
+     *
+     * @param {Object} b The barrier's userData.barrier state.
+     */
+    Cyberspace.prototype.tickBarrierAlert = function(b) {
+        this.setBarrierColour(b, b.alertColour);
+        var on = (Math.floor(b.phase * 5) % 2) === 0 ? 1 : 0.08;
+        this.setBeacon(b.beacons[0], on);
+        this.setBeacon(b.beacons[1], on);
+        b.sparks.points.visible = false;
+    };
+
+    /**
+     * The damaged look: the field flickers erratically, one beacon is dead and
+     * the other sputters, and sparks spray from the failing post.
+     *
+     * @param {Object} b The barrier's userData.barrier state.
+     * @param {Number} dt Seconds since the last frame.
+     */
+    Cyberspace.prototype.tickBarrierDamaged = function(b, dt) {
+        this.setBarrierColour(b, b.colour);
+        // Erratic flicker: mostly lit, with random brown-outs.
+        var flick = (Math.sin(b.phase * 23) * Math.sin(b.phase * 7) > -0.3) ? 1 : 0.2;
+        b.field.mat.opacity = 0.55 * b.deployT * flick;
+        b.strips[0].emissiveIntensity = 1.4 * flick;
+        b.strips[1].emissiveIntensity = 0.3;
+        // One beacon dead, the other sputtering.
+        this.setBeacon(b.beacons[0], 0);
+        this.setBeacon(b.beacons[1], flick > 0.5 ? (0.4 + 0.6 * Math.random()) : 0.05);
+        this.updateSparks(b.sparks, dt);
+    };
+
+    /**
+     * Tint a barrier's field and both light strips to a colour.
+     *
+     * @param {Object} b The barrier's userData.barrier state.
+     * @param {Number} colour The colour to set.
+     */
+    Cyberspace.prototype.setBarrierColour = function(b, colour) {
+        b.field.mat.color.setHex(colour);
+        b.strips[0].color.setHex(colour);
+        b.strips[0].emissive.setHex(colour);
+        b.strips[0].emissiveIntensity = 1.4;
+        b.strips[1].color.setHex(colour);
+        b.strips[1].emissive.setHex(colour);
+        b.strips[1].emissiveIntensity = 1.4;
+    };
+
+    /**
+     * Set a beacon's brightness (emissive, halo and light together), 0 = off.
+     *
+     * @param {Object} beacon A {mat, halo, light} beacon.
+     * @param {Number} level Brightness 0..1.
+     */
+    Cyberspace.prototype.setBeacon = function(beacon, level) {
+        beacon.mat.emissiveIntensity = 0.2 + 2.3 * level;
+        beacon.halo.opacity = 0.1 + 0.6 * level;
+        beacon.light.intensity = 0.5 + 7 * level;
+    };
+
+    /**
+     * Advance a spark burst: spawn a few new sparks each frame, move live ones
+     * under gravity, and recycle them when their life runs out.
+     *
+     * @param {Object} sparks The spark system from buildBarrierSparks.
+     * @param {Number} dt Seconds since the last frame.
+     */
+    Cyberspace.prototype.updateSparks = function(sparks, dt) {
+        sparks.points.visible = true;
+        var pos = sparks.positions;
+        var spawn = 2;
+        for (var i = 0; i < sparks.life.length; i++) {
+            if (sparks.life[i] <= 0) {
+                if (spawn > 0 && Math.random() < 0.5) {
+                    spawn--;
+                    sparks.life[i] = 0.25 + Math.random() * 0.3;
+                    pos[i * 3] = sparks.origin.x;
+                    pos[i * 3 + 1] = sparks.origin.y;
+                    pos[i * 3 + 2] = 0;
+                    sparks.velocities[i].set(
+                        (Math.random() - 0.5) * 3,
+                        1 + Math.random() * 2.5,
+                        (Math.random() - 0.5) * 3
+                    );
+                }
+                continue;
+            }
+            sparks.life[i] -= dt;
+            var v = sparks.velocities[i];
+            v.y -= 9 * dt;
+            pos[i * 3] += v.x * dt;
+            pos[i * 3 + 1] += v.y * dt;
+            pos[i * 3 + 2] += v.z * dt;
+            if (sparks.life[i] <= 0) {
+                pos[i * 3 + 1] = -999; // Park the dead spark out of sight.
+            }
+        }
+        sparks.points.geometry.attributes.position.needsUpdate = true;
     };
 
     /**
@@ -11533,6 +12175,9 @@ define('format_mnemo/vr', [], function() {
         // Keep the sun/moon pinned at a fixed direction and distance from the eye.
         this.updateCelestials();
 
+        // Deploy/retract, strobe and spark the energy security barriers.
+        this.updateEnergyBarriers(dt);
+
         // Advance the optional arcade game (targets, spawns); a no-op unless it
         // is running.
         if (this.game) {
@@ -16068,6 +16713,7 @@ define('format_mnemo/vr', [], function() {
     function loadSceneAssets(config, THREE) {
         var assets = {
             signFontFamily: null, signTexture: null, gateTexture: null,
+            structureTexture: null,
             roadTexture: null, groundTexture: null, sidewalkTexture: null,
             spaceTexture: null, planetTextures: [], ringTexture: null,
             sunTexture: null, moonTexture: null
@@ -16104,6 +16750,13 @@ define('format_mnemo/vr', [], function() {
         if (config.gatetextureurl) {
             jobs.push(loadBoundedTexture(config.gatetextureurl, THREE, false, function(tex) {
                 assets.gateTexture = tex;
+            }));
+        }
+        // Shared structure texture is tiled (wraps) so it can repeat over a
+        // frame larger than one tile.
+        if (config.structuretextureurl) {
+            jobs.push(loadBoundedTexture(config.structuretextureurl, THREE, true, function(tex) {
+                assets.structureTexture = tex;
             }));
         }
         if (config.roadtextureurl) {
