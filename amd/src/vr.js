@@ -7290,11 +7290,14 @@ define('format_mnemo/vr', [], function() {
             text.color = opts.colour;
             text.material.transparent = true;
             text.material.depthWrite = false;
-            // Neon glow: a soft coloured halo around the crisp core letters.
+            // Neon glow: a tight coloured halo around the crisp core letters. A
+            // wide, strong halo (the old 28% blur) blooms in the post pipeline
+            // and washes the SDF letters out, so keep it narrow and faint - the
+            // crisp SDF core carries the legibility, the halo is just an accent.
             text.outlineColor = opts.colour;
-            text.outlineWidth = '5%';
-            text.outlineBlur = '28%';
-            text.outlineOpacity = 0.55;
+            text.outlineWidth = '4%';
+            text.outlineBlur = '10%';
+            text.outlineOpacity = 0.4;
             text.sdfGlyphSize = 128;
             text.userData.mnemoSdf = true;
             text.sync(function() {
