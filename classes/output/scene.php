@@ -324,9 +324,10 @@ class scene implements renderable, templatable {
     protected function placer_props(): array {
         $labels = [
             'lamp' => get_string('placelamp', 'format_mnemo'),
-            'barrier' => get_string('placebarrier', 'format_mnemo'),
             'kiosk' => get_string('placekiosk', 'format_mnemo'),
             'av' => get_string('placevehicle', 'format_mnemo'),
+            'echeckpoint' => get_string('placecheckpoint', 'format_mnemo'),
+            'earch' => get_string('placearch', 'format_mnemo'),
         ];
         $out = [];
         foreach (\format_mnemo\output\asset_gallery::placer_prop_names() as $name) {
@@ -984,9 +985,10 @@ class scene implements renderable, templatable {
                 'placedone' => get_string('placedone', 'format_mnemo'),
                 'placehint' => get_string('placehint', 'format_mnemo'),
                 'placelamp' => get_string('placelamp', 'format_mnemo'),
-                'placebarrier' => get_string('placebarrier', 'format_mnemo'),
                 'placekiosk' => get_string('placekiosk', 'format_mnemo'),
                 'placevehicle' => get_string('placevehicle', 'format_mnemo'),
+                'placecheckpoint' => get_string('placecheckpoint', 'format_mnemo'),
+                'placearch' => get_string('placearch', 'format_mnemo'),
                 'comfort' => get_string('comfort', 'format_mnemo'),
                 'comfortturn' => get_string('comfortturn', 'format_mnemo'),
                 'comfortturnsnap' => get_string('comfortturnsnap', 'format_mnemo'),

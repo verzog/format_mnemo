@@ -642,6 +642,10 @@ final class asset_gallery_test extends \advanced_testcase {
         $this->assertContains('lamp', $names);
         $this->assertContains('av', $names);
         $this->assertNotContains('building-quiz', $names);
+        // The procedural energy barriers are always placeable (built from code,
+        // with no model file), so the list offers them out of the box.
+        $this->assertContains('echeckpoint', $names);
+        $this->assertContains('earch', $names);
 
         // An uploaded prop joins the list; an uploaded building model does not.
         // A numeric base name (123.glb) must survive as the string "123", not
@@ -671,6 +675,10 @@ final class asset_gallery_test extends \advanced_testcase {
         $this->assertContains('lamp', $names);
         $this->assertNotContains('spaceship', $names);
         $this->assertNotContains('123', $names);
+        // The procedural energy barriers never depend on a model, so they stay
+        // placeable even with an external asset pack configured.
+        $this->assertContains('echeckpoint', $names);
+        $this->assertContains('earch', $names);
     }
 
     /**

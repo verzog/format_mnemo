@@ -53,7 +53,7 @@ final class model_slots_test extends \advanced_testcase {
      */
     public function test_slots(): void {
         $this->resetAfterTest();
-        $this->assertSame(['lamp', 'kiosk', 'barrier'], array_keys(model_slots::slots('prop')));
+        $this->assertSame(['lamp', 'kiosk'], array_keys(model_slots::slots('prop')));
         $this->assertSame(['av'], array_keys(model_slots::slots('vehicle')));
         $buildings = model_slots::slots('building');
         $this->assertArrayHasKey('building-forum', $buildings);
@@ -84,7 +84,6 @@ final class model_slots_test extends \advanced_testcase {
         model_slots::save([
             'lamp' => $m . 'neon-lamp',
             'kiosk' => $m . 'hovercar',
-            'barrier' => model_slots::NONE,
             'av' => $m . 'hovercar',
             'building-forum' => $m . 'tower-a',
             'building-page' => model_slots::NONE,

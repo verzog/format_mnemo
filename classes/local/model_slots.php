@@ -53,7 +53,7 @@ class model_slots {
     const MODEL = 'model:';
 
     /** @var string[] Street prop slot => its language string. */
-    const PROPS = ['lamp' => 'slot_lamp', 'kiosk' => 'slot_kiosk', 'barrier' => 'slot_barrier'];
+    const PROPS = ['lamp' => 'slot_lamp', 'kiosk' => 'slot_kiosk'];
 
     /** @var string[] Vehicle slot => its language string. */
     const VEHICLES = ['av' => 'slot_av'];
