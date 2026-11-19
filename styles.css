@@ -145,6 +145,42 @@
     pointer-events: none;
     text-align: center;
     padding: 1rem;
+    overflow: hidden;
+    isolation: isolate;
+    background: radial-gradient(circle at 50% 48%, #04161f 0%, #010307 72%);
+}
+
+/* An onrushing cyberspace-grid loading backdrop. Both layers animate only
+   transform and opacity, which the browser composites off the main thread, so
+   the effect keeps moving even while a heavy (Ultra sign-text) scene build is
+   blocking the main thread. The ::before is a cyan grid rushing toward the
+   viewer; the ::after is a flickering scanline "static" overlay. Both sit
+   behind the spinner and text (negative z-index inside the isolated stacking
+   context). */
+.format-mnemo__loading::before,
+.format-mnemo__loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.format-mnemo__loading::before {
+    z-index: -2;
+    background-image:
+        repeating-linear-gradient(0deg, rgba(0, 229, 255, 0.28) 0 1px, transparent 1px 30px),
+        repeating-linear-gradient(90deg, rgba(0, 229, 255, 0.28) 0 1px, transparent 1px 30px);
+    background-position: center;
+    animation: format-mnemo-grid-rush 1.6s linear infinite;
+}
+
+.format-mnemo__loading::after {
+    z-index: -1;
+    background-image: repeating-linear-gradient(0deg, rgba(0, 229, 255, 0.1) 0 2px, transparent 2px 4px);
+    opacity: 0.4;
+    animation:
+        format-mnemo-noise-flicker 0.18s steps(2) infinite,
+        format-mnemo-scan-roll 5s linear infinite;
 }
 
 .format-mnemo__spinner {
@@ -162,9 +198,47 @@
     }
 }
 
+@keyframes format-mnemo-grid-rush {
+    from {
+        transform: scale(0.35);
+        opacity: 0;
+    }
+
+    30% {
+        opacity: 0.55;
+    }
+
+    to {
+        transform: scale(2.6);
+        opacity: 0;
+    }
+}
+
+@keyframes format-mnemo-noise-flicker {
+    to {
+        opacity: 0.18;
+    }
+}
+
+@keyframes format-mnemo-scan-roll {
+    to {
+        transform: translateY(30px);
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .format-mnemo__spinner {
         animation-duration: 3s;
+    }
+
+    .format-mnemo__loading::before {
+        animation: none;
+        opacity: 0.3;
+        transform: scale(1.4);
+    }
+
+    .format-mnemo__loading::after {
+        animation: none;
     }
 }
 
