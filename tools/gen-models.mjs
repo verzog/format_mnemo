@@ -60,6 +60,31 @@ function cylinder(radius, height, seg) {
         nrm.push(x0, 0, z0, x1, 0, z1, x1, 0, z1, x0, 0, z0);
         idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
+    // End caps (a triangle fan around a centre vertex) so the cylinder is a
+    // solid disc from top and bottom, not an open tube - e.g. the lamp's
+    // downlight lens must read as a lit disc when seen from the street below.
+    [hy, -hy].forEach(function(cy) {
+        var up = cy > 0 ? 1 : -1;
+        var centre = pos.length / 3;
+        pos.push(0, cy, 0);
+        nrm.push(0, up, 0);
+        var ring = [];
+        for (var j = 0; j < seg; j++) {
+            var a = (j / seg) * Math.PI * 2;
+            ring.push(pos.length / 3);
+            pos.push(Math.cos(a) * radius, cy, Math.sin(a) * radius);
+            nrm.push(0, up, 0);
+        }
+        for (var k = 0; k < seg; k++) {
+            var nx = (k + 1) % seg;
+            // Wind so the face points outward (+Y up, -Y down).
+            if (up > 0) {
+                idx.push(centre, ring[k], ring[nx]);
+            } else {
+                idx.push(centre, ring[nx], ring[k]);
+            }
+        }
+    });
     return {pos: pos, nrm: nrm, idx: idx};
 }
 

@@ -4335,47 +4335,62 @@ define('format_mnemo/vr', [], function() {
         this.lampLights++;
         var THREE = this.THREE;
         // Sit the light at the lamp's head, not a fixed height: the luminaire is
-        // near the top of the model, so derive the head height from the model's
-        // own size (a previous fixed 3.4 left the light halfway down the taller
-        // lamp). The head is centred over the pole, so x/z stay 0.
-        var headY = this.lampHeadY(group);
+        // near the top of the model, so derive the head's Y from the model's own
+        // local bounds (a previous fixed 3.4 left the light halfway down the
+        // taller lamp). The head is centred over the pole, so x/z stay 0.
+        var box = this.lampLocalBox(group);
+        var bottom = box ? box.min.y : 0;
+        var top = box ? box.max.y : 6;
+        // The luminaire sits just below the very top (crown and finial). Use the
+        // model's actual top Y (not just its height), so a custom lamp whose
+        // origin is not at its base is still lit at its head, not above it.
+        var headY = top - 0.08 * (top - bottom);
         // Tie the pool to the course's neon palette so it matches the signage;
         // physically-based falloff (decay 2) keeps it local to the lamp.
         var light = new THREE.PointLight(this.palette.primary, 14, 18, 2);
         light.position.set(0, headY, 0);
         light.castShadow = false;
         group.add(light);
-        // Misty palettes show the lamp's light as a soft cone through the haze.
+        // Misty palettes show the lamp's light as a soft cone through the haze:
+        // from the luminaire down to the model's base.
         if (this.palette.mist) {
-            group.add(this.lampCone(headY));
+            var cone = this.lampCone(headY - bottom);
+            cone.position.y = bottom;
+            group.add(cone);
         }
     };
 
     /**
-     * The lamp's lit-head height in the group's own local space, a little below
-     * the top of the model, so the light and its glow cone sit at the luminaire
-     * whatever the model's size (rather than a fixed height that desynced when
-     * the model grew taller). Falls back to a sensible height if the model's
-     * bounds cannot be measured.
+     * The lamp model's bounding box in the group's own local space, so the light
+     * and glow cone can be placed at the luminaire whatever the model's size or
+     * origin. Converts each mesh's world bounds back through the group's inverse
+     * matrix. Returns null if the bounds cannot be measured (e.g. an empty
+     * group), so the caller falls back to sensible defaults.
      *
      * @param {Object} group The lamp's group (model clone).
-     * @return {Number} The head height in the group's local units.
+     * @return {Object|null} A Three.Box3 in local space, or null.
      */
-    Cyberspace.prototype.lampHeadY = function(group) {
+    Cyberspace.prototype.lampLocalBox = function(group) {
         var THREE = this.THREE;
         try {
             group.updateWorldMatrix(true, true);
-            var box = new THREE.Box3().setFromObject(group);
-            var sy = (group.scale && group.scale.y) ? group.scale.y : 1;
-            var localHeight = (box.max.y - box.min.y) / sy;
-            if (isFinite(localHeight) && localHeight > 0) {
-                // The luminaire sits just below the very top (crown and finial).
-                return localHeight * 0.92;
-            }
+            var inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+            var box = new THREE.Box3();
+            var tmp = new THREE.Matrix4();
+            group.traverse(function(o) {
+                if (!o.geometry) {
+                    return;
+                }
+                if (!o.geometry.boundingBox) {
+                    o.geometry.computeBoundingBox();
+                }
+                tmp.multiplyMatrices(inv, o.matrixWorld);
+                box.union(o.geometry.boundingBox.clone().applyMatrix4(tmp));
+            });
+            return box.isEmpty() ? null : box;
         } catch (e) {
-            // Fall through to the default.
+            return null;
         }
-        return 5.6;
     };
 
     /**
