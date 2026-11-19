@@ -86,6 +86,7 @@ async function loadFixture(name) {
             day: {night: 0.5},
             gltf: CS.prototype.gltf,
             loadModel: CS.prototype.loadModel,
+            withAssetRev: CS.prototype.withAssetRev,
             dressLoadedModel: CS.prototype.dressLoadedModel
         };
         try {
