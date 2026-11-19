@@ -736,45 +736,74 @@ function format_mnemo_migrate_env_options(): void {
         'mnemogame' => 'game',
     ];
     $legacy = array_keys($map);
-    [$insql, $params] = $DB->get_in_or_equal($legacy, SQL_PARAMS_NAMED);
+
+    // Every option name this migration reads or writes: the legacy keys, the
+    // per-course active-environment key, and every per-environment target key.
+    // Loading just these in a single query lets the per-course work below run
+    // entirely from memory instead of querying inside the loop.
+    $names = array_merge($legacy, ['mnemoenvironment']);
+    foreach (\format_mnemo::ENVIRONMENTS as $envname) {
+        foreach ($map as $setting) {
+            $names[] = 'mnemo_' . $envname . '_' . $setting;
+        }
+    }
+    [$insql, $params] = $DB->get_in_or_equal($names, SQL_PARAMS_NAMED);
     $params['format'] = 'mnemo';
-    $courseids = $DB->get_fieldset_select(
+    $params['sectionid'] = 0;
+    $rows = $DB->get_records_select(
         'course_format_options',
-        'DISTINCT courseid',
-        "format = :format AND name $insql",
+        "format = :format AND sectionid = :sectionid AND name $insql",
         $params
     );
-    foreach ($courseids as $courseid) {
-        $env = $DB->get_field('course_format_options', 'value', [
-            'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => 'mnemoenvironment',
-        ]);
+    // Index the loaded rows by course id and then by option name.
+    $bycourse = [];
+    foreach ($rows as $row) {
+        $bycourse[$row->courseid][$row->name] = $row;
+    }
+
+    // Decide every insert and delete in memory, then apply each as one batched
+    // query after the loop, so the number of queries does not grow with the
+    // number of courses.
+    $toinsert = [];
+    $deleteids = [];
+    foreach ($bycourse as $courseid => $named) {
+        $env = isset($named['mnemoenvironment']) ? $named['mnemoenvironment']->value : null;
         if (!in_array($env, \format_mnemo::ENVIRONMENTS, true)) {
             $env = 'cyberspace';
         }
         foreach ($map as $oldname => $setting) {
-            $old = $DB->get_record('course_format_options', [
-                'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => $oldname,
-            ]);
-            if (!$old) {
+            if (!isset($named[$oldname])) {
                 continue;
             }
             $newname = 'mnemo_' . $env . '_' . $setting;
-            $new = $DB->get_record('course_format_options', [
-                'format' => 'mnemo', 'courseid' => $courseid, 'sectionid' => 0, 'name' => $newname,
-            ]);
-            if ($new) {
-                $new->value = $old->value;
-                $DB->update_record('course_format_options', $new);
-            } else {
-                $DB->insert_record('course_format_options', (object)[
-                    'courseid' => $courseid,
-                    'format' => 'mnemo',
-                    'sectionid' => 0,
-                    'name' => $newname,
-                    'value' => $old->value,
-                ]);
+            // Drop any existing target row so the moved value replaces it (the
+            // new row is inserted below), then drop the legacy row.
+            if (isset($named[$newname])) {
+                $deleteids[] = $named[$newname]->id;
             }
-            $DB->delete_records('course_format_options', ['id' => $old->id]);
+            $toinsert[] = (object)[
+                'courseid' => $courseid,
+                'format' => 'mnemo',
+                'sectionid' => 0,
+                'name' => $newname,
+                'value' => $named[$oldname]->value,
+            ];
+            $deleteids[] = $named[$oldname]->id;
         }
     }
+    if (!$toinsert && !$deleteids) {
+        return;
+    }
+    // Delete first, then insert, inside one transaction: the deletes clear any
+    // target rows before their replacements are inserted (the table's unique
+    // courseid/format/sectionid/name key would otherwise reject the insert),
+    // and the transaction keeps the move atomic.
+    $transaction = $DB->start_delegated_transaction();
+    if ($deleteids) {
+        $DB->delete_records_list('course_format_options', 'id', $deleteids);
+    }
+    if ($toinsert) {
+        $DB->insert_records('course_format_options', $toinsert);
+    }
+    $transaction->allow_commit();
 }
