@@ -2442,6 +2442,31 @@ const scenarios = [
         }
     },
     {
+        name: 'access: the lock placard grows to fit long conditions',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const mk = (conditions) => {
+                const self = {
+                    THREE, config: {strings: {}},
+                    newCanvasCtx: CS.prototype.newCanvasCtx,
+                    wrapTextLines: CS.prototype.wrapTextLines,
+                    buildLockPanel: CS.prototype.buildLockPanel
+                };
+                return self.buildLockPanel({lockblocks: true, conditions});
+            };
+            const short = mk('Not available until 1 January.');
+            const long = mk('Not available unless: you belong to Group A; and it is on or after ' +
+                '1 January 2027; and you complete Assignment One, Assignment Two, Assignment ' +
+                'Three, Assignment Four and the Final Project before the street will open.');
+            const sh = short.geometry.parameters.height;
+            const lh = long.geometry.parameters.height;
+            const empty = mk('   '); // No conditions -> no placard.
+            const pass = lh > sh && empty === null;
+            return {pass, detail: `short=${sh.toFixed(2)} long=${lh.toFixed(2)} empty=${empty}`};
+        }
+    },
+    {
         name: 'editor: a ground structure footprint is clamped out of the road',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

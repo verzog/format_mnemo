@@ -6504,10 +6504,19 @@ define('format_mnemo/vr', [], function() {
             (s.barrierlocked || 'Access restricted') :
             (s.barrierlockedstaff || 'Restricted for learners');
         var w = 512;
-        var h = 256;
+        var pad = 24;
+        var bodyTop = 78;
+        var lineh = 32;
         var ctx = this.newCanvasCtx(w);
+        // Measure the wrapped body with the body font, then grow the canvas to
+        // fit the heading, every line and the padding, so long condition lists
+        // are never clipped.
+        ctx.font = '26px sans-serif';
+        var lines = this.wrapTextLines(ctx, text, w - pad * 2);
+        var h = Math.max(160, bodyTop + lines.length * lineh + pad);
+        // Resizing the canvas resets the 2D context, so set it up and draw now.
+        ctx.canvas.width = w;
         ctx.canvas.height = h;
-        // A dark translucent card with a neon edge.
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = 'rgba(6, 12, 20, 0.82)';
         ctx.fillRect(0, 0, w, h);
@@ -6517,47 +6526,52 @@ define('format_mnemo/vr', [], function() {
         ctx.textBaseline = 'top';
         ctx.fillStyle = '#7fe9ff';
         ctx.font = 'bold 34px sans-serif';
-        ctx.fillText(heading, 24, 22, w - 48);
+        ctx.fillText(heading, pad, 22, w - pad * 2);
         ctx.fillStyle = '#e7f6ff';
         ctx.font = '26px sans-serif';
-        this.wrapCanvasText(ctx, text, 24, 78, w - 48, 32);
+        for (var i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], pad, bodyTop + i * lineh);
+        }
         var tex = new THREE.CanvasTexture(ctx.canvas);
         if (tex.colorSpace !== undefined) {
             tex.colorSpace = THREE.SRGBColorSpace;
         }
         var mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, side: THREE.DoubleSide});
-        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.1), mat);
+        // A fixed width; the height follows the canvas aspect so text is never
+        // squashed, capped so a very long list does not tower over the street.
+        var planeW = 4.2;
+        var planeH = Math.min(6, planeW * (h / w));
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
         return mesh;
     };
 
     /**
-     * Draw text onto a 2D canvas context, wrapping on spaces to a maximum width
-     * and advancing by a line height. Used for the lock placard.
+     * Split text into lines that each fit a maximum pixel width, wrapping on
+     * spaces, measured in the context's current font. Used to size and fill the
+     * lock placard.
      *
-     * @param {Object} ctx The canvas 2D context.
-     * @param {String} text The text to draw.
-     * @param {Number} x Left x.
-     * @param {Number} y Top y of the first line.
+     * @param {Object} ctx The canvas 2D context (its font already set).
+     * @param {String} text The text to wrap.
      * @param {Number} maxw Maximum line width in pixels.
-     * @param {Number} lineh Line height in pixels.
+     * @return {String[]} The wrapped lines.
      */
-    Cyberspace.prototype.wrapCanvasText = function(ctx, text, x, y, maxw, lineh) {
+    Cyberspace.prototype.wrapTextLines = function(ctx, text, maxw) {
         var words = String(text).replace(/\s+/g, ' ').trim().split(' ');
+        var lines = [];
         var line = '';
-        var cy = y;
         for (var i = 0; i < words.length; i++) {
             var test = line ? line + ' ' + words[i] : words[i];
             if (ctx.measureText(test).width > maxw && line) {
-                ctx.fillText(line, x, cy);
+                lines.push(line);
                 line = words[i];
-                cy += lineh;
             } else {
                 line = test;
             }
         }
         if (line) {
-            ctx.fillText(line, x, cy);
+            lines.push(line);
         }
+        return lines;
     };
 
     /**

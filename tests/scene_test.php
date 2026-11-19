@@ -325,6 +325,9 @@ final class scene_test extends \advanced_testcase {
         $PAGE->set_url('/course/view.php', ['id' => $course->id]);
         $student = $generator->create_and_enrol($course, 'student');
         $teacher = $generator->create_and_enrol($course, 'editingteacher');
+        // A non-editing teacher cannot manage activities but may bypass access
+        // restrictions, so must see the barrier yet never be blocked by it.
+        $nonediting = $generator->create_and_enrol($course, 'teacher');
 
         // A learner who has not met the date is blocked by the barrier.
         $this->setUser($student);
@@ -352,6 +355,16 @@ final class scene_test extends \advanced_testcase {
         $this->assertTrue($staffview['locked']);
         $this->assertFalse($staffview['lockblocks']);
         $this->assertNotEmpty($staffview['conditions']);
+
+        // A non-editing teacher (bypasses availability but cannot manage) also
+        // sees the barrier and is not blocked.
+        $this->setUser($nonediting);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $teacherview = $this->find_section($config, 1);
+        $this->assertNotNull($teacherview);
+        $this->assertTrue($teacherview['locked']);
+        $this->assertFalse($teacherview['lockblocks']);
     }
 
     /**
