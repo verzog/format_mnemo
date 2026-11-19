@@ -2873,6 +2873,38 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Append the plugin version as a ?rev= cache-buster to a same-site asset
+     * URL, so an upgraded plugin's changed bundled models are refetched rather
+     * than served stale from the browser cache. Left unchanged for an external
+     * asset-pack URL (a different origin, the admin's responsibility), a URL
+     * that already carries a query or fragment, or when no revision is known.
+     *
+     * @param {String} url The asset URL.
+     * @return {String} The URL, with ?rev= appended where appropriate.
+     */
+    Cyberspace.prototype.withAssetRev = function(url) {
+        var rev = this.config && this.config.assetrev;
+        if (!rev || typeof url !== 'string' || url === '' ||
+                url.indexOf('?') !== -1 || url.indexOf('#') !== -1) {
+            return url;
+        }
+        // Same-site: a root-relative path (but not protocol-relative "//host"),
+        // or an absolute URL on this page's own origin.
+        var rootRelative = url.charAt(0) === '/' && url.charAt(1) !== '/';
+        var sameOrigin = false;
+        try {
+            sameOrigin = typeof window !== 'undefined' && window.location &&
+                url.indexOf(window.location.origin + '/') === 0;
+        } catch (e) {
+            sameOrigin = false;
+        }
+        if (!rootRelative && !sameOrigin) {
+            return url;
+        }
+        return url + '?rev=' + encodeURIComponent(rev);
+    };
+
+    /**
      * Load a glTF model (binary .glb or JSON .gltf), cached per URL. Returns a
      * template group; callers clone it for each instance.
      *
@@ -2886,6 +2918,10 @@ define('format_mnemo/vr', [], function() {
      * @return {Promise} Resolves with a Three.Group template.
      */
     Cyberspace.prototype.loadModel = function(url) {
+        // Cache-bust same-site model URLs with the plugin version, so a browser
+        // picks up a changed bundled model after the plugin is upgraded instead
+        // of serving the stale cached file (the model paths carry no revision).
+        url = this.withAssetRev(url);
         if (this.modelCache[url]) {
             return this.modelCache[url];
         }
