@@ -275,8 +275,8 @@ final class scene_test extends \advanced_testcase {
         $this->assertArrayHasKey('description', $activity);
         $this->assertStringContainsString('Read this before the lab', $activity['description']);
 
-        // export_for_template keeps the description on the list rows, but strips
-        // it from the 3D config payload (the scene does not render it).
+        // The exported template data keeps the description on the list rows,
+        // but strips it from the 3D config payload (the scene does not use it).
         $data = $scene->export_for_template($renderer);
         $listactivity = null;
         foreach ($data->sections as $section) {
