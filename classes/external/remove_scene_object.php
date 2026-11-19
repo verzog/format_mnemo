@@ -32,15 +32,15 @@ use context_course;
 use invalid_parameter_exception;
 
 /**
- * Mark a generated prop's slot (a street lamp, barrier or kiosk) hidden for the
- * course, so the scene stops building it. Recorded on the per-course scene-object
- * row keyed by slot; guarded by the activity-editing capability on the course.
+ * Mark a generated prop's slot (a street lamp or kiosk) hidden for the course,
+ * so the scene stops building it. Recorded on the per-course scene-object row
+ * keyed by slot; guarded by the activity-editing capability on the course.
  * Only the decorative-prop slot types are removable — gates and pylons (which
  * mark topics) and activities are not.
  */
 class remove_scene_object extends external_api {
     /** @var string Allowed shape of a removable prop slot key. */
-    const KEY_PATTERN = '/^(?:lamp|barrier|kiosk):[0-9]+$/';
+    const KEY_PATTERN = '/^(?:lamp|kiosk):[0-9]+$/';
 
     /**
      * Parameters.

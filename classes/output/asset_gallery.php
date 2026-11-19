@@ -620,6 +620,11 @@ class asset_gallery {
             }
             $out[] = $name;
         }
+        // The energy barriers are built procedurally (no model file) but are
+        // placeable, so list them here: this is the single source the palette and
+        // the add-placed-object web service both read, so they stay in agreement.
+        $out[] = 'echeckpoint';
+        $out[] = 'earch';
         sort($out, SORT_STRING);
         return $out;
     }

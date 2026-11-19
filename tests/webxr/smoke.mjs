@@ -1854,6 +1854,7 @@ const scenarios = [
                 modelOrientation: CS.prototype.modelOrientation,
                 orientClone: CS.prototype.orientClone,
                 animateClone: CS.prototype.animateClone,
+                isProceduralProp: CS.prototype.isProceduralProp,
                 placeProp: CS.prototype.placeProp
             };
             self.placeProp('lamp', 7, 4, -6);
@@ -1910,7 +1911,7 @@ const scenarios = [
             const removed = [];
             const self = {
                 scene: {add: () => {}, remove: (o) => removed.push(o)},
-                editables: [ed], placedObjects: [{id: 9, type: 'barrier', x: 0, z: 0}],
+                editables: [ed], placedObjects: [{id: 9, type: 'kiosk', x: 0, z: 0}],
                 selected: ed, selBox: null, selLabel: null, editorPanel: null,
                 THREE,
                 deselectEditable: CS.prototype.deselectEditable,
@@ -2013,6 +2014,7 @@ const scenarios = [
                     return Promise.resolve(tpl);
                 },
                 buildPlacedObjectsOfType: (name) => built.push(name),
+                isProceduralProp: CS.prototype.isProceduralProp,
                 ensurePropTemplate: CS.prototype.ensurePropTemplate
             };
             self.ensurePropTemplate('drone');
@@ -3572,6 +3574,94 @@ const scenarios = [
         }
     },
     {
+        name: 'barrier: placeable arch and checkpoint build groups and register for animation',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, wetMaterials: [], wetEnv: null, structureTexture: null, energyBarriers: [],
+                maxAnisotropy: () => 8,
+                makeTextTexture: () => new THREE.Texture(),
+                radialTexture: CS.prototype.radialTexture,
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                structureMaterial: CS.prototype.structureMaterial,
+                barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                drawRivet: CS.prototype.drawRivet,
+                buildBarrierPost: CS.prototype.buildBarrierPost,
+                buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                buildBarrierField: CS.prototype.buildBarrierField,
+                addBarrierDecal: CS.prototype.addBarrierDecal,
+                buildEnergyBarrier: CS.prototype.buildEnergyBarrier,
+                buildArchGroup: CS.prototype.buildArchGroup,
+                buildCheckpointGroup: CS.prototype.buildCheckpointGroup,
+                isProceduralProp: CS.prototype.isProceduralProp,
+                buildProceduralProp: CS.prototype.buildProceduralProp
+            };
+            // The two placeable types are procedural; a model name is not.
+            const kinds = self.isProceduralProp('echeckpoint') && self.isProceduralProp('earch') &&
+                !self.isProceduralProp('lamp');
+            // A single arch registers one barrier; a checkpoint registers three.
+            const arch = self.buildProceduralProp('earch');
+            const afterArch = self.energyBarriers.length;
+            const check = self.buildProceduralProp('echeckpoint');
+            const total = self.energyBarriers.length;
+            const ok = kinds && arch && arch.children.length === 1 && afterArch === 1 &&
+                check && check.children.length === 3 && total === 4 &&
+                self.buildProceduralProp('nope') === null;
+            return {pass: !!ok, detail: `kinds=${kinds} arch=${afterArch} total=${total}`};
+        }
+    },
+    {
+        name: 'barrier: beacon point lights are capped; excess beacons glow without a light',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, wetMaterials: [], wetEnv: null, structureTexture: null, energyBarriers: [],
+                beaconLights: 0,
+                maxAnisotropy: () => 8,
+                makeTextTexture: () => new THREE.Texture(),
+                radialTexture: CS.prototype.radialTexture,
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                structureMaterial: CS.prototype.structureMaterial,
+                barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                drawRivet: CS.prototype.drawRivet,
+                buildBarrierPost: CS.prototype.buildBarrierPost,
+                buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                buildBarrierField: CS.prototype.buildBarrierField,
+                addBarrierDecal: CS.prototype.addBarrierDecal,
+                buildEnergyBarrier: CS.prototype.buildEnergyBarrier,
+                buildCheckpointGroup: CS.prototype.buildCheckpointGroup,
+                buildProceduralProp: CS.prototype.buildProceduralProp,
+                isProceduralProp: CS.prototype.isProceduralProp,
+                setBeacon: CS.prototype.setBeacon
+            };
+            // Five checkpoints = 30 beacons, but only 24 real point lights.
+            let withLight = 0, withoutLight = 0;
+            for (let i = 0; i < 5; i++) {
+                const g = self.buildProceduralProp('echeckpoint');
+                g.traverse((o) => {
+                    if (o.userData && o.userData.barrier) {
+                        o.userData.barrier.beacons.forEach((b) => {
+                            if (b.light) {
+                                withLight++;
+                            } else {
+                                withoutLight++;
+                                self.setBeacon(b, 1); // Must not throw on a null light.
+                            }
+                        });
+                    }
+                });
+            }
+            const pass = self.beaconLights === 24 && withLight === 24 && withoutLight === 6;
+            return {pass, detail: `spent=${self.beaconLights} lit=${withLight} unlit=${withoutLight}`};
+        }
+    },
+    {
         name: 'resize: a zero-size container is skipped; a real size is applied',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
@@ -4232,9 +4322,9 @@ const scenarios = [
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const self = {propType: CS.prototype.propType,
-                placedObjects: [{id: 7, type: 'barrier', x: 0, z: 0}]};
+                placedObjects: [{id: 7, type: 'kiosk', x: 0, z: 0}]};
             const pass = self.propType({objkey: 'lamp:3'}) === 'lamp' &&
-                self.propType({objkey: 'placed:7'}) === 'barrier' &&
+                self.propType({objkey: 'placed:7'}) === 'kiosk' &&
                 self.propType({objkey: 'gate:1'}) === null &&
                 self.propType({cmid: 5}) === null;
             return {pass, detail: `lamp=${self.propType({objkey: 'lamp:3'})}`};

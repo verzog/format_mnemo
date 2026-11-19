@@ -238,7 +238,6 @@ function buildGlb(parts) {
 
 var METAL = {color: [0.05, 0.06, 0.08, 1], metallic: 0.9, roughness: 0.35};
 var GLASS = {color: [0.08, 0.13, 0.18, 1], metallic: 0.3, roughness: 0.12, emissive: [0.02, 0.05, 0.08]};
-var CONCRETE = {color: [0.5, 0.5, 0.52, 1], metallic: 0.0, roughness: 0.95};
 
 function av() {
     return [
@@ -286,13 +285,6 @@ function kiosk() {
         {g: place(box(3.4, 0.12, 1.0), {t: [0, 2.5, 1.1]}), m: {color: [0.6, 0.1, 0.3, 1], roughness: 0.5}},
         {g: place(box(2.2, 1.2, 0.08), {t: [0, 1.55, 1.02]}), m: {color: [0, 0, 0, 1], emissive: [1.8, 0.2, 1.3]}},
         {g: place(box(2.8, 0.07, 0.1), {t: [0, 0.7, 1.0]}), m: {color: [0, 0, 0, 1], emissive: [0, 1.4, 1.7]}}
-    ];
-}
-
-function barrier() {
-    return [
-        {g: place(box(2, 0.9, 0.5), {t: [0, 0.45, 0]}), m: CONCRETE},
-        {g: place(box(2.02, 0.22, 0.52), {t: [0, 0.62, 0]}), m: {color: [0, 0, 0, 1], emissive: [1.6, 0.9, 0]}}
     ];
 }
 
@@ -376,7 +368,6 @@ const props = {
     av: av(),
     lamp: lamp(),
     kiosk: kiosk(),
-    barrier: barrier(),
     'building-quiz': buildingQuiz()
 };
 

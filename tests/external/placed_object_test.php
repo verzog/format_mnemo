@@ -207,7 +207,7 @@ final class placed_object_test extends \advanced_testcase {
         $this->getDataGenerator()->enrol_user($teacher->id, $courseb->id, 'editingteacher');
         $this->setUser($teacher);
 
-        $placed = add_placed_object::execute($coursea->id, 'barrier', 0.0, 0.0);
+        $placed = add_placed_object::execute($coursea->id, 'kiosk', 0.0, 0.0);
         // Attempting to remove course A's prop while naming course B is a no-op.
         remove_placed_object::execute($courseb->id, $placed['id']);
         $this->assertTrue($DB->record_exists('format_mnemo_placedobj', ['id' => $placed['id']]));

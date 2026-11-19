@@ -200,7 +200,7 @@ define('format_mnemo/vr', [], function() {
         // the model it credits is actually loaded (see noteModelUsed).
         this.credits = initCredits(root);
         // World-space XZ footprints of placed buildings, so scattered props
-        // (kiosks, lamps, barriers) can avoid dropping on top of a building.
+        // (kiosks, lamps) can avoid dropping on top of a building.
         this.footprints = [];
         // Number of real point lights attached to street lamps so far, capped
         // so a very long avenue does not spawn an unbounded number of lights.
@@ -348,7 +348,8 @@ define('format_mnemo/vr', [], function() {
         this.wetCaptureTimer = null; // Pending reflection re-capture.
         this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
-        this.energyBarriers = []; // Animated energy security barriers (see buildCheckpoint).
+        this.energyBarriers = []; // Animated energy security barriers (see buildCheckpointGroup).
+        this.beaconLights = 0; // Real point lights spent on barrier beacons (capped, like lamps).
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
@@ -520,7 +521,7 @@ define('format_mnemo/vr', [], function() {
         this.buildCity();
         // Wet palettes: reflect the finished city in the puddles.
         this.applyWetReflections();
-        // Original glTF props (lamps, kiosks, barriers, flying traffic); loads
+        // Original glTF props (lamps, kiosks, flying traffic); loads
         // asynchronously and falls back cleanly if models are unavailable.
         this.buildProps();
         this.buildControllers();
@@ -3635,7 +3636,7 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * Load the original prop models and scatter them through the city: street
-     * lamps and barriers along the roads, kiosks at some side-street mouths, and
+     * lamps along the roads, kiosks at some side-street mouths, and
      * flying-car traffic above the streets. Skipped (with a clean fallback to
      * the procedural scene) when no model base URL is configured or a load
      * fails.
@@ -3667,9 +3668,6 @@ define('format_mnemo/vr', [], function() {
         load('lamp', function(tpl) {
             self.placeLampSlots(tpl);
         });
-        load('barrier', function(tpl) {
-            self.scatterStreetProps(tpl, 'barrier');
-        });
         load('kiosk', function(tpl) {
             self.scatterKiosks(tpl);
         });
@@ -3689,18 +3687,22 @@ define('format_mnemo/vr', [], function() {
         // "toString" or "__proto__" cannot collide with an inherited property.
         var known = Object.create(null);
         known.lamp = true;
-        known.barrier = true;
         known.kiosk = true;
         known.av = true;
         var extra = Object.create(null);
         this.placedObjects.forEach(function(p) {
-            if (!known[p.type]) {
+            // Procedural props (the energy barriers) have no model to load; they
+            // are built directly from code below.
+            if (!known[p.type] && !self.isProceduralProp(p.type)) {
                 extra[p.type] = true;
             }
         });
         Object.keys(extra).forEach(function(name) {
             load(name);
         });
+
+        // Build any placed procedural props (energy barriers / arches).
+        this.buildPlacedProceduralProps();
 
         this.buildTraffic();
     };
@@ -3716,7 +3718,8 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.ensurePropTemplate = function(name) {
         var self = this;
-        if (!name || this.propTemplates[name]) {
+        // Procedural props (energy barriers) have no model to fetch.
+        if (!name || this.propTemplates[name] || this.isProceduralProp(name)) {
             return;
         }
         this.propLoading = this.propLoading || {};
@@ -3740,7 +3743,7 @@ define('format_mnemo/vr', [], function() {
      * on the ground, but a placed vehicle hovers above its grid square like the
      * flying traffic.
      *
-     * @param {String} type The prop model name (lamp, barrier, kiosk, av).
+     * @param {String} type The prop model name (lamp, kiosk, av).
      * @return {Number} The world-y to place it at.
      */
     Cyberspace.prototype.placedBaseY = function(type) {
@@ -3757,9 +3760,10 @@ define('format_mnemo/vr', [], function() {
         var s = this.config.strings || {};
         var labels = {
             lamp: s.placelamp || 'Street lamp',
-            barrier: s.placebarrier || 'Barrier',
             kiosk: s.placekiosk || 'Kiosk',
-            av: s.placevehicle || 'Vehicle'
+            av: s.placevehicle || 'Vehicle',
+            echeckpoint: s.placecheckpoint || 'Energy checkpoint',
+            earch: s.placearch || 'Energy arch'
         };
         if (labels[type]) {
             return labels[type];
@@ -4060,7 +4064,7 @@ define('format_mnemo/vr', [], function() {
      * plugin's bundled models when the pack does not provide it. This lets a
      * partial asset pack (only some props) keep the bundled models for the rest.
      *
-     * @param {String} name The prop base name (lamp, barrier, kiosk, av).
+     * @param {String} name The prop base name (lamp, kiosk, av).
      * @return {Promise} Resolves with a Three.Group template.
      */
     /**
@@ -4355,12 +4359,6 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Place a repeated static prop (lamp or barrier) along the avenue kerbs.
-     *
-     * @param {Object} tpl The model template group.
-     * @param {String} kind "lamp" or "barrier".
-     */
-    /**
      * Attach a real point light to a street lamp so it actually illuminates the
      * reflective road, ground and sidewalks around it (a warm pool with a
      * specular glint), rather than only glowing at the bulb. The light is a
@@ -4478,58 +4476,6 @@ define('format_mnemo/vr', [], function() {
             return; // Light, not a solid: never picked or snapped to.
         };
         return cone;
-    };
-
-    Cyberspace.prototype.scatterStreetProps = function(tpl, kind) {
-        var road = this.roads[0];
-        if (!road) {
-            return;
-        }
-        var step = kind === 'lamp' ? 24 : 16;
-        var edge = road.xMax + (kind === 'lamp' ? 0.6 : 0.2);
-        var label = kind === 'lamp' ? 'Street lamp' : 'Barrier';
-        // The model's asset-viewer scale: enlarge the footprint clearance by it
-        // so a scaled-up prop still keeps clear of buildings, and pass it on for
-        // the pick proxy and the editable base scale.
-        var scale = this.modelScale(kind);
-        // A physical slot index, advanced for every candidate position along the
-        // avenue (from a fixed start, by a fixed step) whether or not the prop is
-        // actually placed. This keeps each prop's key tied to its physical spot
-        // and stable across viewers, even though footprint skipping (which
-        // depends on per-viewer activities) changes which slots are filled.
-        var slot = 0;
-        for (var z = road.zMax - 6; z > road.zMin + 6; z -= step) {
-            for (var s = -1; s <= 1; s += 2) {
-                var objkey = kind + ':' + slot;
-                slot++;
-                // A prop a teacher deleted stays gone.
-                if (this.isHidden(objkey)) {
-                    continue;
-                }
-                var stored = this.sceneObjects[objkey];
-                var px = this.snapBase(s * edge, stored);
-                var pz = this.snapBase(z, stored);
-                // Skip a prop that would drop on a building footprint.
-                if (!this.footprintClear(px, pz, 0.8 * scale)) {
-                    continue;
-                }
-                var m = tpl.clone();
-                this.orientClone(m, kind);
-                this.animateClone(tpl, m);
-                m.position.set(px, 0, pz);
-                if (s < 0 && kind === 'lamp') {
-                    m.rotation.y = Math.PI; // Arm faces the road on both sides.
-                }
-                if (kind === 'lamp') {
-                    this.addLampLight(m);
-                }
-                this.setShadow(m, true);
-                this.scene.add(m);
-                this.addPickProxy(m, scale);
-                this.registerSceneEditable(objkey, label, m, px, 0, pz, kind === 'lamp', scale);
-                this.instanceClone(tpl, m);
-            }
-        }
     };
 
     /**
@@ -5186,10 +5132,6 @@ define('format_mnemo/vr', [], function() {
             var sx = (Math.random() - 0.5) * roadHalf * 1.4;
             self.wetStreak(sx, (12 + endZ) / 2 + (Math.random() - 0.5) * 40, 0.5 + Math.random());
         }
-
-        // A three-lane energy security checkpoint just inside the avenue mouth,
-        // showing the barriers' five states (see buildCheckpoint).
-        this.buildCheckpoint(2, roadHalf);
 
         sections.forEach(function(section, i) {
             var z = startZ - i * spacing;
@@ -6173,8 +6115,17 @@ define('format_mnemo/vr', [], function() {
         }));
         halo.scale.set(1.3, 1.3, 1);
         group.add(halo);
-        var light = new THREE.PointLight(amber, 6, 9, 2);
-        group.add(light);
+        // A real point light, but only within a global budget (as addLampLight
+        // caps lamps): many placed checkpoints would otherwise create thousands
+        // of lights and blow the renderer's light-uniform limit. Beyond the cap a
+        // beacon keeps its emissive dome and additive halo, just casts no light.
+        var light = null;
+        var spent = this.beaconLights || 0;
+        if (spent < 24) {
+            this.beaconLights = spent + 1;
+            light = new THREE.PointLight(amber, 6, 9, 2);
+            group.add(light);
+        }
         group.position.y = y;
         return {group: group, mat: mat, halo: halo.material, light: light};
     };
@@ -6346,30 +6297,103 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Place a three-lane security checkpoint across the avenue at the given z,
-     * one barrier per lane, each showing a different behaviour so every state is
-     * on display: the centre lane auto-deploys and retracts as the learner nears
-     * it (Deploy / Retract / Idle_BeaconFlash), the left lane is locked in
-     * Alert_Mode, and the right lane is Damaged_Spark. The barriers are tracked
-     * in this.energyBarriers for the tick.
+     * Build a placeable three-lane security checkpoint as a single group,
+     * centred on the origin: the left lane locked in Alert_Mode (red), the centre
+     * lane auto-deploying and retracting as a learner nears it (Deploy / Retract /
+     * Idle_BeaconFlash), and the right lane in Damaged_Spark. Each lane's barrier
+     * is registered in this.energyBarriers for the tick. The caller positions and
+     * registers the returned group.
      *
-     * @param {Number} z The avenue z the checkpoint spans.
-     * @param {Number} roadHalf The avenue half-width.
+     * @return {Object} The checkpoint Three.Group.
      */
-    Cyberspace.prototype.buildCheckpoint = function(z, roadHalf) {
-        var lanes = [
-            {x: -roadHalf * 0.62, behaviour: 'alert'},
-            {x: 0, behaviour: 'auto'},
-            {x: roadHalf * 0.62, behaviour: 'damaged'},
-        ];
-        var laneW = (roadHalf * 2) / 3 - 0.3;
+    Cyberspace.prototype.buildCheckpointGroup = function() {
+        var group = new this.THREE.Group();
+        var lanes = [{x: -3.4, behaviour: 'alert'}, {x: 0, behaviour: 'auto'}, {x: 3.4, behaviour: 'damaged'}];
         for (var i = 0; i < lanes.length; i++) {
-            var bar = this.buildEnergyBarrier({
-                width: laneW, height: 3.1, behaviour: lanes[i].behaviour,
-            });
-            bar.position.set(lanes[i].x, 0, z);
-            this.scene.add(bar);
+            var bar = this.buildEnergyBarrier({width: 3.3, height: 3.1, behaviour: lanes[i].behaviour});
+            bar.position.x = lanes[i].x;
+            group.add(bar);
             this.energyBarriers.push(bar);
+        }
+        return group;
+    };
+
+    /**
+     * Build a placeable single energy-barrier arch as a group: one lane that
+     * auto-deploys and retracts as a learner nears it. Registered in
+     * this.energyBarriers for the tick. The caller positions and registers the
+     * returned group.
+     *
+     * @return {Object} The arch Three.Group.
+     */
+    Cyberspace.prototype.buildArchGroup = function() {
+        var group = new this.THREE.Group();
+        var bar = this.buildEnergyBarrier({width: 3.6, height: 3.1, behaviour: 'auto'});
+        group.add(bar);
+        this.energyBarriers.push(bar);
+        return group;
+    };
+
+    /**
+     * Whether a placeable prop type is built procedurally from code (the energy
+     * barriers) rather than loaded from a glTF model.
+     *
+     * @param {String} type The prop type.
+     * @return {Boolean} True for a procedural prop.
+     */
+    Cyberspace.prototype.isProceduralProp = function(type) {
+        return type === 'echeckpoint' || type === 'earch';
+    };
+
+    /**
+     * Build the group for a procedural placeable prop, or null for an unknown
+     * type.
+     *
+     * @param {String} type The prop type.
+     * @return {Object|null} The prop Three.Group.
+     */
+    Cyberspace.prototype.buildProceduralProp = function(type) {
+        if (type === 'echeckpoint') {
+            return this.buildCheckpointGroup();
+        }
+        if (type === 'earch') {
+            return this.buildArchGroup();
+        }
+        return null;
+    };
+
+    /**
+     * Build one placed procedural prop and register it as an editable keyed
+     * placed:&lt;id&gt;, so it can be selected, moved, scaled and deleted. The
+     * prop's barriers animate via this.energyBarriers (added by the builder).
+     *
+     * @param {Object} p A placed-object record {id, type, x, z}.
+     */
+    Cyberspace.prototype.buildProceduralPlaced = function(p) {
+        var group = this.buildProceduralProp(p.type);
+        if (!group) {
+            return;
+        }
+        var y = this.placedBaseY(p.type);
+        group.position.set(p.x, y, p.z);
+        this.scene.add(group);
+        this.addPickProxy(group, 1);
+        // The barrier drives its own brightness every frame (field, strips,
+        // beacons), so it is registered with emits=false: applyBrightness would
+        // clone its materials, detaching the clones from the references the tick
+        // animates and freezing the effect after an edit. No cloning here.
+        this.registerSceneEditable('placed:' + p.id, this.propLabel(p.type), group, p.x, y, p.z, false, 1);
+    };
+
+    /**
+     * Build every placed procedural prop (energy barriers) already stored for
+     * this course. Called once on load; the live placer uses placeProp.
+     */
+    Cyberspace.prototype.buildPlacedProceduralProps = function() {
+        for (var i = 0; i < this.placedObjects.length; i++) {
+            if (this.isProceduralProp(this.placedObjects[i].type)) {
+                this.buildProceduralPlaced(this.placedObjects[i]);
+            }
         }
     };
 
@@ -6400,8 +6424,11 @@ define('format_mnemo/vr', [], function() {
         // Resolve the deploy target (1 = field up, 0 = open) and the state label.
         var target = 1;
         if (b.behaviour === 'auto') {
-            var dx = this.player.position.x - group.position.x;
-            var dz = this.player.position.z - group.position.z;
+            // A placed barrier is nested inside its placement group, so compare
+            // the barrier's world position (not its local one) to the learner.
+            var wp = group.getWorldPosition(this.tmpBarrierPos || (this.tmpBarrierPos = new this.THREE.Vector3()));
+            var dx = this.player.position.x - wp.x;
+            var dz = this.player.position.z - wp.z;
             var near = (dx * dx + dz * dz) < 49; // Within ~7 units.
             target = near ? 0 : 1;
         }
@@ -6508,7 +6535,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.setBeacon = function(beacon, level) {
         beacon.mat.emissiveIntensity = 0.2 + 2.3 * level;
         beacon.halo.opacity = 0.1 + 0.6 * level;
-        beacon.light.intensity = 0.5 + 7 * level;
+        // A beacon past the light budget has no point light; its glow still flashes.
+        if (beacon.light) {
+            beacon.light.intensity = 0.5 + 7 * level;
+        }
     };
 
     /**
@@ -6687,8 +6717,8 @@ define('format_mnemo/vr', [], function() {
     /**
      * Add an invisible box around a loaded prop model so it is as easy to select
      * in the editor as a tall building - without one, a low or thin prop (a
-     * barrier, a kerbside kiosk) is hard to hit and reads as uneditable, while a
-     * tall lamp is easy. Sized to the model's bounds with a minimum clickable
+     * kerbside kiosk or low bollard) is hard to hit and reads as uneditable, while
+     * a tall lamp is easy. Sized to the model's bounds with a minimum clickable
      * volume, and parented to the group so it moves and scales with it. Not
      * rendered (visible=false) but still raycast, like a building's editProxy.
      *
@@ -9627,9 +9657,10 @@ define('format_mnemo/vr', [], function() {
                 return {key: p.key, label: p.label};
             }) : [
                 {key: 'lamp', label: s.placelamp || 'Street lamp'},
-                {key: 'barrier', label: s.placebarrier || 'Barrier'},
                 {key: 'kiosk', label: s.placekiosk || 'Kiosk'},
-                {key: 'av', label: s.placevehicle || 'Vehicle'}
+                {key: 'av', label: s.placevehicle || 'Vehicle'},
+                {key: 'echeckpoint', label: s.placecheckpoint || 'Energy checkpoint'},
+                {key: 'earch', label: s.placearch || 'Energy arch'}
             ];
         // Keep the active prop type in the offered set (the default 'lamp' may
         // not be present if the site removed the bundled models).
@@ -9901,7 +9932,7 @@ define('format_mnemo/vr', [], function() {
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
         });
         // Deletable objects: teacher-placed props, and generated decorative
-        // props (a street lamp, barrier or kiosk) which are hidden per course.
+        // props (a street lamp or kiosk) which are hidden per course.
         panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !this.isDeletable(editable);
         panel.querySelector('[data-mnemo-ed-status]').textContent = '';
         this.updateSnapSurfaceUi();
@@ -10035,9 +10066,10 @@ define('format_mnemo/vr', [], function() {
         var type = this.placeType;
         var status = this.placerPanel ?
             this.placerPanel.querySelector('[data-mnemo-place-status]') : null;
-        if (!this.propTemplates[type] || !window.require) {
+        if ((!this.propTemplates[type] && !this.isProceduralProp(type)) || !window.require) {
             // The model has not loaded yet (or no ajax available); nothing to
-            // place. Leave a hint rather than failing silently.
+            // place. Leave a hint rather than failing silently. (Procedural props
+            // need no model, so they are never blocked here.)
             if (status) {
                 status.textContent = s.placehint || '';
             }
@@ -10084,6 +10116,24 @@ define('format_mnemo/vr', [], function() {
      * @param {Number} z Grid-snapped world-z.
      */
     Cyberspace.prototype.placeProp = function(type, id, x, z) {
+        // Procedural props (energy barriers) have no model; build them directly.
+        if (this.isProceduralProp(type)) {
+            this.placedObjects.push({id: id, type: type, x: x, z: z});
+            this.buildProceduralPlaced({id: id, type: type, x: x, z: z});
+            // With snap-to-surface on, rest the new prop on the surface beneath
+            // it (e.g. a raised sidewalk) and persist that height, as the model
+            // path below does. (On load the stored transform restores the height,
+            // so this only runs for a live placement.)
+            if (this.snapSurface) {
+                var ped = this.editables[this.editables.length - 1];
+                if (ped && ped.objkey === 'placed:' + id) {
+                    this.dropToSurface(ped);
+                    this.applyTransform(ped);
+                    this.persistTransform(ped);
+                }
+            }
+            return;
+        }
         var tpl = this.propTemplates[type];
         if (!tpl) {
             return;
@@ -10162,6 +10212,17 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.removePlacedFromScene = function(editable, id) {
         if (editable.group) {
+            // Drop any energy barriers under this prop from the animation list,
+            // so the tick stops touching a detached (procedural) prop.
+            var bars = this.energyBarriers;
+            editable.group.traverse(function(o) {
+                if (o.userData && o.userData.barrier) {
+                    var bi = bars.indexOf(o);
+                    if (bi >= 0) {
+                        bars.splice(bi, 1);
+                    }
+                }
+            });
             this.scene.remove(editable.group);
         }
         var idx = this.editables.indexOf(editable);
@@ -10179,7 +10240,7 @@ define('format_mnemo/vr', [], function() {
 
     /**
      * Whether the selected object can be deleted from the editor: a
-     * teacher-placed prop, or a generated decorative prop (lamp/barrier/kiosk).
+     * teacher-placed prop, or a generated decorative prop (lamp/kiosk).
      * Gates, pylons and activities are not deletable.
      *
      * @param {Object} editable The editable record.
@@ -10193,7 +10254,7 @@ define('format_mnemo/vr', [], function() {
             return true;
         }
         var t = this.propType(editable);
-        return t === 'lamp' || t === 'barrier' || t === 'kiosk';
+        return t === 'lamp' || t === 'kiosk';
     };
 
     /**
@@ -10806,7 +10867,7 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * The placed/scattered prop type of an editable (lamp, barrier, kiosk, av),
+     * The placed/scattered prop type of an editable (lamp, kiosk, av),
      * from its slot key, or null for anything else (activities, gates, pylons,
      * surfaces).
      *
@@ -10828,10 +10889,9 @@ define('format_mnemo/vr', [], function() {
             }
             return null;
         }
-        // A scattered prop keys <type>:<slot> (lamp/barrier/kiosk/av).
+        // A scattered prop keys <type>:<slot> (lamp/kiosk/av).
         var prefix = key.split(':')[0];
-        return (prefix === 'lamp' || prefix === 'barrier' || prefix === 'kiosk' ||
-            prefix === 'av') ? prefix : null;
+        return (prefix === 'lamp' || prefix === 'kiosk' || prefix === 'av') ? prefix : null;
     };
 
     /**
