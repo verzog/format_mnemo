@@ -1174,16 +1174,35 @@
     list-style: none;
     padding: 0;
     margin: 0;
+    /* A standard-style vertical list (one activity per row) so each activity's
+       description reads below its name, rather than a row of minimised pills. */
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.5rem;
 }
 
 .format-mnemo__activity {
-    padding: 0.25rem 0.6rem;
+    padding: 0.4rem 0.7rem;
     border-radius: 4px;
     border-left: 4px solid #06f;
     background: rgba(0, 102, 255, 0.06);
+}
+
+.format-mnemo__activity-description {
+    margin: 0.35rem 0 0;
+    /* Dim the theme's own text colour, so it reads as secondary in light and
+       dark themes without hardcoding a colour. */
+    opacity: 0.75;
+    font-size: 0.92em;
+    line-height: 1.4;
+}
+
+.format-mnemo__activity-description > :first-child {
+    margin-top: 0;
+}
+
+.format-mnemo__activity-description > :last-child {
+    margin-bottom: 0;
 }
 
 .format-mnemo__activity--complete {

@@ -119,6 +119,13 @@ class scene implements renderable, templatable {
                         'modname' => $cm->modname,
                         'url' => $url ? $url->out(false) : null,
                         'state' => $state,
+                        // The activity's description, as a standard course page
+                        // shows it when the teacher ticked "Display description
+                        // on course page". Rendered in the fallback list so it
+                        // reads like a normal course. Empty when there is none,
+                        // or the activity is not accessible to this user (so a
+                        // restricted activity never leaks its description).
+                        'description' => $cm->uservisible ? $cm->get_formatted_content() : '',
                         // A teacher-chosen building model for this specific
                         // activity (file name or URL), or null to use the
                         // type-based/procedural building.
@@ -1544,14 +1551,24 @@ class scene implements renderable, templatable {
         $data->rootid = $config['rootid'];
         $data->environment = $config['environment'];
         $data->palette = $config['palette'];
-        // The full scene graph is handed to the browser via a data attribute
-        // (read in JS) instead of a large js_call_amd argument.
-        $data->configjson = json_encode($config);
+        // The fallback list shows each activity's description; the 3D scene does
+        // not, so build the list rows first (keeping descriptions) and then hand
+        // the 3D client a copy without them (they are not needed there and would
+        // only bloat the data attribute).
         $data->sections = array_values(array_map(function ($section) {
             $section['activities'] = array_values($section['activities']);
             return (object)$section;
         }, $config['sections']));
         $data->hassections = !empty($config['sections']);
+
+        // The full scene graph is handed to the browser via a data attribute
+        // (read in JS) instead of a large js_call_amd argument.
+        foreach ($config['sections'] as $si => $section) {
+            foreach ($section['activities'] as $ai => $activity) {
+                unset($config['sections'][$si]['activities'][$ai]['description']);
+            }
+        }
+        $data->configjson = json_encode($config);
 
         // Credits for the models that name an author or licence (CC-BY and
         // similar need them shown). The 3D view hides those it does not use.
