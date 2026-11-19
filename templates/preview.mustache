@@ -1,0 +1,75 @@
+{{!
+    This file is part of Moodle - https://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
+}}
+{{!
+    @template format_mnemo/preview
+
+    The admin asset viewer's body: the textures gallery, the model cards grouped
+    by category, and the "Save all" bar. The dynamic parts (cards, forms, headings)
+    are built server-side with the page's helpers and passed in as pre-escaped HTML,
+    so this template only lays out the page skeleton.
+
+    Context variables required for this template:
+    * pagetitle string The page heading (HTML).
+    * rootid string The unique id of the root element (the client renders into it).
+    * config string The JSON client config for the data-mnemo-preview attribute.
+    * intro string The intro paragraph (HTML).
+    * texturesheading string The "Textures" section heading (HTML).
+    * texturecards string The texture cards (HTML).
+    * modelsheading string The "Models" section heading (HTML).
+    * axesnote string The axes note under the models heading (HTML).
+    * modelsections array One entry per model category shown.
+        * heading string The category heading (HTML).
+        * help string The category help paragraph, or '' (HTML).
+        * slotform string The category's slot-choices form, or '' (HTML).
+        * cards string The category's model cards (HTML).
+    * savebar string The "Save all" bar form (HTML).
+
+    Example context (json):
+    {
+        "pagetitle": "<h2>Asset viewer</h2>",
+        "rootid": "mnemo-preview-0",
+        "config": "{}",
+        "intro": "<p>Intro</p>",
+        "texturesheading": "<h3>Textures</h3>",
+        "texturecards": "",
+        "modelsheading": "<h3>Models</h3>",
+        "axesnote": "<p>Axes</p>",
+        "modelsections": [
+            {"heading": "<h4>Props</h4>", "help": "", "slotform": "", "cards": ""}
+        ],
+        "savebar": ""
+    }
+}}
+{{{pagetitle}}}
+<div class="format-mnemo-preview" id="{{rootid}}" data-mnemo-preview="{{config}}">
+    {{{intro}}}
+    {{{texturesheading}}}
+    <div class="format-mnemo-preview__grid">
+        {{{texturecards}}}
+    </div>
+    {{{modelsheading}}}
+    {{{axesnote}}}
+    {{#modelsections}}
+        {{{heading}}}
+        {{{help}}}
+        {{{slotform}}}
+        <div class="format-mnemo-preview__grid">
+            {{{cards}}}
+        </div>
+    {{/modelsections}}
+    {{{savebar}}}
+</div>

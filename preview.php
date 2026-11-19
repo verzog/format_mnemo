@@ -470,8 +470,12 @@ $config['strings'] = [
 ];
 
 echo $OUTPUT->header();
-echo $OUTPUT->heading(get_string('preview_title', 'format_mnemo'));
-echo html_writer::tag('p', get_string('preview_intro', 'format_mnemo'), ['class' => 'text-muted']);
+
+// The page body is assembled into these variables and rendered through a single
+// Mustache template (format_mnemo/preview) at the foot of the page, so no markup
+// is echoed directly here.
+$pagetitle = $OUTPUT->heading(get_string('preview_title', 'format_mnemo'));
+$intro = html_writer::tag('p', get_string('preview_intro', 'format_mnemo'), ['class' => 'text-muted']);
 
 // Source badge helper: a short coloured label for where an asset comes from.
 $sourcebadge = function (string $source): string {
@@ -489,12 +493,8 @@ $sourcebadge = function (string $source): string {
     );
 };
 
-echo html_writer::start_div('format-mnemo-preview', ['id' => $rootid,
-    'data-mnemo-preview' => json_encode($config)]);
-
 // Textures.
-echo $OUTPUT->heading(get_string('preview_textures', 'format_mnemo'), 3);
-echo html_writer::start_div('format-mnemo-preview__grid');
+$texturecards = '';
 foreach ($textures as $tex) {
     $media = $tex['url']
         ? html_writer::empty_tag('img', ['src' => $tex['url'], 'alt' => $tex['label'],
@@ -512,16 +512,14 @@ foreach ($textures as $tex) {
             'format-mnemo-preview__use text-muted'
         );
     }
-    echo html_writer::div(
+    $texturecards .= html_writer::div(
         $media . html_writer::div($body, 'format-mnemo-preview__meta'),
         'format-mnemo-preview__card'
     );
 }
-echo html_writer::end_div();
 
 // Models.
-echo $OUTPUT->heading(get_string('preview_models', 'format_mnemo'), 3);
-echo html_writer::tag('p', get_string('preview_axes', 'format_mnemo'), ['class' => 'text-muted']);
+$axesnote = html_writer::tag('p', get_string('preview_axes', 'format_mnemo'), ['class' => 'text-muted']);
 
 // Render one model card. The canvas id keeps the model's index in the full list
 // so it stays aligned with $modelconfig (the client renders into it by id).
@@ -702,6 +700,7 @@ foreach (asset_gallery::building_placeholders($models) as $placeholder) {
     );
 }
 
+$modelsections = [];
 foreach ($modelcats as $cat => $catlabel) {
     $cards = '';
     foreach ($models as $i => $model) {
@@ -716,19 +715,23 @@ foreach ($modelcats as $cat => $catlabel) {
     if ($cards === '' && $slotform === '') {
         continue;
     }
-    echo $OUTPUT->heading($catlabel, 4);
     // What belongs in each category, and which uploader it comes from.
+    $help = '';
     if (get_string_manager()->string_exists('preview_cat_' . $cat . '_help', 'format_mnemo')) {
-        echo html_writer::tag('p', get_string('preview_cat_' . $cat . '_help', 'format_mnemo'), ['class' => 'text-muted']);
+        $help = html_writer::tag('p', get_string('preview_cat_' . $cat . '_help', 'format_mnemo'), ['class' => 'text-muted']);
     }
-    echo $slotform;
-    echo html_writer::div($cards, 'format-mnemo-preview__grid');
+    $modelsections[] = [
+        'heading' => $OUTPUT->heading($catlabel, 4),
+        'help' => $help,
+        'slotform' => $slotform,
+        'cards' => $cards,
+    ];
 }
 
 // The "Save all" bar: hidden until a card's settings change, it then counts
 // the changed cards and saves them all in one go (the client fills in the
 // saveall field with each changed card's values).
-echo html_writer::tag(
+$savebar = html_writer::tag(
     'form',
     html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'saveall', 'value' => '']) .
     html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]) .
@@ -751,7 +754,18 @@ echo html_writer::tag(
     ]
 );
 
-echo html_writer::end_div();
+echo $OUTPUT->render_from_template('format_mnemo/preview', [
+    'pagetitle' => $pagetitle,
+    'rootid' => $rootid,
+    'config' => json_encode($config),
+    'intro' => $intro,
+    'texturesheading' => $OUTPUT->heading(get_string('preview_textures', 'format_mnemo'), 3),
+    'texturecards' => $texturecards,
+    'modelsheading' => $OUTPUT->heading(get_string('preview_models', 'format_mnemo'), 3),
+    'axesnote' => $axesnote,
+    'modelsections' => $modelsections,
+    'savebar' => $savebar,
+]);
 
 $PAGE->requires->js_call_amd('format_mnemo/vr', 'initPreview', [$rootid]);
 
