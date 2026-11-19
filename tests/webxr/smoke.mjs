@@ -3614,6 +3614,54 @@ const scenarios = [
         }
     },
     {
+        name: 'barrier: beacon point lights are capped; excess beacons glow without a light',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = {
+                THREE, wetMaterials: [], wetEnv: null, structureTexture: null, energyBarriers: [],
+                beaconLights: 0,
+                maxAnisotropy: () => 8,
+                makeTextTexture: () => new THREE.Texture(),
+                radialTexture: CS.prototype.radialTexture,
+                newCanvasCtx: CS.prototype.newCanvasCtx,
+                structureFallbackTexture: CS.prototype.structureFallbackTexture,
+                structureMaterial: CS.prototype.structureMaterial,
+                barrierFieldTexture: CS.prototype.barrierFieldTexture,
+                drawRivet: CS.prototype.drawRivet,
+                buildBarrierPost: CS.prototype.buildBarrierPost,
+                buildBarrierBeacon: CS.prototype.buildBarrierBeacon,
+                buildBarrierSparks: CS.prototype.buildBarrierSparks,
+                buildBarrierField: CS.prototype.buildBarrierField,
+                addBarrierDecal: CS.prototype.addBarrierDecal,
+                buildEnergyBarrier: CS.prototype.buildEnergyBarrier,
+                buildCheckpointGroup: CS.prototype.buildCheckpointGroup,
+                buildProceduralProp: CS.prototype.buildProceduralProp,
+                isProceduralProp: CS.prototype.isProceduralProp,
+                setBeacon: CS.prototype.setBeacon
+            };
+            // Five checkpoints = 30 beacons, but only 24 real point lights.
+            let withLight = 0, withoutLight = 0;
+            for (let i = 0; i < 5; i++) {
+                const g = self.buildProceduralProp('echeckpoint');
+                g.traverse((o) => {
+                    if (o.userData && o.userData.barrier) {
+                        o.userData.barrier.beacons.forEach((b) => {
+                            if (b.light) {
+                                withLight++;
+                            } else {
+                                withoutLight++;
+                                self.setBeacon(b, 1); // Must not throw on a null light.
+                            }
+                        });
+                    }
+                });
+            }
+            const pass = self.beaconLights === 24 && withLight === 24 && withoutLight === 6;
+            return {pass, detail: `spent=${self.beaconLights} lit=${withLight} unlit=${withoutLight}`};
+        }
+    },
+    {
         name: 'resize: a zero-size container is skipped; a real size is applied',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

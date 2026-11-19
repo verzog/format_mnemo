@@ -348,7 +348,8 @@ define('format_mnemo/vr', [], function() {
         this.wetCaptureTimer = null; // Pending reflection re-capture.
         this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
-        this.energyBarriers = []; // Animated energy security barriers (see buildCheckpoint).
+        this.energyBarriers = []; // Animated energy security barriers (see buildCheckpointGroup).
+        this.beaconLights = 0; // Real point lights spent on barrier beacons (capped, like lamps).
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
         this.roads = []; // Walkable road corridors (rects in the XZ plane).
@@ -6114,8 +6115,17 @@ define('format_mnemo/vr', [], function() {
         }));
         halo.scale.set(1.3, 1.3, 1);
         group.add(halo);
-        var light = new THREE.PointLight(amber, 6, 9, 2);
-        group.add(light);
+        // A real point light, but only within a global budget (as addLampLight
+        // caps lamps): many placed checkpoints would otherwise create thousands
+        // of lights and blow the renderer's light-uniform limit. Beyond the cap a
+        // beacon keeps its emissive dome and additive halo, just casts no light.
+        var light = null;
+        var spent = this.beaconLights || 0;
+        if (spent < 24) {
+            this.beaconLights = spent + 1;
+            light = new THREE.PointLight(amber, 6, 9, 2);
+            group.add(light);
+        }
         group.position.y = y;
         return {group: group, mat: mat, halo: halo.material, light: light};
     };
@@ -6368,7 +6378,11 @@ define('format_mnemo/vr', [], function() {
         group.position.set(p.x, y, p.z);
         this.scene.add(group);
         this.addPickProxy(group, 1);
-        this.registerSceneEditable('placed:' + p.id, this.propLabel(p.type), group, p.x, y, p.z, true, 1);
+        // emits=false: the barrier drives its own brightness every frame (field,
+        // strips, beacons), and applyBrightness would clone its materials - which
+        // would detach the clones from the references the tick animates, freezing
+        // the effect after an edit. So no brightness edit (and no cloning) here.
+        this.registerSceneEditable('placed:' + p.id, this.propLabel(p.type), group, p.x, y, p.z, false, 1);
     };
 
     /**
@@ -6521,7 +6535,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.setBeacon = function(beacon, level) {
         beacon.mat.emissiveIntensity = 0.2 + 2.3 * level;
         beacon.halo.opacity = 0.1 + 0.6 * level;
-        beacon.light.intensity = 0.5 + 7 * level;
+        // A beacon past the light budget has no point light; its glow still flashes.
+        if (beacon.light) {
+            beacon.light.intensity = 0.5 + 7 * level;
+        }
     };
 
     /**
@@ -10103,6 +10120,18 @@ define('format_mnemo/vr', [], function() {
         if (this.isProceduralProp(type)) {
             this.placedObjects.push({id: id, type: type, x: x, z: z});
             this.buildProceduralPlaced({id: id, type: type, x: x, z: z});
+            // With snap-to-surface on, rest the new prop on the surface beneath
+            // it (e.g. a raised sidewalk) and persist that height, as the model
+            // path below does. (On load the stored transform restores the height,
+            // so this only runs for a live placement.)
+            if (this.snapSurface) {
+                var ped = this.editables[this.editables.length - 1];
+                if (ped && ped.objkey === 'placed:' + id) {
+                    this.dropToSurface(ped);
+                    this.applyTransform(ped);
+                    this.persistTransform(ped);
+                }
+            }
             return;
         }
         var tpl = this.propTemplates[type];
