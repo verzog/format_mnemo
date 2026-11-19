@@ -12119,15 +12119,47 @@ define('format_mnemo/vr', [], function() {
     /**
      * Per-frame update: locomotion, spinning, flicker, highlighting, rendering.
      */
+    /**
+     * Whether this frame should be skipped entirely (no animation, no render).
+     * True while the on-screen activity panel covers the stage (nothing visible
+     * behind it), or while the container is collapsed or hidden at zero size - a
+     * 2D/3D toggle, a collapsed editor splitter, display:none - because drawing
+     * into a zero-sized buffer makes the WebGL framebuffer incomplete and floods
+     * the console with errors. An XR session is exempt: it never shows the panel
+     * and renders to the headset, not this element. When the container is visible
+     * but its size changed without a resize event, the size is re-applied here so
+     * the view is not left stretched.
+     *
+     * @param {Boolean} presenting Whether an immersive (XR) session is active.
+     * @return {Boolean} True to skip this frame.
+     */
+    Cyberspace.prototype.pauseFrame = function(presenting) {
+        if (presenting) {
+            return false;
+        }
+        if (this.activityOverlay && !this.activityOverlay.el.hidden) {
+            return true;
+        }
+        var cw = this.root.clientWidth;
+        var ch = this.root.clientHeight;
+        if (cw <= 0 || ch <= 0) {
+            return true;
+        }
+        var size = this.renderer.getSize(this.tmpSize || (this.tmpSize = new this.THREE.Vector2()));
+        if (size.x !== cw || size.y !== ch) {
+            this.onResize();
+        }
+        return false;
+    };
+
     Cyberspace.prototype.tick = function() {
         var dt = Math.min(0.05, this.clock.getDelta());
         this.time += dt;
         var presenting = this.renderer.xr.isPresenting;
 
-        // While the on-screen activity panel covers the stage, pause the scene:
-        // it is fully hidden, so there is nothing to animate or render. (An
-        // immersive session never shows the panel, so it keeps running.)
-        if (!presenting && this.activityOverlay && !this.activityOverlay.el.hidden) {
+        // Pause the whole frame while the activity panel covers the stage or the
+        // container is collapsed/hidden (see pauseFrame).
+        if (this.pauseFrame(presenting)) {
             return;
         }
 
@@ -12835,7 +12867,17 @@ define('format_mnemo/vr', [], function() {
 
     Cyberspace.prototype.onResize = function() {
         var w = this.root.clientWidth;
-        var h = this.root.clientHeight || 480;
+        var h = this.root.clientHeight;
+        // The container can collapse to zero width or height: a 2D/3D toggle, a
+        // collapsed editor splitter, or display:none on a hidden tab. Sizing the
+        // renderer or its post-processing targets to zero makes the WebGL
+        // framebuffer incomplete and floods the console with
+        // GL_INVALID_FRAMEBUFFER_OPERATION errors, so wait until it has a real
+        // size. The view resizes again when it reappears, and the tick re-applies
+        // the size if it returns changed without firing a resize event.
+        if (w <= 0 || h <= 0) {
+            return;
+        }
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h, false);

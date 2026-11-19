@@ -3572,6 +3572,32 @@ const scenarios = [
         }
     },
     {
+        name: 'resize: a zero-size container is skipped; a real size is applied',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const mk = (w, h) => {
+                let setTo = null;
+                const self = {
+                    root: {clientWidth: w, clientHeight: h},
+                    camera: {aspect: 0, updateProjectionMatrix() {}},
+                    renderer: {setSize(a, b) { setTo = {w: a, h: b}; }},
+                    postfx: null,
+                    updateControlsInset() {},
+                    onResize: CS.prototype.onResize
+                };
+                self.onResize();
+                return setTo;
+            };
+            // Collapsed width or height must not size the WebGL buffer to zero
+            // (which floods the console with framebuffer errors); a real size is.
+            const hidden = mk(0, 480);
+            const zeroH = mk(800, 0);
+            const ok = mk(800, 600);
+            return {pass: hidden === null && zeroH === null && !!ok && ok.w === 800 && ok.h === 600,
+                detail: `hidden=${hidden} zeroH=${zeroH} ok=${JSON.stringify(ok)}`};
+        }
+    },
+    {
         name: 'comfort: applyComfort maps settings onto the gesture manager',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
