@@ -1317,6 +1317,9 @@ const scenarios = [
                     signFontStack: CS.prototype.signFontStack,
                     wrapLines: CS.prototype.wrapLines,
                     frameMaterial: CS.prototype.frameMaterial,
+                    makeSignText: CS.prototype.makeSignText,
+                    makeCanvasTextPlane: CS.prototype.makeCanvasTextPlane,
+                    wantsSdfText: CS.prototype.wantsSdfText,
                     makeSign: CS.prototype.makeSign
                 };
                 return self.makeSign(
@@ -3285,6 +3288,103 @@ const scenarios = [
             } finally {
                 window.require = origRequire;
             }
+        }
+    },
+    {
+        name: 'sign: SDF text is gated on Ultra + troika ready + covered name + flat screen',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.isHeadsetBrowser = () => false;
+            self.loaders = {Text: function() {}, sdfReady: true};
+            self.config = {sdffonturl: '/font.woff'};
+            self.comfort = {signtext: 'ultra'};
+            const onUltra = self.wantsSdfText('Algebra');
+            const accented = self.wantsSdfText('Café');       // e-acute: covered.
+            self.comfort = {signtext: 'normal'};
+            const offNormal = self.wantsSdfText('Algebra');
+            self.comfort = {signtext: 'ultra'};
+            self.loaders = {Text: function() {}};                  // font not confirmed loaded.
+            const offNotReady = self.wantsSdfText('Algebra');
+            self.loaders = {};
+            const offNoTroika = self.wantsSdfText('Algebra');
+            self.loaders = {Text: function() {}, sdfReady: true};
+            // A non-Latin name (CJK) is outside the bundled font, so canvas.
+            const nonLatin = self.wantsSdfText(String.fromCharCode(0x65E5, 0x672C));
+            // Latin Extended-A (U+0141 L-stroke) is NOT in the bundled font.
+            const extendedA = self.wantsSdfText('WŁoMo');
+            self.isHeadsetBrowser = () => true;
+            const offHeadset = self.wantsSdfText('Algebra');
+            const pass = onUltra === true && accented === true && offNormal === false &&
+                offNotReady === false && offNoTroika === false && nonLatin === false &&
+                extendedA === false && offHeadset === false;
+            return {pass, detail: `ultra=${onUltra} accented=${accented} normal=${offNormal} ` +
+                `notReady=${offNotReady} noTroika=${offNoTroika} nonLatin=${nonLatin} ` +
+                `extA=${extendedA} headset=${offHeadset}`};
+        }
+    },
+    {
+        name: 'sign: applyBrightness skips troika SDF text (array material would corrupt)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.releaseInstance = () => {};
+            const group = new THREE.Group();
+            // A normal frame mesh (should be dimmed) and a fake SDF text whose
+            // material is an array with a throwing setter (troika-like).
+            const frame = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+                new THREE.MeshBasicMaterial({color: 0x888888}));
+            group.add(frame);
+            const sdf = new THREE.Object3D();
+            sdf.userData.mnemoSdf = true;
+            let setterCalled = false;
+            Object.defineProperty(sdf, 'material', {
+                get() { return [{}, {}]; },
+                set() { setterCalled = true; throw new Error('troika setter rejects array'); }
+            });
+            group.add(sdf);
+            const editable = {group, transform: {brightness: 0.5}};
+            let threw = false;
+            try {
+                self.applyBrightness(editable);
+            } catch (e) {
+                threw = true;
+            }
+            const dimmed = frame.material.color.getHex() < 0x888888;
+            return {pass: !threw && !setterCalled && dimmed,
+                detail: `threw=${threw} setterCalled=${setterCalled} frameHex=${frame.material.color.getHex().toString(16)}`};
+        }
+    },
+    {
+        name: 'sign: makeSdfText builds a troika mesh and scales it to fit, else null',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            let synced = false;
+            function FakeText() {
+                this.material = {};
+                this.userData = {};
+                this.scale = {v: 1, setScalar(s) { this.v = s; }};
+            }
+            FakeText.prototype.sync = function(cb) {
+                this.textRenderInfo = {blockBounds: [0, 0, 4, 1]};
+                synced = true;
+                if (cb) {
+                    cb();
+                }
+            };
+            self.loaders = {Text: FakeText};
+            self.config = {sdffonturl: '/f.woff'};
+            const mesh = self.makeSdfText({text: 'Algebra', colour: 0x39d0ff}, 3, 1.4);
+            const built = mesh instanceof FakeText && mesh.text === 'Algebra' &&
+                mesh.maxWidth > 0 && mesh.userData.mnemoSdf === true;
+            // faceW=2.76, faceH=1.0, block 4x1 -> s=min(0.69,1)=0.69 (<=2.8 cap).
+            const scaled = mesh.scale.v > 0.6 && mesh.scale.v < 0.8;
+            self.loaders = {};
+            const none = self.makeSdfText({text: 'Algebra', colour: 0x39d0ff}, 3, 1.4);
+            return {pass: built && synced && scaled && none === null,
+                detail: `built=${built} synced=${synced} scale=${mesh.scale.v.toFixed(2)} none=${none}`};
         }
     },
     {

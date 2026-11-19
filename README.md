@@ -893,6 +893,21 @@ inside a full Moodle tree with `grunt amd` and commit both build files.
   WASM runtime and the hand, face and body-pose (`pose_landmarker_lite`) model
   files are bundled unmodified under `thirdparty/mediapipe/`; upstream licence at
   `thirdparty/mediapipe-LICENSE.txt`. Declared in `thirdpartylibs.xml`.
+- **troika-three-text** `0.52.4` — MIT licence, © ProtectWise, Inc.,
+  <https://github.com/protectwise/troika>. Powers the opt-in **Ultra**
+  crisp-at-any-zoom SDF sign lettering. Rolled up with its dependencies
+  (`troika-three-utils`, `troika-worker-utils`, `bidi-js`,
+  `webgl-sdf-generator`) into a single ES module at
+  `thirdparty/troika/troika-three-text.module.js` — **modified**: bundled, and
+  three.js externalised to the plugin's bundled copy via a relative import so no
+  page import map is needed. Upstream licence at `thirdparty/troika/LICENSE`.
+  Declared in `thirdpartylibs.xml`.
+- **Share Tech Mono** `5.0.12` — SIL Open Font Licence 1.1, © Carrois Type
+  Design, Ralph du Carrois, <https://github.com/google/fonts/tree/main/ofl/sharetechmono>.
+  The monospace display font the SDF sign-text renderer draws with, bundled
+  unmodified (Latin subset, WOFF) at `thirdparty/fonts/share-tech-mono.woff`;
+  upstream licence at `thirdparty/fonts/LICENSE`. Declared in
+  `thirdpartylibs.xml`.
 
 ## Licence
 

@@ -33,4 +33,26 @@
       <copyright>2019-2024 The MediaPipe Authors</copyright>
     </copyrights>
   </library>
+  <library>
+    <location>thirdparty/troika/troika-three-text.module.js</location>
+    <name>troika-three-text (with troika-three-utils, troika-worker-utils, bidi-js, webgl-sdf-generator)</name>
+    <description>SDF (signed distance field) text rendering for Three.js, used for the opt-in Ultra crisp-at-any-zoom sign lettering. Rolled up into a single ES module (modified: bundled with its dependencies, and three.js externalised to the plugin's bundled copy via a relative import so no page import map is needed).</description>
+    <version>0.52.4</version>
+    <license>MIT</license>
+    <repository>https://github.com/protectwise/troika</repository>
+    <copyrights>
+      <copyright>2019 ProtectWise, Inc.</copyright>
+    </copyrights>
+  </library>
+  <library>
+    <location>thirdparty/fonts/share-tech-mono.woff</location>
+    <name>Share Tech Mono</name>
+    <description>A monospace display font (Latin subset, WOFF) used by the SDF sign-text renderer. Unmodified upstream font file.</description>
+    <version>5.0.12</version>
+    <license>OFL-1.1</license>
+    <repository>https://github.com/google/fonts/tree/main/ofl/sharetechmono</repository>
+    <copyrights>
+      <copyright>2012 Carrois Type Design, Ralph du Carrois</copyright>
+    </copyrights>
+  </library>
 </libraries>
