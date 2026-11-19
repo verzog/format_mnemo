@@ -227,11 +227,31 @@ function av() {
 }
 
 function lamp() {
+    // A sleeker cyberspace street lamp: a tapered pole on a stepped base, with a
+    // neon collar and a thin neon strip up the pole, topped by a CENTRED
+    // luminaire whose lit disc faces straight down (coaxial with the pole, so
+    // the light pool sits directly under it - the scene's point light and glow
+    // cone are placed at this centred head, see addLampLight/lampCone).
+    var neon = {color: [0, 0, 0, 1], emissive: [0.18, 1.05, 1.35]}; // Subtle cyan accent.
+    var down = {color: [0, 0, 0, 1], emissive: [2.4, 2.0, 1.3]};    // Warm downlight lens.
     return [
-        {g: place(cylinder(0.12, 6, 10), {t: [0, 3, 0]}), m: METAL},
-        {g: place(box(1.4, 0.12, 0.12), {t: [0.6, 5.9, 0]}), m: METAL},
-        {g: place(box(0.8, 0.25, 0.42), {t: [1.2, 5.78, 0]}), m: METAL},
-        {g: place(box(0.62, 0.09, 0.3), {t: [1.2, 5.63, 0]}), m: {color: [0, 0, 0, 1], emissive: [2.2, 1.7, 0.9]}}
+        // Stepped base plinth.
+        {g: place(cylinder(0.42, 0.3, 16), {t: [0, 0.15, 0]}), m: METAL},
+        {g: place(cylinder(0.3, 0.22, 16), {t: [0, 0.42, 0]}), m: METAL},
+        // Tapered pole: a wider lower segment and a slimmer upper one.
+        {g: place(cylinder(0.17, 3.4, 16), {t: [0, 2.0, 0]}), m: METAL},
+        {g: place(cylinder(0.11, 2.6, 16), {t: [0, 5.0, 0]}), m: METAL},
+        // Neon collar ring partway up, and a thin neon strip running up the pole.
+        {g: place(cylinder(0.23, 0.16, 20), {t: [0, 1.9, 0]}), m: neon},
+        {g: place(box(0.04, 4.8, 0.04), {t: [0.18, 2.6, 0]}), m: neon},
+        // Luminaire crown on top of the pole (a wider rim and a neon ring).
+        {g: place(cylinder(0.5, 0.22, 20), {t: [0, 6.35, 0]}), m: METAL},
+        {g: place(cylinder(0.46, 0.14, 20), {t: [0, 6.18, 0]}), m: neon},
+        // Warm downlight lens on the underside - the lit head, centred over the
+        // pole so the light reads straight down.
+        {g: place(cylinder(0.4, 0.08, 20), {t: [0, 6.08, 0]}), m: down},
+        // Small finial cap on the very top.
+        {g: place(cylinder(0.12, 0.18, 12), {t: [0, 6.55, 0]}), m: METAL}
     ];
 }
 

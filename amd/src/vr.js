@@ -4334,16 +4334,48 @@ define('format_mnemo/vr', [], function() {
         }
         this.lampLights++;
         var THREE = this.THREE;
+        // Sit the light at the lamp's head, not a fixed height: the luminaire is
+        // near the top of the model, so derive the head height from the model's
+        // own size (a previous fixed 3.4 left the light halfway down the taller
+        // lamp). The head is centred over the pole, so x/z stay 0.
+        var headY = this.lampHeadY(group);
         // Tie the pool to the course's neon palette so it matches the signage;
         // physically-based falloff (decay 2) keeps it local to the lamp.
         var light = new THREE.PointLight(this.palette.primary, 14, 18, 2);
-        light.position.set(0, 3.4, 0);
+        light.position.set(0, headY, 0);
         light.castShadow = false;
         group.add(light);
         // Misty palettes show the lamp's light as a soft cone through the haze.
         if (this.palette.mist) {
-            group.add(this.lampCone());
+            group.add(this.lampCone(headY));
         }
+    };
+
+    /**
+     * The lamp's lit-head height in the group's own local space, a little below
+     * the top of the model, so the light and its glow cone sit at the luminaire
+     * whatever the model's size (rather than a fixed height that desynced when
+     * the model grew taller). Falls back to a sensible height if the model's
+     * bounds cannot be measured.
+     *
+     * @param {Object} group The lamp's group (model clone).
+     * @return {Number} The head height in the group's local units.
+     */
+    Cyberspace.prototype.lampHeadY = function(group) {
+        var THREE = this.THREE;
+        try {
+            group.updateWorldMatrix(true, true);
+            var box = new THREE.Box3().setFromObject(group);
+            var sy = (group.scale && group.scale.y) ? group.scale.y : 1;
+            var localHeight = (box.max.y - box.min.y) / sy;
+            if (isFinite(localHeight) && localHeight > 0) {
+                // The luminaire sits just below the very top (crown and finial).
+                return localHeight * 0.92;
+            }
+        } catch (e) {
+            // Fall through to the default.
+        }
+        return 5.6;
     };
 
     /**
@@ -4351,11 +4383,16 @@ define('format_mnemo/vr', [], function() {
      * to the ground (geometry and material shared; the editor's brightness
      * slider gives a lamp its own material copy when it is changed).
      *
+     * @param {Number} [height] The head height, i.e. the cone's length from the
+     *     luminaire down to the street. Defaults to 3.3.
      * @return {Object} A Three.Mesh, positioned in the lamp's local space.
      */
-    Cyberspace.prototype.lampCone = function() {
+    Cyberspace.prototype.lampCone = function(height) {
         var THREE = this.THREE;
-        if (!this.lampConeParts) {
+        var h = (height > 0) ? height : 3.3;
+        // Cached geometry/material are shared; all lamps use the same model, so
+        // the height is constant and the cache is rebuilt only if it changes.
+        if (!this.lampConeParts || this.lampConeParts.height !== h) {
             var canvas = document.createElement('canvas');
             canvas.width = 4;
             canvas.height = 64;
@@ -4365,9 +4402,13 @@ define('format_mnemo/vr', [], function() {
             g.addColorStop(1, 'rgba(255,255,255,0)');
             ctx.fillStyle = g;
             ctx.fillRect(0, 0, 4, 64);
-            var geo = new THREE.CylinderGeometry(0.12, 2.1, 3.3, 20, 1, true);
-            geo.translate(0, 1.65, 0);
+            // The base radius grows with the head height so the cone keeps a
+            // natural spread from the luminaire down to the street.
+            var baseR = Math.max(1.2, h * 0.34);
+            var geo = new THREE.CylinderGeometry(0.12, baseR, h, 20, 1, true);
+            geo.translate(0, h / 2, 0);
             this.lampConeParts = {
+                height: h,
                 geo: geo,
                 mat: new THREE.MeshBasicMaterial({
                     map: new THREE.CanvasTexture(canvas), color: this.palette.primary,
