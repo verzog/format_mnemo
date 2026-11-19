@@ -6410,9 +6410,13 @@ define('format_mnemo/vr', [], function() {
         b.deployT += Math.max(-speed, Math.min(speed, target - b.deployT));
         b.deployT = Math.max(0, Math.min(1, b.deployT));
         if (b.behaviour === 'auto') {
-            b.state = (b.deployT > prev + 1e-4) ? 'Deploy'
-                : (b.deployT < prev - 1e-4) ? 'Retract'
-                    : (b.deployT > 0.5 ? 'Idle_BeaconFlash' : 'Open');
+            if (b.deployT > prev + 1e-4) {
+                b.state = 'Deploy';
+            } else if (b.deployT < prev - 1e-4) {
+                b.state = 'Retract';
+            } else {
+                b.state = b.deployT > 0.5 ? 'Idle_BeaconFlash' : 'Open';
+            }
         }
         // Raise/lower the field and fade it out as it drops.
         b.field.pivot.scale.y = Math.max(0.0001, b.deployT);
