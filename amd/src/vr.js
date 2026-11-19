@@ -16532,6 +16532,7 @@ define('format_mnemo/vr', [], function() {
             // maps are not allowed") - previously that dropped compressed
             // (Draco/meshopt/KTX2) models to the uncompressed-only parser.
             var separator = config.loaderurl.indexOf('?') >= 0 ? '&' : '?';
+            // The loader is bundled with the plugin; see the import-map note above.
             // phpcs:ignore MoodleAudit.Security.ExternalAsset.S6 -- Plugin's bundled ES-module loader (import map, not AMD).
             var script = document.createElement('script');
             script.type = 'module';
@@ -16585,6 +16586,7 @@ define('format_mnemo/vr', [], function() {
                 reject((e && e.detail) || new Error('MediaPipe failed to load'));
             }, {once: true});
             var sep = config.mediapipeloaderurl.indexOf('?') >= 0 ? '&' : '?';
+            // The MediaPipe loader is bundled with the plugin, loaded as an ES module.
             // phpcs:ignore MoodleAudit.Security.ExternalAsset.S6 -- Plugin's bundled ES-module loader (import map, not AMD).
             var script = document.createElement('script');
             script.type = 'module';
