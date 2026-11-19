@@ -211,11 +211,15 @@ final class scene_test extends \advanced_testcase {
             ['format' => 'mnemo', 'numsections' => 2],
             ['createsections' => true]
         );
-        // A real, viewable activity in section 1.
+        // A real, viewable activity in section 1, with a course-page
+        // description (as "Display description on course page" produces).
         $page = $this->getDataGenerator()->create_module('page', [
             'course' => $course->id,
             'section' => 1,
             'name' => 'Wetwire briefing',
+            'intro' => '<p>Read this before the lab.</p>',
+            'introformat' => FORMAT_HTML,
+            'showdescription' => 1,
         ]);
         // A label, which should be excluded from the flyable nodes.
         $this->getDataGenerator()->create_module('label', [
@@ -266,6 +270,31 @@ final class scene_test extends \advanced_testcase {
         // With no override set, the per-activity building field is present and null.
         $this->assertArrayHasKey('building', $activity);
         $this->assertNull($activity['building']);
+
+        // The activity's course-page description is exposed for the fallback list.
+        $this->assertArrayHasKey('description', $activity);
+        $this->assertStringContainsString('Read this before the lab', $activity['description']);
+
+        // export_for_template keeps the description on the list rows, but strips
+        // it from the 3D config payload (the scene does not render it).
+        $data = $scene->export_for_template($renderer);
+        $listactivity = null;
+        foreach ($data->sections as $section) {
+            if ((int)$section->number === 1) {
+                $listactivity = $section->activities[0];
+            }
+        }
+        $this->assertNotNull($listactivity);
+        $this->assertStringContainsString('Read this before the lab', $listactivity['description']);
+        $decoded = json_decode($data->configjson, true);
+        $jsonactivity = null;
+        foreach ($decoded['sections'] as $section) {
+            if ((int)$section['number'] === 1) {
+                $jsonactivity = $section['activities'][0];
+            }
+        }
+        $this->assertNotNull($jsonactivity);
+        $this->assertArrayNotHasKey('description', $jsonactivity);
     }
 
     /**

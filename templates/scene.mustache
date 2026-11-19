@@ -112,6 +112,9 @@
                         {{^url}}
                             <span class="format-mnemo__activity-link">{{name}}</span>
                         {{/url}}
+                        {{#description}}
+                            <div class="format-mnemo__activity-description">{{{description}}}</div>
+                        {{/description}}
                     </li>
                     {{/activities}}
                 </ul>
