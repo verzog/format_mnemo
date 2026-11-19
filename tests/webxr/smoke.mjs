@@ -3291,29 +3291,69 @@ const scenarios = [
         }
     },
     {
-        name: 'sign: SDF text is gated on Ultra + troika loaded + Latin name + flat screen',
+        name: 'sign: SDF text is gated on Ultra + troika ready + covered name + flat screen',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const self = Object.create(CS.prototype);
             self.isHeadsetBrowser = () => false;
-            self.loaders = {Text: function() {}};
+            self.loaders = {Text: function() {}, sdfReady: true};
             self.config = {sdffonturl: '/font.woff'};
             self.comfort = {signtext: 'ultra'};
             const onUltra = self.wantsSdfText('Algebra');
+            const accented = self.wantsSdfText('Café');       // e-acute: covered.
             self.comfort = {signtext: 'normal'};
             const offNormal = self.wantsSdfText('Algebra');
             self.comfort = {signtext: 'ultra'};
+            self.loaders = {Text: function() {}};                  // font not confirmed loaded.
+            const offNotReady = self.wantsSdfText('Algebra');
             self.loaders = {};
             const offNoTroika = self.wantsSdfText('Algebra');
-            self.loaders = {Text: function() {}};
+            self.loaders = {Text: function() {}, sdfReady: true};
             // A non-Latin name (CJK) is outside the bundled font, so canvas.
             const nonLatin = self.wantsSdfText(String.fromCharCode(0x65E5, 0x672C));
+            // Latin Extended-A (U+0141 L-stroke) is NOT in the bundled font.
+            const extendedA = self.wantsSdfText('WŁoMo');
             self.isHeadsetBrowser = () => true;
             const offHeadset = self.wantsSdfText('Algebra');
-            const pass = onUltra === true && offNormal === false && offNoTroika === false &&
-                nonLatin === false && offHeadset === false;
-            return {pass, detail: `ultra=${onUltra} normal=${offNormal} noTroika=${offNoTroika} ` +
-                `nonLatin=${nonLatin} headset=${offHeadset}`};
+            const pass = onUltra === true && accented === true && offNormal === false &&
+                offNotReady === false && offNoTroika === false && nonLatin === false &&
+                extendedA === false && offHeadset === false;
+            return {pass, detail: `ultra=${onUltra} accented=${accented} normal=${offNormal} ` +
+                `notReady=${offNotReady} noTroika=${offNoTroika} nonLatin=${nonLatin} ` +
+                `extA=${extendedA} headset=${offHeadset}`};
+        }
+    },
+    {
+        name: 'sign: applyBrightness skips troika SDF text (array material would corrupt)',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.releaseInstance = () => {};
+            const group = new THREE.Group();
+            // A normal frame mesh (should be dimmed) and a fake SDF text whose
+            // material is an array with a throwing setter (troika-like).
+            const frame = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+                new THREE.MeshBasicMaterial({color: 0x888888}));
+            group.add(frame);
+            const sdf = new THREE.Object3D();
+            sdf.userData.mnemoSdf = true;
+            let setterCalled = false;
+            Object.defineProperty(sdf, 'material', {
+                get() { return [{}, {}]; },
+                set() { setterCalled = true; throw new Error('troika setter rejects array'); }
+            });
+            group.add(sdf);
+            const editable = {group, transform: {brightness: 0.5}};
+            let threw = false;
+            try {
+                self.applyBrightness(editable);
+            } catch (e) {
+                threw = true;
+            }
+            const dimmed = frame.material.color.getHex() < 0x888888;
+            return {pass: !threw && !setterCalled && dimmed,
+                detail: `threw=${threw} setterCalled=${setterCalled} frameHex=${frame.material.color.getHex().toString(16)}`};
         }
     },
     {

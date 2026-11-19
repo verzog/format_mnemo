@@ -511,9 +511,6 @@ define('format_mnemo/vr', [], function() {
 
         this.buildEnvironment();
         this.buildRaycaster();
-        // Warm the SDF glyph cache before the signs are built (no-op unless the
-        // opt-in Ultra sign text is active).
-        this.preloadSdfFont();
         this.buildCity();
         // Wet palettes: reflect the finished city in the puddles.
         this.applyWetReflections();
@@ -6373,6 +6370,20 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * @const {Array} The code-point ranges the bundled SDF WOFF (Share Tech
+     * Mono, Latin subset) actually has glyphs for, read from its cmap. Used to
+     * gate SDF text so no name reaches troika with a glyph it would try to fetch
+     * a fallback font for over the network.
+     */
+    var SDF_FONT_RANGES = [
+        [0x09, 0x0A], [0x0D, 0x0D], [0x20, 0x7E], [0xA0, 0xFF], [0x131, 0x131],
+        [0x152, 0x153], [0x2C6, 0x2C6], [0x2DA, 0x2DA], [0x2DC, 0x2DC],
+        [0x2013, 0x2014], [0x2018, 0x201A], [0x201C, 0x201E], [0x2022, 0x2022],
+        [0x2026, 0x2026], [0x2039, 0x203A], [0x2044, 0x2044], [0x20AC, 0x20AC],
+        [0x2122, 0x2122], [0x2212, 0x2212], [0x2215, 0x2215]
+    ];
+
+    /**
      * Build the text object for a sign face: a crisp-at-any-zoom SDF text mesh
      * (troika) when the opt-in Ultra mode is on and available, otherwise a
      * supersampled canvas texture plane. Both are positioned by the caller.
@@ -6429,7 +6440,11 @@ define('format_mnemo/vr', [], function() {
         if (!(this.comfort && this.comfort.signtext === 'ultra')) {
             return false;
         }
-        if (!(this.loaders && this.loaders.Text) || !this.config.sdffonturl) {
+        // Require the font to have actually loaded upfront (see preloadSdfFont in
+        // init): troika's font loader never calls back on a blocked/failed
+        // request, so without this gate a failed load would leave every sign
+        // waiting forever instead of falling back to canvas.
+        if (!(this.loaders && this.loaders.Text && this.loaders.sdfReady) || !this.config.sdffonturl) {
             return false;
         }
         return this.fontCoversText(text);
@@ -6446,13 +6461,23 @@ define('format_mnemo/vr', [], function() {
      * @return {Boolean} True when the font covers the whole string.
      */
     Cyberspace.prototype.fontCoversText = function(text) {
+        // The exact code-point ranges the bundled WOFF (Share Tech Mono, Latin
+        // subset) actually has glyphs for, read from its cmap. The gate must
+        // match the font precisely: a character outside this set (e.g. the
+        // Latin Extended-A letters Ł, Ą, ž) would otherwise make troika fetch a
+        // fallback font over the network, which hangs offline or behind a CSP.
+        // Such names fall back to the canvas text instead.
+        var ranges = SDF_FONT_RANGES;
         var s = String(text);
         for (var i = 0; i < s.length; i++) {
             var c = s.charCodeAt(i);
-            var ok = (c >= 0x20 && c <= 0x7E) || // Basic Latin (printable).
-                (c >= 0xA0 && c <= 0x24F) || // Latin-1 Supplement + Latin Extended-A.
-                (c >= 0x2010 && c <= 0x205E) || // Common punctuation, dashes, ellipsis.
-                c === 0x09 || c === 0x0A || c === 0x0D; // Tab, newline, carriage return.
+            var ok = false;
+            for (var r = 0; r < ranges.length; r++) {
+                if (c >= ranges[r][0] && c <= ranges[r][1]) {
+                    ok = true;
+                    break;
+                }
+            }
             if (!ok) {
                 return false;
             }
@@ -6532,27 +6557,6 @@ define('format_mnemo/vr', [], function() {
         var s = Math.min(faceW / bw, faceH / bh);
         s = Math.max(0.05, Math.min(s, 2.8));
         text.scale.setScalar(s);
-    };
-
-    /**
-     * Warm the SDF glyph cache for the common Latin characters once, before the
-     * city's signs are built, so Ultra sign text appears with less first-glyph
-     * delay. Best effort and a no-op unless SDF text is active.
-     */
-    Cyberspace.prototype.preloadSdfFont = function() {
-        try {
-            var preload = this.loaders && this.loaders.preloadFont;
-            if (!preload || !this.config.sdffonturl || !this.wantsSdfText('A')) {
-                return;
-            }
-            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz' +
-                '0123456789 .,:;!?-&()\'’/…';
-            preload({font: this.config.sdffonturl, characters: chars}, function() {
-                // Warmed; nothing to do.
-            });
-        } catch (e) {
-            // Best effort; signs still render, with a brief first-glyph delay.
-        }
     };
 
     /**
@@ -10226,6 +10230,13 @@ define('format_mnemo/vr', [], function() {
                     o.userData.mnemoBaseIntensity = o.intensity;
                 }
                 o.intensity = o.userData.mnemoBaseIntensity * b;
+                return;
+            }
+            // Troika SDF text manages its own materials: its `material` getter
+            // returns an array once an outline is set, and its setter rejects a
+            // plain array, so the clone-and-reassign below would corrupt it (and
+            // then throw on the next read). Leave the neon text as-is.
+            if (o.userData && o.userData.mnemoSdf) {
                 return;
             }
             if (!o.material) {
@@ -15703,6 +15714,49 @@ define('format_mnemo/vr', [], function() {
     }
 
     /**
+     * Confirm the SDF sign-text font actually loads, within a bounded time,
+     * before any sign is built - so the opt-in Ultra text is only enabled when
+     * it can render. troika's font loader does not call its callback on a
+     * blocked or failed request (offline, or a CSP that blocks the worker/font),
+     * so the timeout is what resolves false and keeps the whole scene on canvas
+     * text; a success also warms the common Latin glyph cache so signs appear
+     * promptly. Never rejects.
+     *
+     * @param {Object} loaded The loaded modules (may carry preloadFont).
+     * @param {Object} config The scene config (needs sdffonturl).
+     * @return {Promise} Resolves true when the font loaded, else false.
+     */
+    function preloadSdfFont(loaded, config) {
+        return new Promise(function(resolve) {
+            var preload = loaded && loaded.preloadFont;
+            if (!preload || !loaded.Text || !config.sdffonturl) {
+                resolve(false);
+                return;
+            }
+            var settled = false;
+            var finish = function(ok) {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                resolve(ok);
+            };
+            window.setTimeout(function() {
+                finish(false);
+            }, 6000);
+            try {
+                var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz' +
+                    '0123456789 .,:;!?-&()\'’/…';
+                preload({font: config.sdffonturl, characters: chars}, function() {
+                    finish(true);
+                });
+            } catch (e) {
+                finish(false);
+            }
+        });
+    }
+
+    /**
      * Load Three.js as a native ES module.
      *
      * Moodle's JS build rewrites a literal import() into a RequireJS call,
@@ -16952,8 +17006,16 @@ define('format_mnemo/vr', [], function() {
             var loaded = null;
             loadThree(config).then(function(three) {
                 loaded = three;
-                return loadSceneAssets(config, three.THREE);
-            }).then(function(assets) {
+                // Load the scene assets and, in parallel, confirm the SDF font
+                // actually loads (bounded) before any sign is built, so Ultra
+                // sign text is only enabled when it can render without hanging.
+                return Promise.all([
+                    loadSceneAssets(config, three.THREE),
+                    preloadSdfFont(three, config)
+                ]);
+            }).then(function(results) {
+                var assets = results[0];
+                loaded.sdfReady = results[1];
                 try {
                     new Cyberspace(loaded.THREE, root, config, loaded, assets);
                     // Remove the loading screen only once the scene is built. On
