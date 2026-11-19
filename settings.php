@@ -150,80 +150,6 @@ if ($ADMIN->fulltree) {
         ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['.woff2', '.woff', '.ttf', '.otf']]
     ));
 
-    // Sign frame texture. Left blank, sign frames are drawn as a flat neon glow.
-    // Point this at a hosted image to tint every sign's frame with a texture
-    // (e.g. brushed metal, worn plastic). The uploaded texture below is used if
-    // this is blank; this URL, if set, wins.
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/signtextureurl',
-        get_string('setting_signtextureurl', 'format_mnemo'),
-        get_string('setting_signtextureurl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-
-    // Upload a sign frame texture straight into Moodle instead of hosting it at
-    // a URL. The file lands in the 'signtexture' file area at system context and
-    // is served via pluginfile. The URL setting above, if set, takes precedence.
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/signtexture',
-        get_string('setting_signtexture', 'format_mnemo'),
-        get_string('setting_signtexture_desc', 'format_mnemo'),
-        'signtexture',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
-    ));
-
-    // Topic gate texture. Left blank, the gate arches are drawn as a flat neon
-    // glow. Point this at a hosted image to skin every topic gate's posts and
-    // crossbar with a texture (e.g. dark metal); the topic's neon colour
-    // multiplies over it. The uploaded texture below is used if this is blank;
-    // this URL, if set, wins.
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/gatetextureurl',
-        get_string('setting_gatetextureurl', 'format_mnemo'),
-        get_string('setting_gatetextureurl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-
-    // Upload a topic gate texture straight into Moodle instead of hosting it at
-    // a URL. The file lands in the 'gatetexture' file area at system context and
-    // is served via pluginfile. The URL setting above, if set, takes precedence.
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/gatetexture',
-        get_string('setting_gatetexture', 'format_mnemo'),
-        get_string('setting_gatetexture_desc', 'format_mnemo'),
-        'gatetexture',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
-    ));
-
-    // Shared structure texture. A single tileable image used as the metal/alloy
-    // surface of the plugin's own procedural structures (currently the energy
-    // security barriers' frames). Left blank, those structures use a plain
-    // blue-black alloy. The uploaded texture below is used if this is blank;
-    // this URL, if set, wins.
-    $settings->add(new admin_setting_configtext(
-        'format_mnemo/structuretextureurl',
-        get_string('setting_structuretextureurl', 'format_mnemo'),
-        get_string('setting_structuretextureurl_desc', 'format_mnemo'),
-        '',
-        PARAM_URL
-    ));
-
-    // Upload a shared structure texture straight into Moodle instead of hosting
-    // it at a URL. The file lands in the 'structuretexture' file area at system
-    // context and is served via pluginfile. The URL setting above, if set, wins.
-    $settings->add(new admin_setting_configstoredfile(
-        'format_mnemo/structuretexture',
-        get_string('setting_structuretexture', 'format_mnemo'),
-        get_string('setting_structuretexture_desc', 'format_mnemo'),
-        'structuretexture',
-        0,
-        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
-    ));
-
     // Offer flat-screen (non-VR) learners an opt-in webcam gesture control for
     // steering and moving. On by default; the camera is only used when the
     // learner turns it on, is processed on the device and never uploaded. Untick
@@ -469,10 +395,85 @@ if ($ADMIN->fulltree) {
     // and the flying-car types. Shared by every world that has streets —
     // Cyberspace, Grid and the Void, whose streets float in space.
     $settings->add(new admin_setting_heading(
-        'format_mnemo/streetsheading',
-        get_string('setting_streetsheading', 'format_mnemo'),
-        get_string('setting_streetsheading_desc', 'format_mnemo')
+        'format_mnemo/texturesheading',
+        get_string('setting_texturesheading', 'format_mnemo'),
+        get_string('setting_texturesheading_desc', 'format_mnemo')
     ));
+
+    // Sign frame texture. Left blank, sign frames are drawn as a flat neon glow.
+    // Point this at a hosted image to tint every sign's frame with a texture
+    // (e.g. brushed metal, worn plastic). The uploaded texture below is used if
+    // this is blank; this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/signtextureurl',
+        get_string('setting_signtextureurl', 'format_mnemo'),
+        get_string('setting_signtextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a sign frame texture straight into Moodle instead of hosting it at
+    // a URL. The file lands in the 'signtexture' file area at system context and
+    // is served via pluginfile. The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/signtexture',
+        get_string('setting_signtexture', 'format_mnemo'),
+        get_string('setting_signtexture_desc', 'format_mnemo'),
+        'signtexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Topic gate texture. Left blank, the gate arches are drawn as a flat neon
+    // glow. Point this at a hosted image to skin every topic gate's posts and
+    // crossbar with a texture (e.g. dark metal); the topic's neon colour
+    // multiplies over it. The uploaded texture below is used if this is blank;
+    // this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/gatetextureurl',
+        get_string('setting_gatetextureurl', 'format_mnemo'),
+        get_string('setting_gatetextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a topic gate texture straight into Moodle instead of hosting it at
+    // a URL. The file lands in the 'gatetexture' file area at system context and
+    // is served via pluginfile. The URL setting above, if set, takes precedence.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/gatetexture',
+        get_string('setting_gatetexture', 'format_mnemo'),
+        get_string('setting_gatetexture_desc', 'format_mnemo'),
+        'gatetexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
+    // Shared structure texture. A single tileable image used as the metal/alloy
+    // surface of the plugin's own procedural structures (currently the energy
+    // security barriers' frames). Left blank, those structures use a plain
+    // blue-black alloy. The uploaded texture below is used if this is blank;
+    // this URL, if set, wins.
+    $settings->add(new admin_setting_configtext(
+        'format_mnemo/structuretextureurl',
+        get_string('setting_structuretextureurl', 'format_mnemo'),
+        get_string('setting_structuretextureurl_desc', 'format_mnemo'),
+        '',
+        PARAM_URL
+    ));
+
+    // Upload a shared structure texture straight into Moodle instead of hosting
+    // it at a URL. The file lands in the 'structuretexture' file area at system
+    // context and is served via pluginfile. The URL setting above, if set, wins.
+    $settings->add(new admin_setting_configstoredfile(
+        'format_mnemo/structuretexture',
+        get_string('setting_structuretexture', 'format_mnemo'),
+        get_string('setting_structuretexture_desc', 'format_mnemo'),
+        'structuretexture',
+        0,
+        ['subdirs' => 0, 'maxfiles' => 1, 'accepted_types' => ['web_image']]
+    ));
+
 
     // Road texture. Left blank, streets are the bundled flat wet-asphalt
     // colour. Point this at a hosted tileable image (or upload one below) to
@@ -577,6 +578,12 @@ if ($ADMIN->fulltree) {
         get_string('setting_groundpatchsize_desc', 'format_mnemo'),
         '14',
         PARAM_INT
+    ));
+
+    $settings->add(new admin_setting_heading(
+        'format_mnemo/streetsheading',
+        get_string('setting_streetsheading', 'format_mnemo'),
+        get_string('setting_streetsheading_desc', 'format_mnemo')
     ));
 
     // Flying-car traffic types. One car type per line, in the form
