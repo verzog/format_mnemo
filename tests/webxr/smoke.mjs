@@ -2412,6 +2412,61 @@ const scenarios = [
         }
     },
     {
+        name: 'access: enforceLockBarriers holds a learner out of a sealed street',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const barrier = {x: 9, side: 1, zMin: -24.5, zMax: -15.5, height: 8};
+            const mk = (x, y, z) => ({
+                player: {position: {x, y, z}},
+                lockBarriers: [barrier],
+                enforceLockBarriers: CS.prototype.enforceLockBarriers
+            });
+            // Pushed past the plane, within the street and low: held at the mouth.
+            const inside = mk(11, 1, -20);
+            inside.enforceLockBarriers();
+            const held = Math.abs(inside.player.position.x - 8.6) < 1e-6; // 9 - side*0.4
+            // Already on the avenue side: untouched.
+            const avenue = mk(5, 1, -20);
+            avenue.enforceLockBarriers();
+            const freeAvenue = avenue.player.position.x === 5;
+            // Flying high above the barrier: passes over.
+            const over = mk(11, 20, -20);
+            over.enforceLockBarriers();
+            const flewOver = over.player.position.x === 11;
+            // Outside the street's z-span (on the avenue elsewhere): untouched.
+            const elsewhere = mk(11, 1, 0);
+            elsewhere.enforceLockBarriers();
+            const freeElsewhere = elsewhere.player.position.x === 11;
+            const pass = held && freeAvenue && flewOver && freeElsewhere;
+            return {pass, detail: `held=${held} avenue=${freeAvenue} over=${flewOver} elsewhere=${freeElsewhere}`};
+        }
+    },
+    {
+        name: 'access: the lock placard grows to fit long conditions',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const mk = (conditions) => {
+                const self = {
+                    THREE, config: {strings: {}},
+                    newCanvasCtx: CS.prototype.newCanvasCtx,
+                    wrapTextLines: CS.prototype.wrapTextLines,
+                    buildLockPanel: CS.prototype.buildLockPanel
+                };
+                return self.buildLockPanel({lockblocks: true, conditions});
+            };
+            const short = mk('Not available until 1 January.');
+            const long = mk('Not available unless: you belong to Group A; and it is on or after ' +
+                '1 January 2027; and you complete Assignment One, Assignment Two, Assignment ' +
+                'Three, Assignment Four and the Final Project before the street will open.');
+            const sh = short.geometry.parameters.height;
+            const lh = long.geometry.parameters.height;
+            const empty = mk('   '); // No conditions -> no placard.
+            const pass = lh > sh && empty === null;
+            return {pass, detail: `short=${sh.toFixed(2)} long=${lh.toFixed(2)} empty=${empty}`};
+        }
+    },
+    {
         name: 'editor: a ground structure footprint is clamped out of the road',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

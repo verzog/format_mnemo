@@ -298,6 +298,92 @@ final class scene_test extends \advanced_testcase {
     }
 
     /**
+     * A section with unmet conditional-access restrictions is barriered: a
+     * learner who fails the conditions is locked out (and physically blocked),
+     * a teacher sees the barrier but is never blocked, and the conditions text
+     * is carried through. An unrestricted section carries no barrier.
+     */
+    public function test_scene_config_section_lock(): void {
+        global $PAGE, $DB;
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+        $course = $generator->create_course(
+            ['format' => 'mnemo', 'numsections' => 2],
+            ['createsections' => true]
+        );
+        // Restrict section 1 to a future date, shown (greyed) so the condition
+        // text is displayed rather than the section being hidden outright.
+        $availability = json_encode((object)[
+            'op' => '&',
+            'c' => [(object)['type' => 'date', 'd' => '>=', 't' => time() + DAYSECS]],
+            'showc' => [true],
+        ]);
+        $sectionid = $DB->get_field('course_sections', 'id', ['course' => $course->id, 'section' => 1]);
+        $DB->set_field('course_sections', 'availability', $availability, ['id' => $sectionid]);
+        rebuild_course_cache($course->id, true);
+        $format = course_get_format($course);
+        $PAGE->set_url('/course/view.php', ['id' => $course->id]);
+        $student = $generator->create_and_enrol($course, 'student');
+        $teacher = $generator->create_and_enrol($course, 'editingteacher');
+        // A non-editing teacher cannot manage activities but may bypass access
+        // restrictions, so must see the barrier yet never be blocked by it.
+        $nonediting = $generator->create_and_enrol($course, 'teacher');
+
+        // A learner who has not met the date is blocked by the barrier.
+        $this->setUser($student);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $locked = $this->find_section($config, 1);
+        $this->assertNotNull($locked);
+        $this->assertTrue($locked['locked']);
+        $this->assertTrue($locked['lockblocks']);
+        $this->assertNotEmpty($locked['conditions']);
+        // The unrestricted section carries no barrier.
+        $open = $this->find_section($config, 0);
+        $this->assertNotNull($open);
+        $this->assertFalse($open['locked']);
+        $this->assertFalse($open['lockblocks']);
+        $this->assertSame('', $open['conditions']);
+
+        // A teacher sees the barrier (so they know the street is gated) but is
+        // never physically blocked by it.
+        $this->setUser($teacher);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $staffview = $this->find_section($config, 1);
+        $this->assertNotNull($staffview);
+        $this->assertTrue($staffview['locked']);
+        $this->assertFalse($staffview['lockblocks']);
+        $this->assertNotEmpty($staffview['conditions']);
+
+        // A non-editing teacher (bypasses availability but cannot manage) also
+        // sees the barrier and is not blocked.
+        $this->setUser($nonediting);
+        $scene = new \format_mnemo\output\scene($format);
+        $config = $scene->get_scene_config($PAGE->get_renderer('format_mnemo'));
+        $teacherview = $this->find_section($config, 1);
+        $this->assertNotNull($teacherview);
+        $this->assertTrue($teacherview['locked']);
+        $this->assertFalse($teacherview['lockblocks']);
+    }
+
+    /**
+     * Find a section in a scene config by its section number.
+     *
+     * @param array $config The scene config from get_scene_config().
+     * @param int $number The section number to find.
+     * @return array|null The section entry, or null when absent.
+     */
+    protected function find_section(array $config, int $number): ?array {
+        foreach ($config['sections'] as $section) {
+            if ((int)$section['number'] === $number) {
+                return $section;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Video activities are classified in the scene config: a YouTube URL is an
      * embed, a direct video-file URL is a playable file, and non-video
      * activities carry a null video.

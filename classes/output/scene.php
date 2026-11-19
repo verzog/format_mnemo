@@ -80,6 +80,10 @@ class scene implements renderable, templatable {
         // checked at its own module context (see below) so a module-level
         // prohibit hides that one object from the editor.
         $canedit = has_capability('moodle/course:manageactivities', $context);
+        // Whether the viewer may bypass access restrictions (the same capability
+        // Moodle uses), so an access barrier shows them the gate but never
+        // physically blocks them.
+        $canbypassavailability = has_capability('moodle/course:ignoreavailabilityrestrictions', $context);
         // URL activity records and Resource video main files for the course, so
         // video detection is a couple of queries rather than one per activity.
         $urlrecords = $DB->get_records('url', ['course' => (int)$course->id]);
@@ -154,6 +158,12 @@ class scene implements renderable, templatable {
 
             // Signs show the teacher's plain title (no editing-view number).
             $name = $this->format->get_section_title_plain($section);
+            // Conditional-access lock: a street whose section has unmet access
+            // restrictions gets a barrier across its mouth showing the
+            // conditions. A viewer who may bypass restrictions (teacher/manager)
+            // always sees the barrier so they can tell which streets are gated,
+            // but passes through it.
+            $lock = $this->section_lock($section, $canbypassavailability);
             $sections[] = [
                 'number' => (int)$section->section,
                 'name' => $name,
@@ -163,6 +173,12 @@ class scene implements renderable, templatable {
                 'activities' => $activities,
                 'activitycount' => count($activities),
                 'hasactivities' => !empty($activities),
+                // Whether to raise an access barrier at the street mouth, and
+                // whether it physically blocks this viewer, plus the conditions
+                // text to show on it.
+                'locked' => $lock['locked'],
+                'lockblocks' => $lock['blocks'],
+                'conditions' => $lock['conditions'],
             ];
         }
 
@@ -182,6 +198,62 @@ class scene implements renderable, templatable {
      */
     public static function is_readable(string $modname): bool {
         return in_array($modname, self::READABLE_MODS, true);
+    }
+
+    /**
+     * The conditional-access lock for one section (street): whether to raise a
+     * barrier at the street mouth, whether it physically blocks the current
+     * viewer, and the human-readable conditions to show on it.
+     *
+     * A section with access restrictions ("restrict access") is barriered when
+     * its conditions are shown (not fully hidden). A learner who has not met
+     * the conditions is blocked by it; a learner who has met them sees no
+     * barrier. A viewer who may bypass access restrictions (a teacher/manager)
+     * always sees the barrier (so they can tell which streets are gated) but is
+     * never blocked by it.
+     *
+     * @param \section_info $section The section.
+     * @param bool $canbypass Whether the viewer may bypass access restrictions
+     *     (moodle/course:ignoreavailabilityrestrictions), and so passes every
+     *     barrier and may see conditions a learner would not.
+     * @return array{locked: bool, blocks: bool, conditions: string}
+     */
+    protected function section_lock(\section_info $section, bool $canbypass): array {
+        $none = ['locked' => false, 'blocks' => false, 'conditions' => ''];
+        if (empty($section->availability)) {
+            return $none;
+        }
+        // A learner who has met the conditions is not barriered. "Available" is
+        // the raw condition check; the bypass capability is applied separately
+        // (uservisible), so this stays false for a restricted teacher - who is
+        // handled as a bypasser below rather than treated as having met them.
+        $met = (bool)$section->available;
+        if ($met && !$canbypass) {
+            return $none;
+        }
+        // The conditions text. A learner sees availableinfo, which respects each
+        // condition's show/hide setting (a hidden condition is never disclosed).
+        // A bypasser sees the full information, which is a staff display and may
+        // include hidden conditions - and is also populated when they can access
+        // the section (when availableinfo would be empty).
+        if ($canbypass) {
+            $info = new \core_availability\info_section($section);
+            $full = $info->get_full_information();
+            $conditions = is_string($full) && $full !== '' ? trim(html_to_text($full, 0, false)) : '';
+        } else {
+            $raw = (string)$section->availableinfo;
+            $conditions = $raw === '' ? '' : trim(html_to_text($raw, 0, false));
+        }
+        if ($conditions === '') {
+            return $none;
+        }
+        return [
+            'locked' => true,
+            // Only a learner who cannot bypass and has not met the conditions is
+            // physically stopped; a bypasser sees the barrier but passes.
+            'blocks' => !$met && !$canbypass,
+            'conditions' => $conditions,
+        ];
     }
 
     /**
@@ -936,6 +1008,8 @@ class scene implements renderable, templatable {
                 'complete' => get_string('statecomplete', 'format_mnemo'),
                 'available' => get_string('stateavailable', 'format_mnemo'),
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
+                'barrierlocked' => get_string('barrierlocked', 'format_mnemo'),
+                'barrierlockedstaff' => get_string('barrierlockedstaff', 'format_mnemo'),
                 'fullscreen' => get_string('fullscreen', 'format_mnemo'),
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
                 'fly' => get_string('fly', 'format_mnemo'),
