@@ -4384,9 +4384,9 @@ define('format_mnemo/vr', [], function() {
         // model's actual top Y (not just its height), so a custom lamp whose
         // origin is not at its base is still lit at its head, not above it.
         var headY = top - 0.08 * (top - bottom);
-        // Tie the pool to the course's neon palette so it matches the signage;
-        // physically-based falloff (decay 2) keeps it local to the lamp.
-        var light = new THREE.PointLight(this.palette.primary, 14, 18, 2);
+        // A warm light-yellow pool (a real street lamp), matching the beam cone
+        // above; physically-based falloff (decay 2) keeps it local to the lamp.
+        var light = new THREE.PointLight(0xffe6b0, 14, 18, 2);
         light.position.set(0, headY, 0);
         light.castShadow = false;
         group.add(light);
@@ -4465,8 +4465,10 @@ define('format_mnemo/vr', [], function() {
                 height: h,
                 geo: geo,
                 mat: new THREE.MeshBasicMaterial({
-                    map: new THREE.CanvasTexture(canvas), color: this.palette.primary,
-                    transparent: true, opacity: 0.1 + this.day.night * 0.14, depthWrite: false,
+                    // A warm light-yellow beam (a real street lamp), kept faint so
+                    // it reads as a soft shaft of light rather than a solid cone.
+                    map: new THREE.CanvasTexture(canvas), color: 0xffe6b0,
+                    transparent: true, opacity: 0.05 + this.day.night * 0.09, depthWrite: false,
                     blending: THREE.AdditiveBlending, side: THREE.DoubleSide
                 })
             };
@@ -7288,11 +7290,14 @@ define('format_mnemo/vr', [], function() {
             text.color = opts.colour;
             text.material.transparent = true;
             text.material.depthWrite = false;
-            // Neon glow: a soft coloured halo around the crisp core letters.
+            // Neon glow: a tight coloured halo around the crisp core letters. A
+            // wide, strong halo (the old 28% blur) blooms in the post pipeline
+            // and washes the SDF letters out, so keep it narrow and faint - the
+            // crisp SDF core carries the legibility, the halo is just an accent.
             text.outlineColor = opts.colour;
-            text.outlineWidth = '5%';
-            text.outlineBlur = '28%';
-            text.outlineOpacity = 0.55;
+            text.outlineWidth = '4%';
+            text.outlineBlur = '10%';
+            text.outlineOpacity = 0.4;
             text.sdfGlyphSize = 128;
             text.userData.mnemoSdf = true;
             text.sync(function() {
