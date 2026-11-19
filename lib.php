@@ -431,14 +431,15 @@ function format_mnemo_inplace_editable($itemtype, $itemid, $newvalue) {
 function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forcedownload, array $options = []) {
     // Site-wide assets uploaded in the plugin's admin settings, served from the
     // system context: the prop asset pack ('assetpack'), the neon sign webfont
-    // ('signfont'), the sign frame texture ('signtexture'), and the road,
-    // ground and sidewalk textures ('roadtexture', 'groundtexture',
+    // ('signfont'), the sign frame texture ('signtexture'), the topic gate
+    // texture ('gatetexture'), and the road, ground and sidewalk textures
+    // ('roadtexture', 'groundtexture',
     // 'sidewalktexture'). These are all decorative, served like the plugin's
     // bundled static files (which are already public), so they need no login,
     // even on a site that forces login. Only the file types the scene loads are
     // served (see \format_mnemo\local\public_files).
     $siteareas = ['assetpack', 'vehicleassets', 'buildingassets', 'signfont', 'signtexture',
-        'roadtexture', 'groundtexture',
+        'gatetexture', 'roadtexture', 'groundtexture',
         'sidewalktexture', 'spacetexture', 'planettextures', 'ringtexture', 'sunasset', 'moonasset'];
     if (in_array($filearea, $siteareas, true)) {
         if ($context->contextlevel != CONTEXT_SYSTEM) {

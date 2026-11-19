@@ -880,6 +880,7 @@ class scene implements renderable, templatable {
             // See resolve_asset_url().
             'signfonturl' => $this->resolve_asset_url('signfonturl', 'signfont'),
             'signtextureurl' => $this->resolve_asset_url('signtextureurl', 'signtexture'),
+            'gatetextureurl' => $this->resolve_asset_url('gatetextureurl', 'gatetexture'),
             'roadtextureurl' => $this->resolve_asset_url('roadtextureurl', 'roadtexture'),
             'groundtextureurl' => $this->resolve_asset_url('groundtextureurl', 'groundtexture'),
             'sidewalktextureurl' => $this->resolve_asset_url('sidewalktextureurl', 'sidewalktexture'),

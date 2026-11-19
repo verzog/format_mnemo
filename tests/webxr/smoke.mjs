@@ -3388,6 +3388,31 @@ const scenarios = [
         }
     },
     {
+        name: 'gate: a gate texture skins the posts/crossbar, else flat neon',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const build = (tex) => {
+                const self = {
+                    THREE,
+                    scene: new THREE.Group(),
+                    gateTexture: tex,
+                    makeSign: () => ({group: new THREE.Group()}),
+                    registerSceneEditable: () => {},
+                    buildGate: CS.prototype.buildGate
+                };
+                self.buildGate({name: 'Topic One', image: null}, 0, 0, 1, 3, 0x39d0ff, 'gate:0');
+                // First child of the gate group is a post, using postMat.
+                return self.scene.children[0].children[0].material.map;
+            };
+            const fake = new THREE.Texture();
+            const withTex = build(fake);
+            const without = build(null);
+            return {pass: withTex === fake && without === null,
+                detail: `with=${withTex === fake} without=${without}`};
+        }
+    },
+    {
         name: 'comfort: applyComfort maps settings onto the gesture manager',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
