@@ -6378,10 +6378,10 @@ define('format_mnemo/vr', [], function() {
         group.position.set(p.x, y, p.z);
         this.scene.add(group);
         this.addPickProxy(group, 1);
-        // emits=false: the barrier drives its own brightness every frame (field,
-        // strips, beacons), and applyBrightness would clone its materials - which
-        // would detach the clones from the references the tick animates, freezing
-        // the effect after an edit. So no brightness edit (and no cloning) here.
+        // The barrier drives its own brightness every frame (field, strips,
+        // beacons), so it is registered with emits=false: applyBrightness would
+        // clone its materials, detaching the clones from the references the tick
+        // animates and freezing the effect after an edit. No cloning here.
         this.registerSceneEditable('placed:' + p.id, this.propLabel(p.type), group, p.x, y, p.z, false, 1);
     };
 
