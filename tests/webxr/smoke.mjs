@@ -1008,6 +1008,7 @@ const scenarios = [
                 }},
                 fbxLoader: null,
                 fbx: CS.prototype.fbx,
+                withAssetRev: CS.prototype.withAssetRev,
                 dressLoadedModel: () => {}
             };
             const r = await CS.prototype.loadModel.call(self, 'a/ship.fbx');
@@ -1022,7 +1023,7 @@ const scenarios = [
             const CS = window.__mnemoModule._Cyberspace;
             // No FBXLoader and no GLTFLoader: the .fbx branch rejects so the
             // caller falls back exactly as for any unavailable model.
-            const self = {modelCache: {}, loaders: {}};
+            const self = {modelCache: {}, loaders: {}, withAssetRev: CS.prototype.withAssetRev};
             let rejected = false;
             try {
                 await CS.prototype.loadModel.call(self, 'a/ship.fbx');
@@ -3835,6 +3836,31 @@ const scenarios = [
                 Math.abs(ed.transform.scale - 2) < 1e-6 && self.sidewalkMeshes.length === 1 &&
                 mesh.userData.mnemoEditable === ed && mesh.material.map.repeat.y === 10;
             return {pass, detail: `key=${ed.objkey} rep=${mesh.material.map.repeat.y}`};
+        }
+    },
+    {
+        name: 'assets: withAssetRev cache-busts same-site model URLs only',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.config = {assetrev: '2026111904'};
+            const origin = window.location.origin;
+            const rootRel = self.withAssetRev('/course/format/mnemo/models/lamp.glb');
+            const sameAbs = self.withAssetRev(origin + '/course/format/mnemo/models/av.glb');
+            const external = self.withAssetRev('https://cdn.example.com/pack/lamp.glb');
+            const protoRel = self.withAssetRev('//cdn.example.com/pack/lamp.glb');
+            const hasQuery = self.withAssetRev('/x/lamp.glb?foo=1');
+            self.config = {};
+            const noRev = self.withAssetRev('/x/lamp.glb');
+            const pass =
+                rootRel === '/course/format/mnemo/models/lamp.glb?rev=2026111904' &&
+                sameAbs === origin + '/course/format/mnemo/models/av.glb?rev=2026111904' &&
+                external === 'https://cdn.example.com/pack/lamp.glb' &&
+                protoRel === '//cdn.example.com/pack/lamp.glb' &&
+                hasQuery === '/x/lamp.glb?foo=1' &&
+                noRev === '/x/lamp.glb';
+            return {pass, detail: `rootRel=${rootRel} ext=${external} ` +
+                `proto=${protoRel} q=${hasQuery} noRev=${noRev}`};
         }
     },
     {

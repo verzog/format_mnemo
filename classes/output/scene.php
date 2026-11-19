@@ -831,6 +831,11 @@ class scene implements renderable, templatable {
             // Hour of day (0-24 float) in the site's timezone, so the client can
             // run a day/night cycle that matches the Moodle site's clock.
             'hour' => $this->site_hour(),
+            // The installed plugin version, appended by the client as a ?rev=
+            // cache-buster to same-site asset URLs (the bundled models carry no
+            // revision in their path, so a browser would otherwise keep serving
+            // an old copy after the plugin is upgraded).
+            'assetrev' => (string)get_config('format_mnemo', 'version'),
             // Base URL for glTF prop models. Defaults to the plugin's bundled
             // models; an admin can point it at an external asset pack.
             'modelsbaseurl' => $this->models_base_url(),
