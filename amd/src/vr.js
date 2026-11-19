@@ -12131,6 +12131,25 @@ define('format_mnemo/vr', [], function() {
             return;
         }
 
+        // Skip while the on-screen container is collapsed or hidden (zero width
+        // or height): a 2D/3D toggle, a collapsed editor splitter, display:none.
+        // There is nothing visible to draw, and rendering into a zero-sized
+        // buffer floods the console with framebuffer errors. An XR session
+        // renders to the headset, not this element, so it is exempt. If the
+        // element reappears at a new size without firing a resize event, re-apply
+        // it here so the view is not left stretched.
+        if (!presenting) {
+            var cw = this.root.clientWidth;
+            var ch = this.root.clientHeight;
+            if (cw <= 0 || ch <= 0) {
+                return;
+            }
+            var size = this.renderer.getSize(this.tmpSize || (this.tmpSize = new this.THREE.Vector2()));
+            if (size.x !== cw || size.y !== ch) {
+                this.onResize();
+            }
+        }
+
         // Spin the rooftop holo elements.
         for (var i = 0; i < this.spinners.length; i++) {
             this.spinners[i].rotation.y += this.spinners[i].userData.spin * dt;
@@ -12835,7 +12854,17 @@ define('format_mnemo/vr', [], function() {
 
     Cyberspace.prototype.onResize = function() {
         var w = this.root.clientWidth;
-        var h = this.root.clientHeight || 480;
+        var h = this.root.clientHeight;
+        // The container can collapse to zero width or height: a 2D/3D toggle, a
+        // collapsed editor splitter, or display:none on a hidden tab. Sizing the
+        // renderer or its post-processing targets to zero makes the WebGL
+        // framebuffer incomplete and floods the console with
+        // GL_INVALID_FRAMEBUFFER_OPERATION errors, so wait until it has a real
+        // size. The view resizes again when it reappears, and the tick re-applies
+        // the size if it returns changed without firing a resize event.
+        if (w <= 0 || h <= 0) {
+            return;
+        }
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(w, h, false);
