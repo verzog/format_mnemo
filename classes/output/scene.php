@@ -154,6 +154,11 @@ class scene implements renderable, templatable {
 
             // Signs show the teacher's plain title (no editing-view number).
             $name = $this->format->get_section_title_plain($section);
+            // Conditional-access lock: a street whose section has unmet access
+            // restrictions gets a barrier across its mouth showing the
+            // conditions. Staff (who manage the course) always see the barrier
+            // so they can tell which streets are gated, but pass through it.
+            $lock = $this->section_lock($section, $canedit);
             $sections[] = [
                 'number' => (int)$section->section,
                 'name' => $name,
@@ -163,6 +168,12 @@ class scene implements renderable, templatable {
                 'activities' => $activities,
                 'activitycount' => count($activities),
                 'hasactivities' => !empty($activities),
+                // Whether to raise an access barrier at the street mouth, and
+                // whether it physically blocks this viewer, plus the conditions
+                // text to show on it.
+                'locked' => $lock['locked'],
+                'lockblocks' => $lock['blocks'],
+                'conditions' => $lock['conditions'],
             ];
         }
 
@@ -182,6 +193,51 @@ class scene implements renderable, templatable {
      */
     public static function is_readable(string $modname): bool {
         return in_array($modname, self::READABLE_MODS, true);
+    }
+
+    /**
+     * The conditional-access lock for one section (street): whether to raise a
+     * barrier at the street mouth, whether it physically blocks the current
+     * viewer, and the human-readable conditions to show on it.
+     *
+     * A section with access restrictions ("restrict access") is barriered when
+     * its conditions are shown (not fully hidden). A learner who has not met
+     * the conditions is blocked by it; a learner who has met them sees no
+     * barrier. Staff who manage the course always see the barrier (so they can
+     * tell which streets are gated for learners) but are never blocked by it.
+     *
+     * @param \section_info $section The section.
+     * @param bool $isstaff Whether the viewer manages the course (and so passes
+     *     every barrier).
+     * @return array{locked: bool, blocks: bool, conditions: string}
+     */
+    protected function section_lock(\section_info $section, bool $isstaff): array {
+        $none = ['locked' => false, 'blocks' => false, 'conditions' => ''];
+        if (empty($section->availability)) {
+            return $none;
+        }
+        $info = new \core_availability\info_section($section);
+        // The conditions description, independent of whether the viewer meets
+        // them (so staff see the same text a blocked learner would). Empty when
+        // every condition is hidden, or false if the stored availability is
+        // malformed - in both cases there is nothing to show.
+        $full = $info->get_full_information();
+        $conditions = is_string($full) && $full !== '' ? trim(html_to_text($full, 0, false)) : '';
+        if ($conditions === '') {
+            return $none;
+        }
+        // $section->available reflects the conditions for this viewer; staff
+        // pass regardless. A learner who has met the conditions sees no barrier.
+        $met = (bool)$section->available;
+        if ($met && !$isstaff) {
+            return $none;
+        }
+        return [
+            'locked' => true,
+            // Only a non-staff learner who has not met the conditions is stopped.
+            'blocks' => !$met && !$isstaff,
+            'conditions' => $conditions,
+        ];
     }
 
     /**
@@ -936,6 +992,8 @@ class scene implements renderable, templatable {
                 'complete' => get_string('statecomplete', 'format_mnemo'),
                 'available' => get_string('stateavailable', 'format_mnemo'),
                 'restricted' => get_string('staterestricted', 'format_mnemo'),
+                'barrierlocked' => get_string('barrierlocked', 'format_mnemo'),
+                'barrierlockedstaff' => get_string('barrierlockedstaff', 'format_mnemo'),
                 'fullscreen' => get_string('fullscreen', 'format_mnemo'),
                 'exitfullscreen' => get_string('exitfullscreen', 'format_mnemo'),
                 'fly' => get_string('fly', 'format_mnemo'),

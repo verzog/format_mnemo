@@ -349,6 +349,7 @@ define('format_mnemo/vr', [], function() {
         this.mists = []; // Drifting low fog layers.
         this.beacons = []; // Rooftop lights that blink.
         this.energyBarriers = []; // Animated energy security barriers (see buildCheckpointGroup).
+        this.lockBarriers = []; // Sealed-topic planes that block a learner's entry (see buildSectionBarrier).
         this.beaconLights = 0; // Real point lights spent on barrier beacons (capped, like lamps).
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
@@ -5361,6 +5362,12 @@ define('format_mnemo/vr', [], function() {
         this.buildPylon(section.name, this.snapBase(mouthX + side * 0.6, this.sceneObjects[pylonkey]),
             this.snapBase(z - streetHalf - 0.8, this.sceneObjects[pylonkey]), wayColour, pylonkey);
 
+        // A topic locked by conditional access is sealed with a translucent
+        // energy barrier across its mouth, showing the conditions required.
+        if (section.locked) {
+            this.buildSectionBarrier(section, mouthX, z, side, streetHalf);
+        }
+
         // Activities line both sides of the street, receding down it.
         activities.forEach(function(act, k) {
             var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
@@ -6429,6 +6436,153 @@ define('format_mnemo/vr', [], function() {
         group.add(bar);
         this.energyBarriers.push(bar);
         return group;
+    };
+
+    /**
+     * Seal a locked topic's street with a translucent energy barrier across its
+     * mouth, plus a placard showing the access conditions. The barrier always
+     * stands deployed (a fixed behaviour, not the proximity-opening 'auto'), so
+     * it reads as locked; the placard faces back toward the avenue. When the
+     * section blocks this viewer, the mouth plane is recorded so the learner
+     * cannot drive or fly through it (see enforceLockBarriers); staff see the
+     * barrier but no plane is recorded, so they pass.
+     *
+     * @param {Object} section The section config (locked, lockblocks, conditions).
+     * @param {Number} mouthX The street mouth x (on the avenue kerb).
+     * @param {Number} z The street centreline z.
+     * @param {Number} side -1 for the left of the avenue, +1 for the right.
+     * @param {Number} streetHalf Half-width of the side street (along z).
+     */
+    Cyberspace.prototype.buildSectionBarrier = function(section, mouthX, z, side, streetHalf) {
+        // A short way into the side street - clear of the avenue's own width, so
+        // it seals the topic without ever catching someone walking the avenue.
+        var barrierX = mouthX + side * 3.5;
+        var bar = this.buildEnergyBarrier({
+            width: streetHalf * 2 + 0.6, height: 3.4, behaviour: 'locked',
+        });
+        // The barrier's width runs along its local x; the street runs along x, so
+        // turn it a quarter so the wall spans the street's z cross-section.
+        bar.rotation.y = Math.PI / 2;
+        bar.position.set(barrierX, 0, z);
+        this.scene.add(bar);
+        this.energyBarriers.push(bar);
+        var placard = this.buildLockPanel(section);
+        if (placard) {
+            placard.position.set(barrierX - side * 0.15, 3.1, z);
+            // Face back down the avenue mouth so a learner arriving reads it.
+            placard.lookAt(mouthX - side * 6, 3.1, z);
+            this.scene.add(placard);
+        }
+        if (section.lockblocks) {
+            this.lockBarriers.push({
+                x: barrierX, side: side,
+                zMin: z - streetHalf, zMax: z + streetHalf,
+                // Block up to a little above the barrier; a learner who climbs
+                // far above the city can pass over, but the activities inside
+                // stay locked regardless.
+                height: 8,
+            });
+        }
+    };
+
+    /**
+     * A placard (a canvas-textured plane) showing a locked topic's access
+     * conditions: a heading, then the Moodle restriction text wrapped to the
+     * card. Returns null when there is no conditions text.
+     *
+     * @param {Object} section The section config (lockblocks, conditions).
+     * @return {Object|null} A Three.Mesh facing +z, or null.
+     */
+    Cyberspace.prototype.buildLockPanel = function(section) {
+        var text = (section.conditions || '').trim();
+        if (!text) {
+            return null;
+        }
+        var THREE = this.THREE;
+        var s = this.config.strings || {};
+        var heading = section.lockblocks ?
+            (s.barrierlocked || 'Access restricted') :
+            (s.barrierlockedstaff || 'Restricted for learners');
+        var w = 512;
+        var h = 256;
+        var ctx = this.newCanvasCtx(w);
+        ctx.canvas.height = h;
+        // A dark translucent card with a neon edge.
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(6, 12, 20, 0.82)';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#27e0ff';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(3, 3, w - 6, h - 6);
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#7fe9ff';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.fillText(heading, 24, 22, w - 48);
+        ctx.fillStyle = '#e7f6ff';
+        ctx.font = '26px sans-serif';
+        this.wrapCanvasText(ctx, text, 24, 78, w - 48, 32);
+        var tex = new THREE.CanvasTexture(ctx.canvas);
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var mat = new THREE.MeshBasicMaterial({map: tex, transparent: true, side: THREE.DoubleSide});
+        var mesh = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.1), mat);
+        return mesh;
+    };
+
+    /**
+     * Draw text onto a 2D canvas context, wrapping on spaces to a maximum width
+     * and advancing by a line height. Used for the lock placard.
+     *
+     * @param {Object} ctx The canvas 2D context.
+     * @param {String} text The text to draw.
+     * @param {Number} x Left x.
+     * @param {Number} y Top y of the first line.
+     * @param {Number} maxw Maximum line width in pixels.
+     * @param {Number} lineh Line height in pixels.
+     */
+    Cyberspace.prototype.wrapCanvasText = function(ctx, text, x, y, maxw, lineh) {
+        var words = String(text).replace(/\s+/g, ' ').trim().split(' ');
+        var line = '';
+        var cy = y;
+        for (var i = 0; i < words.length; i++) {
+            var test = line ? line + ' ' + words[i] : words[i];
+            if (ctx.measureText(test).width > maxw && line) {
+                ctx.fillText(line, x, cy);
+                line = words[i];
+                cy += lineh;
+            } else {
+                line = test;
+            }
+        }
+        if (line) {
+            ctx.fillText(line, x, cy);
+        }
+    };
+
+    /**
+     * Hold a learner out of a sealed topic: for each recorded lock-barrier
+     * plane, if the learner is within the street's z-span and below the barrier
+     * height, keep them on the avenue side of the mouth. Runs every frame after
+     * the road constraint, so it governs on-foot walking, flight and VR
+     * locomotion alike. Staff record no planes, so they are never held.
+     */
+    Cyberspace.prototype.enforceLockBarriers = function() {
+        if (!this.lockBarriers.length) {
+            return;
+        }
+        var p = this.player.position;
+        for (var i = 0; i < this.lockBarriers.length; i++) {
+            var b = this.lockBarriers[i];
+            if (p.z < b.zMin || p.z > b.zMax || p.y > b.height) {
+                continue;
+            }
+            // "Inside" the sealed topic is the side*(x - barrierX) > 0 half; keep
+            // the learner a touch on the avenue side of the plane.
+            if (b.side * (p.x - b.x) > -0.4) {
+                p.x = b.x - b.side * 0.4;
+            }
+        }
     };
 
     /**
@@ -12512,6 +12666,7 @@ define('format_mnemo/vr', [], function() {
         if (!this.introActive) {
             this.clampToWorld();
             this.constrainToRoad();
+            this.enforceLockBarriers();
         }
         this.followShadow();
 
