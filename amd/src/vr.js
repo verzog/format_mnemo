@@ -4888,41 +4888,116 @@ define('format_mnemo/vr', [], function() {
         var face = beh.face !== false;
         var speed = ct.jitter ? (10 + Math.random() * 16) : (ct.speed || 14);
         var cruiseY = this.trafficCruiseBand(ct, grounded, drop || 0);
-        // Start somewhere in the box, lifted clear of any building beneath it
-        // (unless the model is allowed to pass through buildings).
-        var x = box.xMin + Math.random() * (box.xMax - box.xMin);
-        var z = box.zMin + Math.random() * (box.zMax - box.zMin);
-        var floorY = avoid ? this.trafficClearance(x, z, drop || 0) : 0;
-        car.position.set(x, Math.max(cruiseY, floorY), z);
-        var dest = this.pickTrafficDest(box, x, z);
-        // Face the first destination (plus the per-model yaw offset that turns
-        // the model's length onto its heading); a fixed-facing model keeps only
-        // the offset and never turns to its heading.
-        car.rotation.y = (face ? Math.atan2(dest.x - x, dest.z - z) : 0) + (yawOffset || 0);
         // Landing: an authored land mode, or forced on by the take-off-and-land
         // behaviour (a model with no authored mode then lands on the ground).
         var land = ct.land || 'none';
         if (beh.takeoffland === true && land === 'none') {
             land = 'ground';
         }
+        // A car that lives at ground level - a grounded model, or one that lands
+        // on the street - is kept on the road network, so it drives along the
+        // roads (or sits on them) rather than drifting over open ground. Rooftop
+        // landers and high flyers (land: none) are left to roam the whole box.
+        var roadBound = grounded || land === 'ground';
+        // Start somewhere in the box, lifted clear of any building beneath it
+        // (unless the model is allowed to pass through buildings). A ground-level
+        // car is tied to the one street nearest its start and patrols it, so it
+        // drives along a road instead of drifting over open ground or stalling
+        // at a kerb trying to cross to a branch it cannot route to.
+        var x = box.xMin + Math.random() * (box.xMax - box.xMin);
+        var z = box.zMin + Math.random() * (box.zMax - box.zMin);
+        var road = roadBound ? this.nearestRoad(x, z) : null;
+        if (road) {
+            x = Math.max(road.xMin, Math.min(road.xMax, x));
+            z = Math.max(road.zMin, Math.min(road.zMax, z));
+        }
+        var floorY = avoid ? this.trafficClearance(x, z, drop || 0) : 0;
+        car.position.set(x, Math.max(cruiseY, floorY), z);
+        var dest = road ? this.pickRoadDest(road) : this.pickTrafficDest(box, x, z);
+        // Face the first destination (plus the per-model yaw offset that turns
+        // the model's length onto its heading); a fixed-facing model keeps only
+        // the offset and never turns to its heading.
+        car.rotation.y = (face ? Math.atan2(dest.x - x, dest.z - z) : 0) + (yawOffset || 0);
         // Landing cars dip toward the ground or a rooftop band and climb back.
+        var low = this.trafficLandLow(land, grounded, drop || 0, cruiseY);
+        return {
+            mesh: car, box: box, speed: speed, yawOffset: yawOffset || 0,
+            drop: drop || 0, avoid: avoid, face: face, road: road,
+            cruiseY: cruiseY, dest: dest, low: low, land: land,
+            bob: Math.random() * 6.28,
+            landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
+        };
+    };
+
+    /**
+     * The landing-dip altitude (the low point of a landing car's cycle), kept
+     * just under the cruise band. A grounded model touches down at its drop; a
+     * flying ground-lander dips to a low street band; a rooftop lander dips to
+     * a rooftop band. A high flyer (land: none) never dips below its cruise.
+     *
+     * @param {String} land The land mode ('none', 'ground' or 'rooftop').
+     * @param {Boolean} grounded Whether the model hugs the street.
+     * @param {Number} drop The model's scaled downward extent below its origin.
+     * @param {Number} cruiseY The cruise altitude.
+     * @return {Number} The landing low altitude.
+     */
+    Cyberspace.prototype.trafficLandLow = function(land, grounded, drop, cruiseY) {
         var low = cruiseY;
         if (land === 'ground') {
             // Touch the road: a grounded model's base already rides at its drop,
             // so it lands on the drop; a flying model dips to a low street band.
-            low = grounded ? (drop || 0) : 2;
+            low = grounded ? drop : 2;
         } else if (land === 'rooftop') {
             low = 10;
         }
         if (low > cruiseY - 1) {
             low = Math.max(0, cruiseY - 1);
         }
+        return low;
+    };
+
+    /**
+     * The road corridor nearest a world (x, z): the same walkable rectangles
+     * the player is held to. Used to tie a ground vehicle to one street at
+     * spawn so it patrols along it. Returns null when there are no roads.
+     *
+     * @param {Number} x World x.
+     * @param {Number} z World z.
+     * @return {Object|null} The nearest road rectangle, or null.
+     */
+    Cyberspace.prototype.nearestRoad = function(x, z) {
+        if (!this.roads || !this.roads.length) {
+            return null;
+        }
+        var best = null;
+        var bestD = Infinity;
+        for (var i = 0; i < this.roads.length; i++) {
+            var r = this.roads[i];
+            var cx = Math.max(r.xMin, Math.min(r.xMax, x));
+            var cz = Math.max(r.zMin, Math.min(r.zMax, z));
+            var d = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+            if (d < bestD) {
+                bestD = d;
+                best = r;
+            }
+        }
+        return best;
+    };
+
+    /**
+     * A random destination within a single road corridor, so a ground vehicle
+     * roams up and down its own street. The corridor is convex, so the point is
+     * always reachable by a straight run - the car never aims across open ground
+     * or at a parallel branch it would have to route through an intersection to
+     * reach (and so never stalls at a kerb).
+     *
+     * @param {Object} road A road corridor rectangle {xMin, xMax, zMin, zMax}.
+     * @return {Object} {x, z} inside that corridor.
+     */
+    Cyberspace.prototype.pickRoadDest = function(road) {
         return {
-            mesh: car, box: box, speed: speed, yawOffset: yawOffset || 0,
-            drop: drop || 0, avoid: avoid, face: face,
-            cruiseY: cruiseY, dest: dest, low: low, land: land,
-            bob: Math.random() * 6.28,
-            landPhase: Math.random(), landPeriod: 18 + Math.random() * 14
+            x: road.xMin + Math.random() * (road.xMax - road.xMin),
+            z: road.zMin + Math.random() * (road.zMax - road.zMin)
         };
     };
 
@@ -4986,12 +5061,15 @@ define('format_mnemo/vr', [], function() {
         for (var i = 0; i < this.traffic.length; i++) {
             var t = this.traffic[i];
             var p = t.mesh.position;
+            // A ground-level car patrols the one street it was tied to at spawn
+            // (t.road); rooftop landers and high flyers roam the whole box.
+            var road = t.road || null;
             // Steer horizontally toward the destination; on arrival, roam on.
             var dx = t.dest.x - p.x;
             var dz = t.dest.z - p.z;
             var dist = Math.sqrt(dx * dx + dz * dz);
             if (dist < 6) {
-                t.dest = this.pickTrafficDest(t.box, p.x, p.z);
+                t.dest = road ? this.pickRoadDest(road) : this.pickTrafficDest(t.box, p.x, p.z);
                 dx = t.dest.x - p.x;
                 dz = t.dest.z - p.z;
                 dist = Math.sqrt(dx * dx + dz * dz);
@@ -5010,6 +5088,12 @@ define('format_mnemo/vr', [], function() {
                 if (t.face !== false) {
                     t.mesh.rotation.y = Math.atan2(vx, vz) + t.yawOffset;
                 }
+            }
+            // Keep a ground-level car within its own street as it advances, so
+            // it drives along the road instead of wandering onto open ground.
+            if (road) {
+                p.x = Math.max(road.xMin, Math.min(road.xMax, p.x));
+                p.z = Math.max(road.zMin, Math.min(road.zMax, p.z));
             }
             // Altitude: the cruise band (a gentle bob, or a landing dip that is
             // never allowed to sink into a building it must avoid), then raised
@@ -5139,6 +5223,17 @@ define('format_mnemo/vr', [], function() {
             var z = startZ - i * spacing;
             var side = (i % 2 === 0) ? -1 : 1;
             self.buildSideStreet(section, z, side, roadHalf, uniformStreetLen);
+        });
+
+        // Now the whole road network exists, keep every ground structure's
+        // footprint out of the streets. A building's footprintBase is attached
+        // only after it is first placed (and later streets were not yet built
+        // then), so a stored transform that spilled onto a road is corrected
+        // here for every viewer rather than only on the next editor action.
+        this.editables.forEach(function(ed) {
+            if (ed.footprintBase) {
+                self.applyTransform(ed);
+            }
         });
 
         // With the streets and their footprints known, work out where the street
@@ -9550,6 +9645,20 @@ define('format_mnemo/vr', [], function() {
                         yInput.value = self.selected.transform.y;
                     }
                     self.applyTransform(self.selected);
+                    // Moving or resizing a building up to the kerb is clamped by
+                    // applyTransform (so it never spills into the street); mirror
+                    // any correction back into the Move X/Z controls so the
+                    // sliders track the building's real position.
+                    if (self.selected.footprintBase) {
+                        var exi = panel.querySelector('[data-mnemo-ed="x"]');
+                        var ezi = panel.querySelector('[data-mnemo-ed="z"]');
+                        if (exi) {
+                            exi.value = self.selected.transform.x;
+                        }
+                        if (ezi) {
+                            ezi.value = self.selected.transform.z;
+                        }
+                    }
                 }
                 self.syncEditorOutputs();
             });
@@ -10768,6 +10877,75 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Keep a ground structure's footprint out of the road corridors: if the
+     * building (centred at its edited world position, with the given world-axis
+     * half-extents) overlaps a walkable road rectangle, nudge it out along the
+     * shallower axis so its footprint sits at the kerb rather than in the
+     * street. The corrected offset is written back to the transform, so the
+     * saved position and the traffic-collision footprint never spill onto a
+     * road. A no-op when the scene has no roads.
+     *
+     * @param {Object} editable The building editable (with a transform).
+     * @param {Number} sx The edit's width multiplier (its scaled x extent).
+     * @param {Number} sz The edit's depth multiplier (its scaled z extent).
+     */
+    Cyberspace.prototype.clampFootprintFromRoads = function(editable, sx, sz) {
+        if (!this.roads || !this.roads.length || !editable.footprintBase) {
+            return;
+        }
+        var t = editable.transform;
+        var fb = editable.footprintBase;
+        // The footprint half-extents at the current scale, expanded to the
+        // world axes so a rotated building's corners are covered (as
+        // setFootprintBounds does for the traffic-collision footprint).
+        var rot = editable.baseRotY + t.rot * Math.PI / 180;
+        var c = Math.abs(Math.cos(rot));
+        var s = Math.abs(Math.sin(rot));
+        var hw = fb.w * t.scale * sx / 2;
+        var hd = fb.d * t.scale * sz / 2;
+        var hx = hw * c + hd * s;
+        var hz = hw * s + hd * c;
+        var cx = editable.baseX + t.x;
+        var cz = editable.baseZ + t.z;
+        // Resolve the deepest overlap each pass; this walks a building that fits
+        // between two streets into the gap between them. A building too large to
+        // fit any gap cannot be placed clear and settles against its worst road.
+        for (var pass = 0; pass < 12; pass++) {
+            var worst = null;
+            var worstArea = 0;
+            for (var i = 0; i < this.roads.length; i++) {
+                var r = this.roads[i];
+                var ox = Math.min(cx + hx, r.xMax) - Math.max(cx - hx, r.xMin);
+                var oz = Math.min(cz + hz, r.zMax) - Math.max(cz - hz, r.zMin);
+                if (ox > 0 && oz > 0 && ox * oz > worstArea) {
+                    worstArea = ox * oz;
+                    worst = {r: r, ox: ox, oz: oz};
+                }
+            }
+            if (!worst) {
+                break;
+            }
+            // Push the footprint fully out of this road by the shortest of the
+            // four exit distances (its least-penetration edge), so the building
+            // backs onto the nearest kerb rather than jumping across the street.
+            var r2 = worst.r;
+            var pushRight = r2.xMax - (cx - hx);
+            var pushLeft = (cx + hx) - r2.xMin;
+            var pushFar = r2.zMax - (cz - hz);
+            var pushNear = (cz + hz) - r2.zMin;
+            var exitX = Math.min(pushRight, pushLeft);
+            var exitZ = Math.min(pushFar, pushNear);
+            if (exitX <= exitZ) {
+                cx += pushRight <= pushLeft ? exitX : -exitX;
+            } else {
+                cz += pushFar <= pushNear ? exitZ : -exitZ;
+            }
+        }
+        t.x = cx - editable.baseX;
+        t.z = cz - editable.baseZ;
+    };
+
+    /**
      * Apply an editable's transform (scale, position offset, rotation) to its
      * group, relative to the default placement recorded at registration.
      *
@@ -10776,13 +10954,20 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.applyTransform = function(editable) {
         var t = editable.transform;
         var g = editable.group;
-        g.position.set(editable.baseX + t.x, editable.baseY + t.y, editable.baseZ + t.z);
-        g.rotation.y = editable.baseRotY + t.rot * Math.PI / 180;
         // Uniform scale times the per-axis width/height/depth multipliers, so a
         // teacher can stretch an object as well as scale it evenly.
         var sx = t.sx > 0 ? t.sx : 1;
         var sy = t.sy > 0 ? t.sy : 1;
         var sz = t.sz > 0 ? t.sz : 1;
+        // A ground structure must never spill into the street: before it is
+        // positioned, nudge its footprint out of the road corridors so the
+        // Move/Scale controls stop at the kerb. Props and surfaces (no
+        // footprint) and scenes without roads are left untouched.
+        if (editable.footprintBase) {
+            this.clampFootprintFromRoads(editable, sx, sz);
+        }
+        g.position.set(editable.baseX + t.x, editable.baseY + t.y, editable.baseZ + t.z);
+        g.rotation.y = editable.baseRotY + t.rot * Math.PI / 180;
         // The model's asset-viewer scale (1 for everything but a configured
         // prop) is a base the teacher's edit scale multiplies, so a configured
         // prop size and a hand-scaled instance compose instead of overriding.
