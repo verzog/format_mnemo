@@ -9826,6 +9826,13 @@ define('format_mnemo/vr', [], function() {
                         if (ezi) {
                             ezi.value = self.selected.transform.z;
                         }
+                        // Resizing or rotating a building slides its same-row
+                        // neighbours out of the way so a growing building never
+                        // overlaps the next. Move (x/z) is left alone, so a
+                        // deliberate drag does not bulldoze the whole row.
+                        if (key === 'scale' || key === 'sx' || key === 'sz' || key === 'rot') {
+                            self.pushNeighbours(self.selected);
+                        }
                     }
                 }
                 self.syncEditorOutputs();
@@ -10278,12 +10285,37 @@ define('format_mnemo/vr', [], function() {
         status.textContent = s.editsaving || 'Saving…';
         var savedText = s.editsaved || 'Saved';
         var errorText = s.editsaveerror || 'Could not save';
-        var promise = this.persistTransform(editable);
-        if (!promise) {
+        // Persist the selected object, plus any neighbours a resize pushed
+        // aside, so the relayout sticks (not just the building being edited).
+        var toSave = [editable];
+        for (var i = 0; i < this.editables.length; i++) {
+            if (this.editables[i] !== editable && this.editables[i].pushed) {
+                toSave.push(this.editables[i]);
+            }
+        }
+        var promises = [];
+        // Snapshot each neighbour's saved x so a later push during the request
+        // (the sliders stay live) is not cleared as though it had been saved.
+        var snaps = [];
+        for (var j = 0; j < toSave.length; j++) {
+            var p = this.persistTransform(toSave[j]);
+            if (p) {
+                promises.push(p);
+                snaps.push({editable: toSave[j], x: toSave[j].transform.x});
+            }
+        }
+        if (!promises.length) {
             saveBtn.disabled = false;
             return;
         }
-        promise.then(function() {
+        Promise.all(promises).then(function() {
+            snaps.forEach(function(s) {
+                // Keep the flag if the building moved again after its snapshot,
+                // so the next Save still carries its latest position.
+                if (s.editable.transform.x === s.x) {
+                    s.editable.pushed = false;
+                }
+            });
             status.textContent = savedText;
             saveBtn.disabled = false;
             return null;
@@ -11111,6 +11143,77 @@ define('format_mnemo/vr', [], function() {
         }
         t.x = cx - editable.baseX;
         t.z = cz - editable.baseZ;
+    };
+
+    /**
+     * Whether two footprints overlap in both axes, beyond a small tolerance (so
+     * two buildings merely touching are not treated as colliding).
+     *
+     * @param {Object} a A footprint {xMin, xMax, zMin, zMax}.
+     * @param {Object} b A footprint {xMin, xMax, zMin, zMax}.
+     * @return {Boolean} True when they overlap in x and z.
+     */
+    Cyberspace.prototype.footprintsOverlap = function(a, b) {
+        return a.xMin < b.xMax - 0.05 && a.xMax > b.xMin + 0.05 &&
+            a.zMin < b.zMax - 0.5 && a.zMax > b.zMin + 0.5;
+    };
+
+    /**
+     * Slide buildings out of the way when one is resized, so a growing building
+     * never overlaps another. Starting from the resized building, every building
+     * it now overlaps (in both x and z, by that building's own footprint) is
+     * pushed along x just clear of it, away from the resized building; a pushed
+     * building is then itself checked against the rest, so the shove cascades
+     * down the row and also catches a deeper building on an adjacent row that a
+     * push moved into. The resized building never moves, and the direction is
+     * fixed relative to it, so the cascade always spreads outward and settles.
+     * A push the road clamp reverses (no room, e.g. against the avenue) is rolled
+     * back rather than saved as an overlap. Every building moved is flagged
+     * pushed so Save persists it too.
+     *
+     * @param {Object} editable The resized building (with a live footprint).
+     */
+    Cyberspace.prototype.pushNeighbours = function(editable) {
+        if (!editable.footprintBase || !editable.footprint) {
+            return;
+        }
+        var gap = 1.5; // Clearance kept between neighbouring buildings.
+        // Which side of the resized building a neighbour is pushed toward is
+        // fixed by its position relative to the resized building, so the whole
+        // cascade moves outward and cannot ping-pong.
+        var anchorcx = (editable.footprint.xMin + editable.footprint.xMax) / 2;
+        var movers = [editable];
+        var guard = 0;
+        while (movers.length && guard++ < 300) {
+            var mover = movers.shift();
+            var mf = mover.footprint;
+            for (var i = 0; i < this.editables.length; i++) {
+                var e = this.editables[i];
+                if (e === editable || e === mover || !e.footprintBase || !e.footprint) {
+                    continue;
+                }
+                if (!this.footprintsOverlap(e.footprint, mf)) {
+                    continue;
+                }
+                // Push e clear of the mover, outward from the resized building.
+                var toRight = (e.footprint.xMin + e.footprint.xMax) / 2 >= anchorcx;
+                var shift = toRight ?
+                    (mf.xMax + gap) - e.footprint.xMin :
+                    (mf.xMin - gap) - e.footprint.xMax;
+                var before = e.transform.x;
+                e.transform.x += shift;
+                this.applyTransform(e);
+                // If the road clamp pulled it back into the mover (no room on
+                // that side), roll the push back rather than save an overlap.
+                if (this.footprintsOverlap(e.footprint, mf)) {
+                    e.transform.x = before;
+                    this.applyTransform(e);
+                    continue;
+                }
+                e.pushed = true;
+                movers.push(e);
+            }
+        }
     };
 
     /**
