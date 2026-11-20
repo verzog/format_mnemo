@@ -2467,6 +2467,44 @@ const scenarios = [
         }
     },
     {
+        name: 'access: a live refresh drops an unlocked barrier and raises a newly locked one',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const bar = {name: 'bar5'};
+            const placard = {material: {map: {dispose() {}}, dispose() {}}};
+            const plane = {x: 9};
+            const removed = [];
+            const self = {
+                sectionBarriers: {5: {bar, placard, plane}, 9: {bar: {}, placard: null, plane: null}},
+                sectionGeom: {
+                    5: {mouthX: 5, z: -20, side: 1, streetHalf: 4.5},
+                    7: {mouthX: 5, z: -46, side: -1, streetHalf: 4.5}
+                },
+                lockBarriers: [plane],
+                energyBarriers: [bar],
+                scene: {remove: (o) => removed.push(o)},
+                builtFor: [],
+                buildSectionBarrier: function(section) {
+                    this.builtFor.push(section.number);
+                    this.sectionBarriers[section.number] = {bar: {}, placard: null, plane: null};
+                },
+                removeSectionBarrier: CS.prototype.removeSectionBarrier,
+                applySectionLocks: CS.prototype.applySectionLocks
+            };
+            self.applySectionLocks([
+                {number: 5, locked: false, lockblocks: false, conditions: ''},   // unlocked -> drop
+                {number: 7, locked: true, lockblocks: true, conditions: 'Do X'}, // newly locked -> build
+                {number: 9, locked: true, lockblocks: true, conditions: 'Y'}     // still locked -> keep
+            ]);
+            const dropped = !self.sectionBarriers[5] && self.energyBarriers.indexOf(bar) === -1 &&
+                self.lockBarriers.indexOf(plane) === -1 && removed.indexOf(bar) !== -1;
+            const built = self.builtFor.indexOf(7) !== -1 && !!self.sectionBarriers[7];
+            const kept = !!self.sectionBarriers[9];
+            const pass = dropped && built && kept;
+            return {pass, detail: `dropped=${dropped} built=${built} kept=${kept}`};
+        }
+    },
+    {
         name: 'editor: a ground structure footprint is clamped out of the road',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

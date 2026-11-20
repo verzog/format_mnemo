@@ -39,6 +39,46 @@ final class get_states_test extends \advanced_testcase {
     }
 
     /**
+     * The states carry each section's lock state, so the client can drop or
+     * raise a topic's access barrier live: a learner who has not met a
+     * section's conditions sees it locked (and blocked), an unrestricted
+     * section is unlocked.
+     */
+    public function test_section_lock_state_is_returned(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+        $course = $generator->create_course(
+            ['format' => 'mnemo', 'numsections' => 2],
+            ['createsections' => true]
+        );
+        // Restrict section 1 to a future date, shown (greyed) so the condition
+        // text is available rather than the section being hidden.
+        $availability = json_encode((object)[
+            'op' => '&',
+            'c' => [(object)['type' => 'date', 'd' => '>=', 't' => time() + DAYSECS]],
+            'showc' => [true],
+        ]);
+        $sectionid = $DB->get_field('course_sections', 'id', ['course' => $course->id, 'section' => 1]);
+        $DB->set_field('course_sections', 'availability', $availability, ['id' => $sectionid]);
+        rebuild_course_cache($course->id, true);
+        $this->setUser($generator->create_and_enrol($course, 'student'));
+
+        $result = get_states::execute($course->id);
+        $bynumber = [];
+        foreach ($result['sections'] as $section) {
+            $bynumber[$section['number']] = $section;
+        }
+        $this->assertArrayHasKey(1, $bynumber);
+        $this->assertTrue($bynumber[1]['locked']);
+        $this->assertTrue($bynumber[1]['lockblocks']);
+        $this->assertNotEmpty($bynumber[1]['conditions']);
+        $this->assertArrayHasKey(0, $bynumber);
+        $this->assertFalse($bynumber[0]['locked']);
+        $this->assertSame('', $bynumber[0]['conditions']);
+    }
+
+    /**
      * A student in a hidden course is refused with a web service error, not
      * an HTML notice.
      */

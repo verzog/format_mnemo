@@ -350,6 +350,8 @@ define('format_mnemo/vr', [], function() {
         this.beacons = []; // Rooftop lights that blink.
         this.energyBarriers = []; // Animated energy security barriers (see buildCheckpointGroup).
         this.lockBarriers = []; // Sealed-topic planes that block a learner's entry (see buildSectionBarrier).
+        this.sectionBarriers = {}; // Access barrier objects, keyed by section number (for live unlock).
+        this.sectionGeom = {}; // Each side street's mouth geometry, keyed by section number.
         this.beaconLights = 0; // Real point lights spent on barrier beacons (capped, like lamps).
         this.texCache = {}; // Cached canvas textures, keyed by string.
         this.matCache = {}; // Cached facade materials, keyed by style + repeat.
@@ -5362,6 +5364,9 @@ define('format_mnemo/vr', [], function() {
         this.buildPylon(section.name, this.snapBase(mouthX + side * 0.6, this.sceneObjects[pylonkey]),
             this.snapBase(z - streetHalf - 0.8, this.sceneObjects[pylonkey]), wayColour, pylonkey);
 
+        // Remember each street's mouth geometry so a live availability refresh
+        // can raise or drop its barrier later (see applySectionLocks).
+        this.sectionGeom[section.number] = {mouthX: mouthX, z: z, side: side, streetHalf: streetHalf};
         // A topic locked by conditional access is sealed with a translucent
         // energy barrier across its mouth, showing the conditions required.
         if (section.locked) {
@@ -6473,15 +6478,83 @@ define('format_mnemo/vr', [], function() {
             placard.lookAt(mouthX - side * 6, 3.1, z);
             this.scene.add(placard);
         }
+        var plane = null;
         if (section.lockblocks) {
-            this.lockBarriers.push({
+            plane = {
                 x: barrierX, side: side,
                 zMin: z - streetHalf, zMax: z + streetHalf,
                 // Block up to a little above the barrier; a learner who climbs
                 // far above the city can pass over, but the activities inside
                 // stay locked regardless.
                 height: 8,
-            });
+            };
+            this.lockBarriers.push(plane);
+        }
+        // Index by section so a live availability refresh can drop the barrier
+        // when the topic unlocks (see applySectionLocks).
+        this.sectionBarriers[section.number] = {bar: bar, placard: placard, plane: plane};
+    };
+
+    /**
+     * Remove a section's access barrier, placard and block plane from the scene
+     * and the animation/collision lists, so a topic that has unlocked is open
+     * without a page reload. A no-op when the section has no barrier.
+     *
+     * @param {Number} number The section number.
+     */
+    Cyberspace.prototype.removeSectionBarrier = function(number) {
+        var rec = this.sectionBarriers[number];
+        if (!rec) {
+            return;
+        }
+        var ei = this.energyBarriers.indexOf(rec.bar);
+        if (ei !== -1) {
+            this.energyBarriers.splice(ei, 1);
+        }
+        this.scene.remove(rec.bar);
+        if (rec.placard) {
+            this.scene.remove(rec.placard);
+            if (rec.placard.material) {
+                if (rec.placard.material.map) {
+                    rec.placard.material.map.dispose();
+                }
+                rec.placard.material.dispose();
+            }
+        }
+        if (rec.plane) {
+            var pi = this.lockBarriers.indexOf(rec.plane);
+            if (pi !== -1) {
+                this.lockBarriers.splice(pi, 1);
+            }
+        }
+        delete this.sectionBarriers[number];
+    };
+
+    /**
+     * Reconcile the access barriers with a fresh set of section lock states (from
+     * get_states): drop the barrier from a topic that has unlocked, and raise one
+     * on a topic that has newly locked, so completing a prerequisite opens its
+     * street without a page reload. Sections absent from the response keep their
+     * current barrier. A section with no recorded street geometry (e.g. one that
+     * was fully hidden at load) is left for a reload.
+     *
+     * @param {Array} sections [{number, locked, lockblocks, conditions}].
+     */
+    Cyberspace.prototype.applySectionLocks = function(sections) {
+        if (!sections || !sections.length) {
+            return;
+        }
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            var has = !!this.sectionBarriers[s.number];
+            if (!s.locked && has) {
+                this.removeSectionBarrier(s.number);
+            } else if (s.locked && !has) {
+                var geom = this.sectionGeom[s.number];
+                if (geom) {
+                    this.buildSectionBarrier(s, geom.mouthX, geom.z, geom.side, geom.streetHalf);
+                }
+            }
         }
     };
 
@@ -11020,6 +11093,7 @@ define('format_mnemo/vr', [], function() {
                     return null;
                 }
                 self.applyStates((res && res.states) || []);
+                self.applySectionLocks((res && res.sections) || []);
                 return null;
             }).catch(function() {
                 // Leave the scene as it is on a failed refresh.

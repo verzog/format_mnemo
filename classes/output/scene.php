@@ -163,7 +163,7 @@ class scene implements renderable, templatable {
             // conditions. A viewer who may bypass restrictions (teacher/manager)
             // always sees the barrier so they can tell which streets are gated,
             // but passes through it.
-            $lock = $this->section_lock($section, $canbypassavailability);
+            $lock = self::section_lock($section, $canbypassavailability);
             $sections[] = [
                 'number' => (int)$section->section,
                 'name' => $name,
@@ -218,7 +218,7 @@ class scene implements renderable, templatable {
      *     barrier and may see conditions a learner would not.
      * @return array{locked: bool, blocks: bool, conditions: string}
      */
-    protected function section_lock(\section_info $section, bool $canbypass): array {
+    public static function section_lock(\section_info $section, bool $canbypass): array {
         $none = ['locked' => false, 'blocks' => false, 'conditions' => ''];
         if (empty($section->availability)) {
             return $none;
