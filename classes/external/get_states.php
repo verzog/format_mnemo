@@ -88,7 +88,26 @@ class get_states extends external_api {
             ];
         }
 
-        return ['states' => $states];
+        // Per-section lock state, so the client can drop a topic's access
+        // barrier the moment a completed prerequisite unlocks it (and raise one
+        // that has newly locked), without a page reload.
+        $canbypass = has_capability('moodle/course:ignoreavailabilityrestrictions', $context);
+        $sections = [];
+        foreach ($modinfo->get_section_info_all() as $section) {
+            // Mirror the scene build: skip a section hidden with nothing to show.
+            if (!$section->uservisible && empty($section->availableinfo)) {
+                continue;
+            }
+            $lock = scene::section_lock($section, $canbypass);
+            $sections[] = [
+                'number' => (int)$section->section,
+                'locked' => $lock['locked'],
+                'lockblocks' => $lock['blocks'],
+                'conditions' => $lock['conditions'],
+            ];
+        }
+
+        return ['states' => $states, 'sections' => $sections];
     }
 
     /**
@@ -102,6 +121,14 @@ class get_states extends external_api {
                 new external_single_structure([
                     'cmid' => new external_value(PARAM_INT, 'Course-module id'),
                     'state' => new external_value(PARAM_ALPHA, 'One of restricted, available, complete'),
+                ])
+            ),
+            'sections' => new external_multiple_structure(
+                new external_single_structure([
+                    'number' => new external_value(PARAM_INT, 'Section number'),
+                    'locked' => new external_value(PARAM_BOOL, 'Whether a barrier is shown for this section'),
+                    'lockblocks' => new external_value(PARAM_BOOL, 'Whether the barrier blocks this viewer'),
+                    'conditions' => new external_value(PARAM_RAW, 'The access conditions text for the barrier'),
                 ])
             ),
         ]);
