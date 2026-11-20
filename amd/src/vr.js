@@ -10294,10 +10294,14 @@ define('format_mnemo/vr', [], function() {
             }
         }
         var promises = [];
+        // Snapshot each neighbour's saved x so a later push during the request
+        // (the sliders stay live) is not cleared as though it had been saved.
+        var snaps = [];
         for (var j = 0; j < toSave.length; j++) {
             var p = this.persistTransform(toSave[j]);
             if (p) {
                 promises.push(p);
+                snaps.push({editable: toSave[j], x: toSave[j].transform.x});
             }
         }
         if (!promises.length) {
@@ -10305,8 +10309,12 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         Promise.all(promises).then(function() {
-            toSave.forEach(function(e) {
-                e.pushed = false;
+            snaps.forEach(function(s) {
+                // Keep the flag if the building moved again after its snapshot,
+                // so the next Save still carries its latest position.
+                if (s.editable.transform.x === s.x) {
+                    s.editable.pushed = false;
+                }
             });
             status.textContent = savedText;
             saveBtn.disabled = false;
@@ -11138,13 +11146,30 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Slide a building's same-row neighbours out of the way when it is resized,
-     * so a growing building never overlaps the next one down the street. The
-     * neighbours are the other buildings whose footprint overlaps this one along
-     * z (the across-street axis) - i.e. on the same kerb of the same street;
-     * buildings on the far kerb or on other streets do not overlap in z and are
-     * left alone. Each side of the growing building is pushed outward along x and
-     * cascades, and every building moved is flagged so Save persists it too.
+     * Whether two footprints overlap in both axes, beyond a small tolerance (so
+     * two buildings merely touching are not treated as colliding).
+     *
+     * @param {Object} a A footprint {xMin, xMax, zMin, zMax}.
+     * @param {Object} b A footprint {xMin, xMax, zMin, zMax}.
+     * @return {Boolean} True when they overlap in x and z.
+     */
+    Cyberspace.prototype.footprintsOverlap = function(a, b) {
+        return a.xMin < b.xMax - 0.05 && a.xMax > b.xMin + 0.05 &&
+            a.zMin < b.zMax - 0.5 && a.zMax > b.zMin + 0.5;
+    };
+
+    /**
+     * Slide buildings out of the way when one is resized, so a growing building
+     * never overlaps another. Starting from the resized building, every building
+     * it now overlaps (in both x and z, by that building's own footprint) is
+     * pushed along x just clear of it, away from the resized building; a pushed
+     * building is then itself checked against the rest, so the shove cascades
+     * down the row and also catches a deeper building on an adjacent row that a
+     * push moved into. The resized building never moves, and the direction is
+     * fixed relative to it, so the cascade always spreads outward and settles.
+     * A push the road clamp reverses (no room, e.g. against the avenue) is rolled
+     * back rather than saved as an overlap. Every building moved is flagged
+     * pushed so Save persists it too.
      *
      * @param {Object} editable The resized building (with a live footprint).
      */
@@ -11153,64 +11178,41 @@ define('format_mnemo/vr', [], function() {
             return;
         }
         var gap = 1.5; // Clearance kept between neighbouring buildings.
-        var sel = editable.footprint;
-        var selcx = (sel.xMin + sel.xMax) / 2;
-        var left = [];
-        var right = [];
-        for (var i = 0; i < this.editables.length; i++) {
-            var e = this.editables[i];
-            if (e === editable || !e.footprintBase || !e.footprint) {
-                continue;
-            }
-            var f = e.footprint;
-            // Overlap in z (beyond a small tolerance) means the same kerb row.
-            if (f.zMin < sel.zMax - 0.5 && f.zMax > sel.zMin + 0.5) {
-                if ((f.xMin + f.xMax) / 2 <= selcx) {
-                    left.push(e);
-                } else {
-                    right.push(e);
+        // Which side of the resized building a neighbour is pushed toward is
+        // fixed by its position relative to the resized building, so the whole
+        // cascade moves outward and cannot ping-pong.
+        var anchorcx = (editable.footprint.xMin + editable.footprint.xMax) / 2;
+        var movers = [editable];
+        var guard = 0;
+        while (movers.length && guard++ < 300) {
+            var mover = movers.shift();
+            var mf = mover.footprint;
+            for (var i = 0; i < this.editables.length; i++) {
+                var e = this.editables[i];
+                if (e === editable || e === mover || !e.footprintBase || !e.footprint) {
+                    continue;
                 }
+                if (!this.footprintsOverlap(e.footprint, mf)) {
+                    continue;
+                }
+                // Push e clear of the mover, outward from the resized building.
+                var toRight = (e.footprint.xMin + e.footprint.xMax) / 2 >= anchorcx;
+                var shift = toRight ?
+                    (mf.xMax + gap) - e.footprint.xMin :
+                    (mf.xMin - gap) - e.footprint.xMax;
+                var before = e.transform.x;
+                e.transform.x += shift;
+                this.applyTransform(e);
+                // If the road clamp pulled it back into the mover (no room on
+                // that side), roll the push back rather than save an overlap.
+                if (this.footprintsOverlap(e.footprint, mf)) {
+                    e.transform.x = before;
+                    this.applyTransform(e);
+                    continue;
+                }
+                e.pushed = true;
+                movers.push(e);
             }
-        }
-        // Nearest neighbour first on each side, then cascade the push outward.
-        right.sort(function(a, b) {
-            return a.footprint.xMin - b.footprint.xMin;
-        });
-        left.sort(function(a, b) {
-            return b.footprint.xMax - a.footprint.xMax;
-        });
-        this.cascadePush(right, sel.xMax + gap, 1, gap);
-        this.cascadePush(left, sel.xMin - gap, -1, gap);
-    };
-
-    /**
-     * Push a sorted row of buildings outward past a moving boundary, cascading:
-     * each building that overlaps the boundary is shifted along x just clear of
-     * it, the boundary advances to that building's new far edge plus the gap,
-     * and once a building already clears the boundary the rest (further out) do
-     * too. Every building moved is flagged pushed so Save persists it.
-     *
-     * @param {Object[]} row The neighbours on one side, nearest first.
-     * @param {Number} boundary The x the nearest building's near edge must clear.
-     * @param {Number} dir +1 to push toward +x, -1 toward -x.
-     * @param {Number} gap The clearance to keep between buildings.
-     */
-    Cyberspace.prototype.cascadePush = function(row, boundary, dir, gap) {
-        for (var i = 0; i < row.length; i++) {
-            var e = row[i];
-            var f = e.footprint;
-            var shift;
-            if (dir > 0 && f.xMin < boundary) {
-                shift = boundary - f.xMin;
-            } else if (dir < 0 && f.xMax > boundary) {
-                shift = boundary - f.xMax;
-            } else {
-                break;
-            }
-            e.transform.x += shift;
-            e.pushed = true;
-            this.applyTransform(e);
-            boundary = (dir > 0 ? e.footprint.xMax : e.footprint.xMin) + dir * gap;
         }
     };
 

@@ -2549,7 +2549,7 @@ const scenarios = [
                 setFootprintBounds: CS.prototype.setFootprintBounds,
                 clampFootprintFromRoads: CS.prototype.clampFootprintFromRoads,
                 applyTransform: CS.prototype.applyTransform,
-                cascadePush: CS.prototype.cascadePush,
+                footprintsOverlap: CS.prototype.footprintsOverlap,
                 pushNeighbours: CS.prototype.pushNeighbours
             };
             self.pushNeighbours(sel);
@@ -2561,6 +2561,80 @@ const scenarios = [
             const otherFree = other.transform.x === 0 && !other.pushed;
             const pass = rightClear && leftClear && otherFree;
             return {pass, detail: `rX=${right.footprint.xMin.toFixed(2)} lX=${left.footprint.xMax.toFixed(2)} other=${other.transform.x}`};
+        }
+    },
+    {
+        name: 'editor: the push cascade catches a deeper neighbour on another row',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mkBuilding = (baseX, zc, w, d) => {
+                const g = new THREE.Group();
+                return {
+                    group: g, scaleNode: g, baseX, baseY: 0, baseZ: zc, baseRotY: 0, baseScale: 1,
+                    footprintBase: {w, d, h: 8},
+                    footprint: {xMin: baseX - w / 2, xMax: baseX + w / 2,
+                        zMin: zc - d / 2, zMax: zc + d / 2, top: 8},
+                    transform: {scale: 1, sx: 1, sy: 1, sz: 1, x: 0, y: 0, z: 0, rot: 0}
+                };
+            };
+            // A is grown wide (−10..10, z −2..2). B is deep (z 0..8) and overlaps
+            // A; C sits on B's z band (5..9) but NOT A's, so the old row filter
+            // missed it. Pushing B into C must now carry the cascade onto C.
+            const A = mkBuilding(0, 0, 20, 4);
+            const B = mkBuilding(8, 4, 4, 8);
+            const C = mkBuilding(13, 7, 4, 4);
+            const self = {
+                editables: [A, B, C], roads: [],
+                renderer: null, selBox: null, selLabel: null, selected: null,
+                setFootprintBounds: CS.prototype.setFootprintBounds,
+                clampFootprintFromRoads: CS.prototype.clampFootprintFromRoads,
+                applyTransform: CS.prototype.applyTransform,
+                footprintsOverlap: CS.prototype.footprintsOverlap,
+                pushNeighbours: CS.prototype.pushNeighbours
+            };
+            self.pushNeighbours(A);
+            const bClear = B.footprint.xMin >= 11.5 - 1e-6 && B.pushed === true;
+            const cPushed = C.pushed === true && C.footprint.xMin >= B.footprint.xMax - 1e-6;
+            const pass = bClear && cPushed;
+            return {pass, detail: `B=${B.footprint.xMin.toFixed(1)}..${B.footprint.xMax.toFixed(1)} C=${C.footprint.xMin.toFixed(1)}`};
+        }
+    },
+    {
+        name: 'editor: a neighbour the road clamp blocks is left put, not saved overlapping',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mkBuilding = (baseX, zc, w, d) => {
+                const g = new THREE.Group();
+                return {
+                    group: g, scaleNode: g, baseX, baseY: 0, baseZ: zc, baseRotY: 0, baseScale: 1,
+                    footprintBase: {w, d, h: 8},
+                    footprint: {xMin: baseX - w / 2, xMax: baseX + w / 2,
+                        zMin: zc - d / 2, zMax: zc + d / 2, top: 8},
+                    transform: {scale: 1, sx: 1, sy: 1, sz: 1, x: 0, y: 0, z: 0, rot: 0}
+                };
+            };
+            // The avenue sits at x −8.4..8.4. The resized building (10..40) grows
+            // toward it; its neighbour (9..15) would be pushed left into the
+            // avenue, which the clamp forbids - so the push is rolled back.
+            const avenue = {xMin: -8.4, xMax: 8.4, zMin: -100, zMax: 12};
+            const sel = mkBuilding(25, 0, 30, 4);
+            const nb = mkBuilding(12, 0, 6, 4);
+            const self = {
+                editables: [sel, nb], roads: [avenue],
+                renderer: null, selBox: null, selLabel: null, selected: null,
+                setFootprintBounds: CS.prototype.setFootprintBounds,
+                clampFootprintFromRoads: CS.prototype.clampFootprintFromRoads,
+                applyTransform: CS.prototype.applyTransform,
+                footprintsOverlap: CS.prototype.footprintsOverlap,
+                pushNeighbours: CS.prototype.pushNeighbours
+            };
+            self.pushNeighbours(sel);
+            // The blocked neighbour is reverted (not flagged, position unchanged).
+            const pass = !nb.pushed && nb.transform.x === 0 &&
+                Math.abs(nb.footprint.xMax - 15) < 1e-6;
+            return {pass, detail: `pushed=${!!nb.pushed} x=${nb.transform.x} xMax=${nb.footprint.xMax.toFixed(1)}`};
         }
     },
     {
