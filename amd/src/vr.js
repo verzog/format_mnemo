@@ -9826,6 +9826,13 @@ define('format_mnemo/vr', [], function() {
                         if (ezi) {
                             ezi.value = self.selected.transform.z;
                         }
+                        // Resizing or rotating a building slides its same-row
+                        // neighbours out of the way so a growing building never
+                        // overlaps the next. Move (x/z) is left alone, so a
+                        // deliberate drag does not bulldoze the whole row.
+                        if (key === 'scale' || key === 'sx' || key === 'sz' || key === 'rot') {
+                            self.pushNeighbours(self.selected);
+                        }
                     }
                 }
                 self.syncEditorOutputs();
@@ -10278,12 +10285,29 @@ define('format_mnemo/vr', [], function() {
         status.textContent = s.editsaving || 'Saving…';
         var savedText = s.editsaved || 'Saved';
         var errorText = s.editsaveerror || 'Could not save';
-        var promise = this.persistTransform(editable);
-        if (!promise) {
+        // Persist the selected object, plus any neighbours a resize pushed
+        // aside, so the relayout sticks (not just the building being edited).
+        var toSave = [editable];
+        for (var i = 0; i < this.editables.length; i++) {
+            if (this.editables[i] !== editable && this.editables[i].pushed) {
+                toSave.push(this.editables[i]);
+            }
+        }
+        var promises = [];
+        for (var j = 0; j < toSave.length; j++) {
+            var p = this.persistTransform(toSave[j]);
+            if (p) {
+                promises.push(p);
+            }
+        }
+        if (!promises.length) {
             saveBtn.disabled = false;
             return;
         }
-        promise.then(function() {
+        Promise.all(promises).then(function() {
+            toSave.forEach(function(e) {
+                e.pushed = false;
+            });
             status.textContent = savedText;
             saveBtn.disabled = false;
             return null;
@@ -11111,6 +11135,83 @@ define('format_mnemo/vr', [], function() {
         }
         t.x = cx - editable.baseX;
         t.z = cz - editable.baseZ;
+    };
+
+    /**
+     * Slide a building's same-row neighbours out of the way when it is resized,
+     * so a growing building never overlaps the next one down the street. The
+     * neighbours are the other buildings whose footprint overlaps this one along
+     * z (the across-street axis) - i.e. on the same kerb of the same street;
+     * buildings on the far kerb or on other streets do not overlap in z and are
+     * left alone. Each side of the growing building is pushed outward along x and
+     * cascades, and every building moved is flagged so Save persists it too.
+     *
+     * @param {Object} editable The resized building (with a live footprint).
+     */
+    Cyberspace.prototype.pushNeighbours = function(editable) {
+        if (!editable.footprintBase || !editable.footprint) {
+            return;
+        }
+        var gap = 1.5; // Clearance kept between neighbouring buildings.
+        var sel = editable.footprint;
+        var selcx = (sel.xMin + sel.xMax) / 2;
+        var left = [];
+        var right = [];
+        for (var i = 0; i < this.editables.length; i++) {
+            var e = this.editables[i];
+            if (e === editable || !e.footprintBase || !e.footprint) {
+                continue;
+            }
+            var f = e.footprint;
+            // Overlap in z (beyond a small tolerance) means the same kerb row.
+            if (f.zMin < sel.zMax - 0.5 && f.zMax > sel.zMin + 0.5) {
+                if ((f.xMin + f.xMax) / 2 <= selcx) {
+                    left.push(e);
+                } else {
+                    right.push(e);
+                }
+            }
+        }
+        // Nearest neighbour first on each side, then cascade the push outward.
+        right.sort(function(a, b) {
+            return a.footprint.xMin - b.footprint.xMin;
+        });
+        left.sort(function(a, b) {
+            return b.footprint.xMax - a.footprint.xMax;
+        });
+        this.cascadePush(right, sel.xMax + gap, 1, gap);
+        this.cascadePush(left, sel.xMin - gap, -1, gap);
+    };
+
+    /**
+     * Push a sorted row of buildings outward past a moving boundary, cascading:
+     * each building that overlaps the boundary is shifted along x just clear of
+     * it, the boundary advances to that building's new far edge plus the gap,
+     * and once a building already clears the boundary the rest (further out) do
+     * too. Every building moved is flagged pushed so Save persists it.
+     *
+     * @param {Object[]} row The neighbours on one side, nearest first.
+     * @param {Number} boundary The x the nearest building's near edge must clear.
+     * @param {Number} dir +1 to push toward +x, -1 toward -x.
+     * @param {Number} gap The clearance to keep between buildings.
+     */
+    Cyberspace.prototype.cascadePush = function(row, boundary, dir, gap) {
+        for (var i = 0; i < row.length; i++) {
+            var e = row[i];
+            var f = e.footprint;
+            var shift;
+            if (dir > 0 && f.xMin < boundary) {
+                shift = boundary - f.xMin;
+            } else if (dir < 0 && f.xMax > boundary) {
+                shift = boundary - f.xMax;
+            } else {
+                break;
+            }
+            e.transform.x += shift;
+            e.pushed = true;
+            this.applyTransform(e);
+            boundary = (dir > 0 ? e.footprint.xMax : e.footprint.xMin) + dir * gap;
+        }
     };
 
     /**

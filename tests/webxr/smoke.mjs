@@ -2524,6 +2524,46 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: resizing a building pushes its same-row neighbours outward',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const mkBuilding = (baseX, zc, w, d) => {
+                const g = new THREE.Group();
+                return {
+                    group: g, scaleNode: g, baseX, baseY: 0, baseZ: zc, baseRotY: 0, baseScale: 1,
+                    footprintBase: {w, d, h: 8},
+                    footprint: {xMin: baseX - w / 2, xMax: baseX + w / 2,
+                        zMin: zc - d / 2, zMax: zc + d / 2, top: 8},
+                    transform: {scale: 1, sx: 1, sy: 1, sz: 1, x: 0, y: 0, z: 0, rot: 0}
+                };
+            };
+            // The selected building, grown wide (footprint -5..5) on row z~0.
+            const sel = mkBuilding(0, 0, 10, 6);
+            const right = mkBuilding(6, 0, 4, 4);  // same row, to the right
+            const left = mkBuilding(-6, 0, 4, 4);  // same row, to the left
+            const other = mkBuilding(6, 20, 4, 4); // different kerb row: untouched
+            const self = {
+                editables: [sel, right, left, other],
+                roads: [], renderer: null, selBox: null, selLabel: null, selected: null,
+                setFootprintBounds: CS.prototype.setFootprintBounds,
+                clampFootprintFromRoads: CS.prototype.clampFootprintFromRoads,
+                applyTransform: CS.prototype.applyTransform,
+                cascadePush: CS.prototype.cascadePush,
+                pushNeighbours: CS.prototype.pushNeighbours
+            };
+            self.pushNeighbours(sel);
+            // Right neighbour pushed clear of sel.xMax + gap (5 + 1.5 = 6.5).
+            const rightClear = right.footprint.xMin >= 6.5 - 1e-6 && right.pushed === true;
+            // Left neighbour pushed clear of sel.xMin - gap (-6.5).
+            const leftClear = left.footprint.xMax <= -6.5 + 1e-6 && left.pushed === true;
+            // The far kerb row is untouched.
+            const otherFree = other.transform.x === 0 && !other.pushed;
+            const pass = rightClear && leftClear && otherFree;
+            return {pass, detail: `rX=${right.footprint.xMin.toFixed(2)} lX=${left.footprint.xMax.toFixed(2)} other=${other.transform.x}`};
+        }
+    },
+    {
         name: 'traffic: a ground-level car is tied to a street and roams along it',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
