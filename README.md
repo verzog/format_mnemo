@@ -380,6 +380,33 @@ that once with the per-model **scale** and **pitch/yaw/roll** settings in the
 asset viewer. Other formats (`.unity`/`.prefab`, `.obj`) are not loaded directly;
 export them to `.glb` (or `.fbx`) first.
 
+**What makes a model work well.** A model that drops straight in and looks right
+almost always has these traits — worth a glance before you download or upload,
+since they are the usual difference between a model that renders cleanly and one
+that comes in grey, black or dull:
+
+- **glTF `.glb` with metallic-roughness materials.** This is the single biggest
+  one. Three.js renders the modern *metallic-roughness* PBR model correctly; the
+  older *specular-glossiness* model is deprecated — it renders wrong (often grey
+  or black) and logs warnings. If a model's materials mention
+  "specular/glossiness", re-export it from Blender as glTF with metallic-roughness.
+- **Textures embedded in the file.** A `.glb` packs its textures inside. A model
+  whose textures are separate files (common with `.fbx`/`.obj` downloads) shows up
+  untextured or black, because those files never come along with it. Power-of-two
+  sizes (512, 1024, 2048 px) are the most GPU-friendly.
+- **An emissive map for the glow.** The city is dark, so neon, screens and signage
+  only read if the model carries an *emissive* map (a brighter glow comes from the
+  `KHR_materials_emissive_strength` extension, which the loader supports). A model
+  with no emissive looks flat here.
+- **A sensible polygon count and file size.** Detail comes from the PBR maps
+  (especially the normal map), not raw triangles, so a tidy model beats a dense
+  one. A 25 MB, 200k-triangle prop looks great on a desktop but loads slowly and
+  can stutter on phones and headsets — keep within the budgets under **Size
+  budgets and lite copies** below (a prop is ~10,000 triangles and 3 MB), or add a
+  `-lite` copy.
+- **No rig needed.** Static props (no skeleton or animation) are simplest; the
+  scene places buildings and props, it does not play character animations.
+
 **Getting a good `.glb`:**
 
 - **From Unity** — install the free **glTFast** or **UnityGLTF** package and
