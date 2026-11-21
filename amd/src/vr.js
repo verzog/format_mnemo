@@ -625,7 +625,10 @@ define('format_mnemo/vr', [], function() {
             sunIntensity: 0.12 + day * 1.2,
             hemiIntensity: 0.28 + day * 0.72,
             fog: horizon.clone(),
-            fogDensity: 0.011 + day * 0.006 + warm * 0.006,
+            // Thin enough that the far towers and the rolling hills read through
+            // the haze rather than dissolving into white; day (smog) is thinned
+            // most, since that is when the distance washed out worst.
+            fogDensity: 0.005 + day * 0.003 + warm * 0.004,
             neon: 0.3 + night * 0.9, // Neon accent strength.
             windowEmissive: 0.05 + night * 1.25, // Lit-window glow (near off by day).
             adOpacity: 0.32 + night * 0.5, // Holographic ad strength.
