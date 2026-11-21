@@ -1056,6 +1056,43 @@ const scenarios = [
         }
     },
     {
+        name: 'video: the support post reaches the ground, not below it',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {
+                THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
+                makePosterTexture: CS.prototype.makePosterTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
+                frameMaterial: CS.prototype.frameMaterial,
+                signFontStack: CS.prototype.signFontStack,
+                makeVideoScreen: CS.prototype.makeVideoScreen
+            };
+            const r = obj.makeVideoScreen(
+                {name: 'Clip', url: 'https://x', state: 'available', video: {kind: 'embed'}});
+            // Mount the screen where buildSideStreet does (centre 3.2 above the
+            // street) and measure the post's world extent.
+            r.group.position.set(0, 3.2, 0);
+            r.group.updateMatrixWorld(true);
+            // The post is the slim 0.16-wide upright; find it and box it.
+            let post = null;
+            r.group.traverse((o) => {
+                if (o.isMesh && o.geometry && o.geometry.parameters &&
+                        o.geometry.parameters.width === 0.16 &&
+                        o.geometry.parameters.height > 0.3) {
+                    post = o;
+                }
+            });
+            const box = post && new THREE.Box3().setFromObject(post);
+            // Its base sits on the ground (y=0), and it no longer plunges far
+            // below (the old fixed post reached about y=-23).
+            const reachesGround = box && Math.abs(box.min.y) < 0.05;
+            const notBelow = box && box.min.y > -0.5;
+            const pass = !!post && reachesGround && notBelow;
+            return {pass, detail: `postMinY=${box && box.min.y.toFixed(3)}`};
+        }
+    },
+    {
         name: 'video: a file activity defers the video until activation',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

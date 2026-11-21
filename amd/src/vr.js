@@ -94,6 +94,11 @@ define('format_mnemo/vr', [], function() {
     // under them, and so surface-snapping rests objects on the right level.
     var SIDEWALK_HEIGHT = 0.18;
 
+    // World height of a video screen's centre above the street. Shared so the
+    // screen's support post can be sized to reach exactly the ground rather than
+    // a fixed over-long drop (which dangles below a floating void platform).
+    var VIDEO_SCREEN_Y = 3.2;
+
     // Standard storey count per facade texture module (see MODULE_H). Building
     // masses are quantised to a whole number of these storeys, so the skyline
     // reads as stacked floors, window rows line up with the facade, and rooftop
@@ -5398,10 +5403,10 @@ define('format_mnemo/vr', [], function() {
             // A video activity is a large screen instead of a building.
             if (act.video) {
                 var vscreen = self.makeVideoScreen(act);
-                vscreen.group.position.set(bx, 3.2, bz);
-                vscreen.group.lookAt(bx, 3.2, z);
+                vscreen.group.position.set(bx, VIDEO_SCREEN_Y, bz);
+                vscreen.group.lookAt(bx, VIDEO_SCREEN_Y, z);
                 self.scene.add(vscreen.group);
-                self.registerEditable(act, vscreen.group, bx, 3.2, bz, null, null, vscreen.panel);
+                self.registerEditable(act, vscreen.group, bx, VIDEO_SCREEN_Y, bz, null, null, vscreen.panel);
                 return;
             }
             var built = self.makeStructure(act, style);
@@ -7714,12 +7719,17 @@ define('format_mnemo/vr', [], function() {
         screen.position.z = 0.05;
         frame.add(screen);
 
-        // A support post to the ground so the screen reads as a street fixture.
+        // A support post from the screen's underside down to the ground, so the
+        // screen reads as a street fixture. Sized to reach y=0 exactly (not a
+        // fixed over-long drop), so it does not dangle below a floating void
+        // platform. The screen centre sits at VIDEO_SCREEN_Y, so the post runs
+        // from the screen bottom (local -h/2) to the ground (local -mountY).
+        var postLen = Math.max(0.1, VIDEO_SCREEN_Y - h / 2);
         var post = new THREE.Mesh(
-            new THREE.BoxGeometry(0.16, 24, 0.16),
+            new THREE.BoxGeometry(0.16, postLen, 0.16),
             new THREE.MeshBasicMaterial({color: colour, transparent: true, opacity: 0.5})
         );
-        post.position.set(0, -h / 2 - 12, -0.05);
+        post.position.set(0, -h / 2 - postLen / 2, -0.05);
         frame.add(post);
         group.add(frame);
 
