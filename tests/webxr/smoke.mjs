@@ -1516,7 +1516,7 @@ const scenarios = [
             a.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
             const b = new THREE.Group();
             b.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), shared));
-            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness}, {group: a, transform: {brightness: 3}});
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials}, {group: a, transform: {brightness: 3}});
             // b must be untouched (its own material was not mutated).
             const bmat = b.children[0].material;
             const amat = a.children[0].material;
@@ -1535,13 +1535,13 @@ const scenarios = [
             emat.emissiveIntensity = 0.5;
             g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), emat));
             const ed = {group: g, transform: {brightness: 2}};
-            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness}, ed);
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials}, ed);
             // The mesh gets its own material clone; read that, not the original.
             const mat = () => g.children[0].material;
             const up = Math.abs(mat().emissiveIntensity - 1.0) < 1e-6;
             // Re-apply relative to the same captured base (0.5), not the last value.
             ed.transform.brightness = 0.5;
-            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness}, ed);
+            CS.prototype.applyBrightness.call({releaseInstance: () => {}, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials}, ed);
             const down = Math.abs(mat().emissiveIntensity - 0.25) < 1e-6;
             return {pass: up && down, detail: `emis=${mat().emissiveIntensity}`};
         }
@@ -1562,7 +1562,7 @@ const scenarios = [
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
                 applyBrightness: CS.prototype.applyBrightness,
-                applyMaterialBrightness: CS.prototype.applyMaterialBrightness
+                applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials
             };
             self.registerSceneEditable('lamp:0', 'Street lamp', g, 5, 0, 5, true);
             const ed = self.editables[0];
@@ -1849,7 +1849,7 @@ const scenarios = [
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
-                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness,
+                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
                 modelOrientation: CS.prototype.modelOrientation,
@@ -1888,7 +1888,7 @@ const scenarios = [
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
-                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness,
+                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
                 modelOrientation: CS.prototype.modelOrientation,
@@ -2447,7 +2447,7 @@ const scenarios = [
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const THREE = window.__mnemoTest.THREE;
-            const self = {applyMaterialBrightness: CS.prototype.applyMaterialBrightness};
+            const self = {applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials};
             const mk = () => new THREE.MeshStandardMaterial({color: 0x808080});
             // b > 1 lifts a dark, non-glowing material by adding an emissive fill.
             const bright = mk();
@@ -2470,8 +2470,57 @@ const scenarios = [
             const glow = new THREE.MeshStandardMaterial({emissive: 0x00ff00, emissiveIntensity: 1});
             self.applyMaterialBrightness(glow, 2);
             const glowScaled = Math.abs(glow.emissiveIntensity - 2) < 1e-6;
-            const pass = lifted && dimmed && restored && glowScaled;
-            return {pass, detail: `lifted=${lifted} dimmed=${dimmed} restored=${restored} glow=${glowScaled}`};
+            // A dark fill that ships with emissiveIntensity 0 must still render
+            // its lift: the intensity is forced up when brightening past 1, then
+            // returns to the captured 0.
+            const zero = new THREE.MeshStandardMaterial({color: 0x404040});
+            zero.emissiveIntensity = 0;
+            self.applyMaterialBrightness(zero, 2.5);
+            const zeroLit = (zero.emissive.r + zero.emissive.g + zero.emissive.b) > 0 &&
+                zero.emissiveIntensity > 0;
+            self.applyMaterialBrightness(zero, 1);
+            const zeroReset = Math.abs(zero.emissiveIntensity) < 1e-9;
+            const pass = lifted && dimmed && restored && glowScaled && zeroLit && zeroReset;
+            return {pass, detail: `lifted=${lifted} dimmed=${dimmed} restored=${restored} ` +
+                `glow=${glowScaled} zeroLit=${zeroLit} zeroReset=${zeroReset}`};
+        }
+    },
+    {
+        name: 'editor: brightness repoints the live sign/screen material references',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            // A video-screen-like group: a frame mesh (its material is the live
+            // state colour, referenced from userData) and a screen mesh (its
+            // own poster material, referenced as screenMat for video playback).
+            const group = new THREE.Group();
+            const frameMat = new THREE.MeshBasicMaterial({color: 0x335577});
+            const frame = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), frameMat);
+            const screenMat = new THREE.MeshBasicMaterial({color: 0x101010});
+            const screen = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), screenMat);
+            screen.userData = {material: frameMat, screenMat: screenMat};
+            group.userData.frameMat = frameMat;
+            frame.add(screen);
+            group.add(frame);
+            const editable = {cmid: 42, group, transform: {brightness: 2}};
+            const self = Object.create(CS.prototype);
+            self.releaseInstance = () => {};
+            self.activities = {42: {frameMat: frameMat}};
+            self.applyBrightness(editable);
+            // The meshes now render their own clones; every live reference must
+            // follow to the clone, not the detached original.
+            const frameNow = frame.material;
+            const screenNow = screen.material;
+            const refsFollow = group.userData.frameMat === frameNow &&
+                screen.userData.material === frameNow &&
+                screen.userData.screenMat === screenNow &&
+                self.activities[42].frameMat === frameNow;
+            const cloned = frameNow !== frameMat && screenNow !== screenMat;
+            // A later state recolour writes the rendered material, so it shows.
+            self.activities[42].frameMat.color.setHex(0xff0000);
+            const recolourShows = frame.material.color.getHex() === 0xff0000;
+            const pass = refsFollow && cloned && recolourShows;
+            return {pass, detail: `refsFollow=${refsFollow} cloned=${cloned} recolour=${recolourShows}`};
         }
     },
     {
@@ -4820,7 +4869,7 @@ const scenarios = [
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
                 applyTransform: CS.prototype.applyTransform,
-                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness,
+                applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
                 modelOrientation: CS.prototype.modelOrientation,
@@ -5565,7 +5614,7 @@ const scenarios = [
                 addLampLight: CS.prototype.addLampLight, lampLocalBox: CS.prototype.lampLocalBox, setShadow: CS.prototype.setShadow,
                 addPickProxy: CS.prototype.addPickProxy,
                 registerSceneEditable: CS.prototype.registerSceneEditable,
-                applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness,
+                applyTransform: CS.prototype.applyTransform, applyBrightness: CS.prototype.applyBrightness, applyMaterialBrightness: CS.prototype.applyMaterialBrightness, ownBrightnessMaterial: CS.prototype.ownBrightnessMaterial, remapLiveMaterials: CS.prototype.remapLiveMaterials,
                 modelScale: CS.prototype.modelScale,
                 modelCfg: CS.prototype.modelCfg,
                 modelOrientation: CS.prototype.modelOrientation,

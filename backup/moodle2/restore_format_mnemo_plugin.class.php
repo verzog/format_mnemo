@@ -107,6 +107,7 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
         $record = (object)(scene_values::transform($data) + [
             'cmid' => $this->task->get_moduleid(),
             'model' => $model,
+            'brightness' => scene_values::brightness($data['brightness'] ?? 1.0),
             'timemodified' => (int)($data['timemodified'] ?? 0),
         ]);
         // A given module has at most one row (unique cmid); guard against a

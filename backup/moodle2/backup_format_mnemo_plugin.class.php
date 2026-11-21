@@ -72,7 +72,7 @@ class backup_format_mnemo_plugin extends backup_format_plugin {
         // for the module being backed up.
         $building = new backup_nested_element('building', ['id'], [
             'model', 'scale', 'scalex', 'scaley', 'scalez',
-            'offsetx', 'offsety', 'offsetz', 'rotation', 'timemodified',
+            'offsetx', 'offsety', 'offsetz', 'rotation', 'brightness', 'timemodified',
         ]);
         $pluginwrapper->add_child($building);
 
