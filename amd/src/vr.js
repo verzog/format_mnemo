@@ -2587,15 +2587,20 @@ define('format_mnemo/vr', [], function() {
         }
         var THREE = this.THREE;
         var d = this.day;
+        // The PMREM generator sizes its cube faces from the equirectangular
+        // width (roughly width / 4), so the canvas must be wide enough to give
+        // valid faces and finite blur weights - 4 px wide collapses to 1x1 faces
+        // and a broken env. The gradient is horizontally uniform, so the width is
+        // only there to satisfy the generator.
         var canvas = document.createElement('canvas');
-        canvas.width = 4;
+        canvas.width = 256;
         canvas.height = 128;
         var ctx = canvas.getContext('2d');
         var grd = ctx.createLinearGradient(0, 128, 0, 0);
         grd.addColorStop(0, '#' + d.horizon.getHexString());
         grd.addColorStop(1, '#' + d.skyTop.getHexString());
         ctx.fillStyle = grd;
-        ctx.fillRect(0, 0, 4, 128);
+        ctx.fillRect(0, 0, 256, 128);
         var tex = new THREE.CanvasTexture(canvas);
         tex.mapping = THREE.EquirectangularReflectionMapping;
         if (tex.colorSpace !== undefined) {
