@@ -1093,26 +1093,34 @@ const scenarios = [
         }
     },
     {
-        name: 'cyberspace: the grassland is flat under the city and rolls into hills',
+        name: 'cyberspace: the grassland apron covers the city and rolls beyond it',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
             const THREE = window.__mnemoTest.THREE;
-            const hh = (x, z) => CS.prototype.hillHeight.call({}, x, z);
-            // Flat apron where the city sits, so buildings are never overtaken by
-            // rising ground: zero at the centre and out to the flat radius.
-            const flat = hh(0, 0) === 0 && hh(200, 200) === 0;
-            // Well beyond the apron the ground rolls (sample a ring so a single
-            // zero crossing does not fail it).
+            const hh = (x, z, f, r) => CS.prototype.hillHeight.call({}, x, z, f, r);
+            // Flat apron within the given radius, so buildings are never overtaken
+            // by rising ground; rolling beyond it (sample a ring so a single zero
+            // crossing does not fail it).
+            const flatOk = hh(0, 0, 320, 560) === 0 && hh(200, 200, 320, 560) === 0;
             let maxFar = 0;
             for (let a = 0; a < 8; a++) {
                 const ang = a / 8 * Math.PI * 2;
-                maxFar = Math.max(maxFar, Math.abs(hh(Math.cos(ang) * 900, Math.sin(ang) * 900)));
+                maxFar = Math.max(maxFar, Math.abs(hh(Math.cos(ang) * 900, Math.sin(ang) * 900, 320, 560)));
             }
             const rolls = maxFar > 2;
+            // The apron grows with the course, and always clears the avenue's far
+            // end (|endZ| = 30 + 26*sections), so big courses keep level streets.
+            const cr = (n, len) => CS.prototype.cityRadius.call(
+                {config: {sections: Array.from({length: n}, () => ({}))}, streetSlots: () => ({len})}, );
+            const small = cr(5, 40);
+            const large = cr(30, 40);
+            const scales = large > small && large >= 30 + 26 * 30;
+            // The hills are flat under a large course's far avenue end, not rising.
+            const farStreetLevel = hh(0, -(30 + 26 * 30), large, large + 220) === 0;
             // buildHills makes a displaced, vertex-coloured, ground-oriented mesh.
             const self = Object.create(CS.prototype);
             self.THREE = THREE;
-            const mesh = self.buildHills();
+            const mesh = self.buildHills(320, 560, 2600);
             const pos = mesh.geometry.getAttribute('position');
             let maxZ = 0;
             for (let i = 0; i < pos.count; i++) {
@@ -1121,8 +1129,9 @@ const scenarios = [
             const built = !!mesh.geometry.getAttribute('color') &&
                 mesh.material.vertexColors === true && maxZ > 5 &&
                 Math.abs(mesh.rotation.x + Math.PI / 2) < 1e-6;
-            const pass = flat && rolls && built;
-            return {pass, detail: `flat=${flat} rolls=${maxFar.toFixed(1)} maxZ=${maxZ.toFixed(1)}`};
+            const pass = flatOk && rolls && scales && farStreetLevel && built;
+            return {pass, detail: `flat=${flatOk} rolls=${maxFar.toFixed(1)} ` +
+                `scales=${scales}(${small.toFixed(0)}->${large.toFixed(0)}) far=${farStreetLevel} maxZ=${maxZ.toFixed(1)}`};
         }
     },
     {

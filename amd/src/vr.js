@@ -773,45 +773,73 @@ define('format_mnemo/vr', [], function() {
         this.buildClouds();
     };
 
-    // Grassland geometry (world units): the landscape plane's size, the radius of
-    // the flat apron the city sits on before the hills start, and where the hills
-    // ramp to full height. Shared by the terrain and so props/streets are never
-    // overtaken by rising ground.
-    var GRASS_SIZE = 2600;
-    var GRASS_FLAT = 320;
-    var GRASS_RISE = 560;
+    /**
+     * How far the city reaches from the origin (world units): the furthest of the
+     * avenue's far end and the far corner of the longest side street, plus a
+     * margin. buildCity lays the avenue to z = -(30 + 26*sections) and branches a
+     * uniform-length side street at each section mouth, so the extent is known
+     * from the section count and the street length before the city is built.
+     * Used to keep the grassland flat under every street whatever the course size.
+     *
+     * @return {Number} The city radius in world units.
+     */
+    Cyberspace.prototype.cityRadius = function() {
+        var sections = this.config.sections || [];
+        var n = Math.max(1, sections.length);
+        var spacing = 26;
+        var self = this;
+        var streetLen = 0;
+        sections.forEach(function(section) {
+            streetLen = Math.max(streetLen, self.streetSlots(section).len);
+        });
+        // Avenue far end (|endZ|), and the far corner of the last side street
+        // (its mouth's |z| plus its reach out in x from the avenue).
+        var avenueEnd = 30 + spacing * n;
+        var sideZ = 20 + spacing * (n - 1);
+        var sideX = 5.5 + streetLen;
+        var corner = Math.sqrt(sideX * sideX + sideZ * sideZ);
+        return Math.max(avenueEnd, corner) + 28;
+    };
 
     /**
      * The Cyberspace landscape: a procedural grassland that is flat under the
-     * city (so streets and buildings sit level) and rolls into low hills in the
-     * distance, dissolving into the smog fog. Replaces the flat wet-asphalt plane
-     * for Cyberspace only. A soft sky fill keeps the grass readable at night
-     * without washing out the neon, and faint electronic haze bands drift across
-     * the mid-distance so the background reads as vague, slightly-electronic mist.
+     * city (so streets and buildings sit level, whatever the course size) and
+     * rolls into low hills beyond it, dissolving into the smog fog. Replaces the
+     * flat wet-asphalt plane for Cyberspace only. A soft sky fill keeps the grass
+     * readable at night without washing out the neon, and faint electronic haze
+     * rings wrap the horizon so the background reads as vague electronic mist.
      */
     Cyberspace.prototype.buildGrassland = function() {
         var THREE = this.THREE;
         var d = this.day;
+        // Flat out to the city's own radius; the hills then ramp up over the next
+        // stretch, and the plane extends well beyond them.
+        var flat = this.cityRadius();
+        var rise = flat + 220;
+        var size = Math.max(2600, (rise + 420) * 2);
         // A gentle hemisphere fill (teal sky, deep-green ground) so the grass is
         // lit at night too; kept low so the neon still dominates after dark.
         var fill = new THREE.HemisphereLight(0x8fb9c9, 0x1f3a22, 0.35 + d.day * 0.5);
         this.scene.add(fill);
-        this.scene.add(this.buildHills());
-        this.buildElectronicMist();
+        this.scene.add(this.buildHills(flat, rise, size));
+        this.buildElectronicMist(flat);
     };
 
     /**
      * The rolling-hills grass mesh for the Cyberspace landscape: a large plane
-     * displaced by a smooth height field (flat to GRASS_FLAT, then rising), with
-     * per-vertex grass colour that lifts with height and a little jitter, so it
-     * reads as terrain rather than a flat sheet.
+     * displaced by a smooth height field (flat to the apron radius, then rising),
+     * with per-vertex grass colour that lifts with height and a little jitter, so
+     * it reads as terrain rather than a flat sheet.
      *
+     * @param {Number} flat Flat-apron radius (world units); the city sits on it.
+     * @param {Number} rise Radius by which the hills reach full height.
+     * @param {Number} size The plane's width/depth (world units).
      * @return {Object} A Three.Mesh, ground-oriented and ready to add.
      */
-    Cyberspace.prototype.buildHills = function() {
+    Cyberspace.prototype.buildHills = function(flat, rise, size) {
         var THREE = this.THREE;
         var seg = 200;
-        var geo = new THREE.PlaneGeometry(GRASS_SIZE, GRASS_SIZE, seg, seg);
+        var geo = new THREE.PlaneGeometry(size, size, seg, seg);
         var pos = geo.attributes.position;
         var lo = new THREE.Color(0x24401f);
         var hi = new THREE.Color(0x4f7b3b);
@@ -820,7 +848,7 @@ define('format_mnemo/vr', [], function() {
         for (var i = 0; i < pos.count; i++) {
             var x = pos.getX(i);
             var y = pos.getY(i);
-            var h = this.hillHeight(x, y);
+            var h = this.hillHeight(x, y, flat, rise);
             pos.setZ(i, h);
             var t = Math.min(1, Math.max(0, h / 10));
             var c = h > 9 ? peak : lo.clone().lerp(hi, t);
@@ -842,26 +870,28 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * The grassland height at a world (x, z): flat (0) out to GRASS_FLAT so the
-     * city sits level, then a smooth blend into rolling hills that ramp up to
-     * GRASS_RISE and beyond, so the hills are a distant backdrop only.
+     * The grassland height at a world (x, z): flat (0) out to the apron radius so
+     * the city sits level, then a smooth blend into rolling hills that ramp up by
+     * the rise radius and beyond, so the hills are a distant backdrop only.
      *
      * @param {Number} x World x (plane local before the ground rotation).
      * @param {Number} z World z (plane local before the ground rotation).
+     * @param {Number} flat Flat-apron radius; height is 0 within it.
+     * @param {Number} rise Radius by which the hills reach full height.
      * @return {Number} The height in world units.
      */
-    Cyberspace.prototype.hillHeight = function(x, z) {
+    Cyberspace.prototype.hillHeight = function(x, z, flat, rise) {
         var r = Math.sqrt(x * x + z * z);
-        if (r <= GRASS_FLAT) {
+        if (r <= flat) {
             return 0;
         }
-        // 0 at the apron edge, 1 by the rise distance: no hard step at the city.
-        var ramp = Math.min(1, (r - GRASS_FLAT) / (GRASS_RISE - GRASS_FLAT));
+        // 0 at the apron edge, 1 by the rise radius: no hard step at the city.
+        var ramp = Math.min(1, (r - flat) / Math.max(1, rise - flat));
         var roll = Math.sin(x * 0.010) * Math.cos(z * 0.012) * 7
             + Math.sin(x * 0.024 + z * 0.018) * 3
             + Math.cos(z * 0.040) * 1.8 + Math.sin(x * 0.055) * 1.1;
-        var rise = Math.max(0, r - GRASS_RISE) * 0.05;
-        return roll * ramp + rise * ramp;
+        var extra = Math.max(0, r - rise) * 0.05;
+        return roll * ramp + extra * ramp;
     };
 
     /**
@@ -871,8 +901,11 @@ define('format_mnemo/vr', [], function() {
      * way the viewer faces. Open cylinders seen from the inside; a shared
      * soft-edged vertical gradient makes each a glowing band rather than a wall,
      * and they are brighter after dark (the smog reads as lit haze at night).
+     *
+     * @param {Number} flat The flat-apron radius; the rings sit just beyond it so
+     *     they stay out past the city whatever the course size.
      */
-    Cyberspace.prototype.buildElectronicMist = function() {
+    Cyberspace.prototype.buildElectronicMist = function(flat) {
         var THREE = this.THREE;
         var canvas = document.createElement('canvas');
         canvas.width = 8;
@@ -886,11 +919,12 @@ define('format_mnemo/vr', [], function() {
         ctx.fillRect(0, 0, 8, 64);
         var tex = new THREE.CanvasTexture(canvas);
         var night = this.day.night;
-        // Radius, centre height, band height, base opacity, tint.
+        var base = flat > 0 ? flat : 320;
+        // Radius (just beyond the city), centre height, band height, opacity, tint.
         var rings = [
-            {r: 430, y: 16, h: 70, o: 0.10, c: 0x2a93b0},
-            {r: 500, y: 30, h: 120, o: 0.08, c: 0x1d6f8c},
-            {r: 560, y: 50, h: 190, o: 0.06, c: 0x163f55}
+            {r: base + 60, y: 16, h: 70, o: 0.10, c: 0x2a93b0},
+            {r: base + 140, y: 30, h: 120, o: 0.08, c: 0x1d6f8c},
+            {r: base + 230, y: 50, h: 190, o: 0.06, c: 0x163f55}
         ];
         for (var i = 0; i < rings.length; i++) {
             var ring = rings[i];
