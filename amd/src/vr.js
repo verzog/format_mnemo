@@ -5440,6 +5440,10 @@ define('format_mnemo/vr', [], function() {
             if (editable) {
                 editable.footprint = footprint;
                 editable.footprintBase = {w: built.w, d: built.d, h: built.h};
+                // The procedural body, so the selection box can wrap it (not the
+                // sign or the invisible full-height click proxy) until a model
+                // attaches and takes over as the box target.
+                editable.body = built.body;
             }
             // Reapply stored brightness once the async model attaches, so the
             // model's own materials are lifted too, for every viewer.
@@ -7227,6 +7231,10 @@ define('format_mnemo/vr', [], function() {
             }
             built.body.visible = false;
             built.group.add(model);
+            // Expose the attached model so the editor's selection box wraps it
+            // (the visible structure) rather than the now-hidden procedural body
+            // or the full-height click proxy.
+            built.group.userData.mnemoModel = model;
             showCredit(self.credits, name);
             // Refresh the wet-street reflection so it shows the model.
             self.scheduleWetCapture();
@@ -10160,6 +10168,34 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * The object a selection box should wrap: the visible structure, not the
+     * whole editable group. For a building the full group also holds the sign and
+     * completion tick (which float above it) and an invisible full-height click
+     * proxy sized to the procedural tower - so boxing the group makes the box
+     * tower over a short imported model dropped into a tall slot. Prefer the
+     * attached, visible model (the procedural body is hidden behind it); else the
+     * procedural body; else the scale node or the group (props, video screens and
+     * scene objects, whose group is already just the visible object).
+     *
+     * @param {Object} editable The editable record.
+     * @return {Object|null} The Object3D to wrap, or null when there is no group.
+     */
+    Cyberspace.prototype.selectionTarget = function(editable) {
+        var group = editable.group;
+        if (!group) {
+            return null;
+        }
+        var model = group.userData && group.userData.mnemoModel;
+        if (model && model.visible) {
+            return model;
+        }
+        if (editable.body) {
+            return editable.body;
+        }
+        return editable.scaleNode || group;
+    };
+
+    /**
      * Select an editable object: show the panel populated with its transform and
      * draw a selection box around it.
      *
@@ -10172,9 +10208,14 @@ define('format_mnemo/vr', [], function() {
             this.selBox = null;
         }
         // Surface editables have no single group (they retile many meshes), so
-        // there is no bounding box to draw around them.
-        if (editable.group) {
-            this.selBox = new this.THREE.BoxHelper(editable.group, this.palette.primary);
+        // there is no bounding box to draw around them. Box the visible structure
+        // (see selectionTarget) rather than the whole group, so the box hugs what
+        // is shown and excludes the sign and completion tick that float above it,
+        // and the invisible full-height click proxy - which otherwise made the
+        // box tower over a short imported model placed in a tall slot.
+        var boxed = this.selectionTarget(editable);
+        if (boxed) {
+            this.selBox = new this.THREE.BoxHelper(boxed, this.palette.primary);
             this.scene.add(this.selBox);
         }
         // Float the object's name above it in the scene so it is unmistakable

@@ -1758,6 +1758,54 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: selectionTarget boxes the model/body, not the sign or tall proxy',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const st = (e) => CS.prototype.selectionTarget.call({}, e);
+            // A building group: a short body, a full-height invisible click proxy
+            // (a tall slot), and a sign that floats high above - mimicking the
+            // real hierarchy that made the box tower over a short imported model.
+            const group = new THREE.Group();
+            const body = new THREE.Group();
+            body.add(new THREE.Mesh(new THREE.BoxGeometry(4, 5, 4), new THREE.MeshBasicMaterial()));
+            const proxy = new THREE.Mesh(new THREE.BoxGeometry(6, 40, 6), new THREE.MeshBasicMaterial());
+            proxy.visible = false;
+            proxy.userData.mnemoProxy = true;
+            const sign = new THREE.Group();
+            sign.position.y = 30;
+            sign.add(new THREE.Mesh(new THREE.PlaneGeometry(3, 1.4), new THREE.MeshBasicMaterial()));
+            group.add(body, proxy, sign);
+            const edBuilding = {group, body, sign, scaleNode: group};
+            // No model yet: the body is the target (not the group/sign/proxy).
+            const noModel = st(edBuilding) === body;
+            // A short model attaches and becomes the visible structure.
+            const model = new THREE.Group();
+            model.add(new THREE.Mesh(new THREE.BoxGeometry(5, 4, 5), new THREE.MeshBasicMaterial()));
+            group.add(model);
+            group.userData.mnemoModel = model;
+            const withModel = st(edBuilding) === model;
+            // A hidden model (failed/!visible) falls back to the body.
+            model.visible = false;
+            const hiddenFallsBack = st(edBuilding) === body;
+            model.visible = true;
+            // A prop/scene object has no body: its group is the target.
+            const propGroup = new THREE.Group();
+            propGroup.add(new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial()));
+            const edProp = {group: propGroup};
+            const prop = st(edProp) === propGroup;
+            // The model box is far shorter than a box over the whole group would
+            // be (which the 40-tall proxy and y=30 sign would have inflated).
+            const modelBox = new THREE.Box3().setFromObject(model);
+            const groupBox = new THREE.Box3().setFromObject(group);
+            const hugsModel = (modelBox.max.y - modelBox.min.y) < 6 &&
+                (groupBox.max.y - groupBox.min.y) > 25;
+            const pass = noModel && withModel && hiddenFallsBack && prop && hugsModel;
+            return {pass, detail: `noModel=${noModel} withModel=${withModel} ` +
+                `hiddenFallsBack=${hiddenFallsBack} prop=${prop} hugsModel=${hugsModel}`};
+        }
+    },
+    {
         name: 'editor: applyTransform counter-rotates the sign to keep it street-facing',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
