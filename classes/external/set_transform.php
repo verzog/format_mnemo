@@ -55,6 +55,7 @@ class set_transform extends external_api {
             'scalex' => new external_value(PARAM_FLOAT, 'Width (x) multiplier', VALUE_DEFAULT, 1.0),
             'scaley' => new external_value(PARAM_FLOAT, 'Height (y) multiplier', VALUE_DEFAULT, 1.0),
             'scalez' => new external_value(PARAM_FLOAT, 'Depth (z) multiplier', VALUE_DEFAULT, 1.0),
+            'brightness' => new external_value(PARAM_FLOAT, 'Brightness multiplier (lightens a dark model)', VALUE_DEFAULT, 1.0),
         ]);
     }
 
@@ -70,6 +71,7 @@ class set_transform extends external_api {
      * @param float $scalex Width (x) multiplier.
      * @param float $scaley Height (y) multiplier.
      * @param float $scalez Depth (z) multiplier.
+     * @param float $brightness Brightness multiplier.
      * @return array{status: bool}
      */
     public static function execute(
@@ -81,7 +83,8 @@ class set_transform extends external_api {
         float $rotation,
         float $scalex = 1.0,
         float $scaley = 1.0,
-        float $scalez = 1.0
+        float $scalez = 1.0,
+        float $brightness = 1.0
     ): array {
         global $DB;
 
@@ -95,6 +98,7 @@ class set_transform extends external_api {
             'offsety' => $offsety,
             'offsetz' => $offsetz,
             'rotation' => $rotation,
+            'brightness' => $brightness,
         ]);
 
         $cm = get_coursemodule_from_id('', $params['cmid'], 0, false, MUST_EXIST);
@@ -104,7 +108,8 @@ class set_transform extends external_api {
 
         // Clamp to sane ranges so a misbehaving client cannot store extreme
         // values that would break the scene, and normalise the rotation.
-        $fields = scene_values::transform($params) + ['timemodified' => time()];
+        $fields = scene_values::transform($params)
+            + ['brightness' => scene_values::brightness($params['brightness']), 'timemodified' => time()];
         $record = $DB->get_record('format_mnemo_building', ['cmid' => $cm->id]);
         if ($record) {
             $DB->update_record('format_mnemo_building', (object)(['id' => $record->id] + $fields));

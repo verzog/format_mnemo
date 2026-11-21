@@ -17,6 +17,7 @@
         <FIELD NAME="offsety" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-y offset from the object's default position."/>
         <FIELD NAME="offsetz" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view world-z offset from the object's default position."/>
         <FIELD NAME="rotation" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="In-view extra rotation about the vertical axis, in degrees."/>
+        <FIELD NAME="brightness" TYPE="number" LENGTH="10" DECIMALS="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="In-view brightness multiplier: brightens a dark model (and dims below 1)."/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="When the override was last set."/>
       </FIELDS>
       <KEYS>

@@ -5429,7 +5429,7 @@ define('format_mnemo/vr', [], function() {
                 built.w * ts * tsx, built.d * ts * tsz,
                 (tf.y || 0) + built.h * ts * tsy, frot);
             // Swap in an attached building model for this activity, if any.
-            self.applyBuildingModel(act, built);
+            var modelp = self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
             // takes the non-uniform width/height/depth so the sign never shears.
             var editable = self.registerEditable(
@@ -5441,6 +5441,9 @@ define('format_mnemo/vr', [], function() {
                 editable.footprint = footprint;
                 editable.footprintBase = {w: built.w, d: built.d, h: built.h};
             }
+            // Reapply stored brightness once the async model attaches, so the
+            // model's own materials are lifted too, for every viewer.
+            self.reapplyModelBrightness(modelp, editable);
         });
     };
 
@@ -9962,9 +9965,9 @@ define('format_mnemo/vr', [], function() {
                 self.retileSurface(self.selected);
             } else {
                 self.applyTransform(self.selected);
-                if (self.selected.emits) {
-                    self.applyBrightness(self.selected);
-                }
+                // Restore the model's light too (brightness is offered on every
+                // model now, not only light-emitting ones).
+                self.applyBrightness(self.selected);
             }
             self.fillEditor(self.selected);
         });
@@ -10283,12 +10286,13 @@ define('format_mnemo/vr', [], function() {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
         });
         // A surface editable offers only its texture-size control; every other
-        // object offers the transform sliders (and brightness only when it emits
-        // light). Toggle each row to match the selected object's kind.
+        // object offers the transform sliders plus a brightness control (which
+        // lifts a dark model out of the night, or dims it). Toggle each row to
+        // match the selected object's kind.
         var surface = editable.kind === 'surface';
         var rows = {scale: !surface, sx: !surface, sy: !surface, sz: !surface,
             x: !surface, y: !surface, z: !surface,
-            rot: !surface, brightness: !surface && editable.emits, texsize: surface};
+            rot: !surface, brightness: !surface, texsize: surface};
         Object.keys(rows).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
@@ -10431,7 +10435,8 @@ define('format_mnemo/vr', [], function() {
             args: {
                 cmid: editable.cmid, scale: t.scale,
                 scalex: one(t.sx), scaley: one(t.sy), scalez: one(t.sz),
-                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
+                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot,
+                brightness: t.brightness !== undefined ? t.brightness : 1
             }
         };
         return new Promise(function(resolve, reject) {
@@ -10974,13 +10979,19 @@ define('format_mnemo/vr', [], function() {
             transform: {
                 scale: t.scale > 0 ? t.scale : 1,
                 sx: t.sx > 0 ? t.sx : 1, sy: t.sy > 0 ? t.sy : 1, sz: t.sz > 0 ? t.sz : 1,
-                x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
+                x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0,
+                // Preserve a stored 0 (fully dark); default to 1 only when absent.
+                brightness: typeof t.brightness === 'number' ? t.brightness : 1
             }
         };
         // Apply any stored transform so it renders from the first frame, for
         // every viewer.
         if (act.transform) {
             this.applyTransform(editable);
+            // A stored brightness lifts (or dims) the model from the first frame.
+            if (editable.transform.brightness !== 1) {
+                this.applyBrightness(editable);
+            }
         }
         // Record the activity (for every viewer, editable or not) with a
         // completion tick, so its state can be refreshed live.
@@ -11534,7 +11545,9 @@ define('format_mnemo/vr', [], function() {
         // configured prop size takes effect.
         if (this.sceneObjects[objkey]) {
             this.applyTransform(editable);
-            if (editable.emits) {
+            // A stored brightness lifts (or dims) any scene object, whether or
+            // not it emits, so a dark prop can be brightened like a building.
+            if (editable.transform.brightness !== 1) {
                 this.applyBrightness(editable);
             }
         } else if (editable.baseScale !== 1) {
@@ -11547,6 +11560,29 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Reapply a building's stored brightness once its attached model has
+     * finished loading. registerEditable lifts the group immediately, but the
+     * model is added asynchronously, so its own materials need a second pass
+     * (applyBrightness is idempotent and captures each base once). A no-op when
+     * there is no model or the brightness is the default.
+     *
+     * @param {Object|null} modelp The model-load promise, or null for no model.
+     * @param {Object} editable The activity's editable record.
+     */
+    Cyberspace.prototype.reapplyModelBrightness = function(modelp, editable) {
+        if (!modelp || !editable || editable.transform.brightness === 1) {
+            return;
+        }
+        var self = this;
+        modelp.then(function() {
+            self.applyBrightness(editable);
+            return null;
+        }).catch(function() {
+            return null;
+        });
+    };
+
+    /**
      * Apply an editable's brightness multiplier to the emissive materials and
      * lights under its group, relative to a base captured on first apply (so it
      * is idempotent and reversible). Basic (unlit neon) materials are scaled by
@@ -11556,6 +11592,11 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.applyBrightness = function(editable) {
         var b = editable.transform.brightness;
+        var self = this;
+        // Old-to-new pairs for every material cloned below, so the live
+        // references other code holds (a sign's frame colour, a video screen's
+        // poster material) can be repointed at the clone that is now rendered.
+        var remap = [];
         // The prop gets its own materials below, so it can no longer be drawn
         // by its model's shared instanced batch: show its own meshes again.
         this.releaseInstance(editable.group);
@@ -11577,33 +11618,143 @@ define('format_mnemo/vr', [], function() {
             if (!o.material) {
                 return;
             }
-            // Props are placed as tpl.clone(), which shares material instances
-            // across every clone. Give this mesh its own material(s) once, so
-            // changing one prop's brightness does not bleed into its siblings.
-            if (!o.userData.mnemoOwnMaterial) {
-                o.material = Array.isArray(o.material) ?
-                    o.material.map(function(m) {
-                        return m.clone();
-                    }) : o.material.clone();
-                o.userData.mnemoOwnMaterial = true;
-            }
+            self.ownBrightnessMaterial(o, remap);
             var mats = Array.isArray(o.material) ? o.material : [o.material];
             for (var i = 0; i < mats.length; i++) {
-                var m = mats[i];
-                if (typeof m.emissiveIntensity === 'number' && m.emissive &&
-                        (m.emissive.r || m.emissive.g || m.emissive.b)) {
-                    if (m.userData.mnemoBaseEmissive === undefined) {
-                        m.userData.mnemoBaseEmissive = m.emissiveIntensity;
-                    }
-                    m.emissiveIntensity = m.userData.mnemoBaseEmissive * b;
-                } else if (m.isMeshBasicMaterial && m.color) {
-                    if (!m.userData.mnemoBaseColor) {
-                        m.userData.mnemoBaseColor = m.color.clone();
-                    }
-                    m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
+                self.applyMaterialBrightness(mats[i], b);
+            }
+        });
+        // Repoint any live material reference (frame colour, screen poster) at
+        // the clone now rendered, so a later recolour or video swap still shows.
+        if (remap.length) {
+            this.remapLiveMaterials(editable, remap);
+        }
+    };
+
+    /**
+     * Give a mesh its own copy of its material(s) once, recording each
+     * old-to-new pair. Props are placed as tpl.clone(), which shares material
+     * instances across every clone, and building models reuse one loaded
+     * template across activities; cloning here keeps one object's brightness
+     * from bleeding into its siblings.
+     *
+     * @param {Object} o The mesh.
+     * @param {Array} remap Collects {from, to} for each material replaced.
+     */
+    Cyberspace.prototype.ownBrightnessMaterial = function(o, remap) {
+        if (o.userData.mnemoOwnMaterial) {
+            return;
+        }
+        if (Array.isArray(o.material)) {
+            o.material = o.material.map(function(m) {
+                var clone = m.clone();
+                remap.push({from: m, to: clone});
+                return clone;
+            });
+        } else {
+            var clone = o.material.clone();
+            remap.push({from: o.material, to: clone});
+            o.material = clone;
+        }
+        o.userData.mnemoOwnMaterial = true;
+    };
+
+    /**
+     * After brightness has cloned materials, repoint the live references that
+     * other code holds (a sign's frame material, a video screen's frame and
+     * poster materials, the activity completion record) at the clone that is
+     * now actually rendered, so a state recolour, hover highlight or video swap
+     * still takes effect.
+     *
+     * @param {Object} editable The editable record.
+     * @param {Array} remap The {from, to} pairs collected while cloning.
+     */
+    Cyberspace.prototype.remapLiveMaterials = function(editable, remap) {
+        var find = function(old) {
+            for (var i = 0; i < remap.length; i++) {
+                if (remap[i].from === old) {
+                    return remap[i].to;
+                }
+            }
+            return null;
+        };
+        // The live references all sit in userData under the editable's group
+        // (the sign frame material, the panel/screen interactive material, the
+        // video poster material), so rewrite any that point at a cloned source.
+        var keys = ['frameMat', 'material', 'screenMat'];
+        editable.group.traverse(function(o) {
+            if (!o.userData) {
+                return;
+            }
+            for (var k = 0; k < keys.length; k++) {
+                var repl = o.userData[keys[k]] && find(o.userData[keys[k]]);
+                if (repl) {
+                    o.userData[keys[k]] = repl;
                 }
             }
         });
+        // The activity record (completion recolour) caches the frame material
+        // directly, so repoint it too.
+        var activity = editable.cmid ? this.activities[editable.cmid] : null;
+        if (activity && activity.frameMat) {
+            var fm = find(activity.frameMat);
+            if (fm) {
+                activity.frameMat = fm;
+            }
+        }
+    };
+
+    /**
+     * Apply a brightness multiplier to one material, capturing its base values
+     * once so it stays reversible. A glowing material scales its emissive
+     * intensity; a lit non-glowing material (a dark building) is lifted by
+     * emitting a share of its own base colour, and dimmed below 1 by scaling the
+     * albedo down; an unlit basic material can only be dimmed by its colour.
+     *
+     * @param {Object} m The material.
+     * @param {Number} b The brightness multiplier.
+     */
+    Cyberspace.prototype.applyMaterialBrightness = function(m, b) {
+        // Classify the material once and remember it: a fill lifts a dark model
+        // by giving it a non-black emissive, so without a locked kind a later
+        // call would mistake it for an "already glowing" material and never
+        // reset it (the brightness would not be reversible).
+        if (m.userData.mnemoBrightKind === undefined) {
+            if (typeof m.emissiveIntensity === 'number' && m.emissive &&
+                    (m.emissive.r || m.emissive.g || m.emissive.b)) {
+                m.userData.mnemoBrightKind = 'glow';
+                m.userData.mnemoBaseEmissive = m.emissiveIntensity;
+            } else if (m.emissive && m.color && !m.isMeshBasicMaterial) {
+                m.userData.mnemoBrightKind = 'fill';
+                m.userData.mnemoFillBase = {
+                    color: m.color.clone(),
+                    emissive: m.emissive.clone(),
+                    intensity: typeof m.emissiveIntensity === 'number' ? m.emissiveIntensity : 1
+                };
+            } else if (m.isMeshBasicMaterial && m.color) {
+                m.userData.mnemoBrightKind = 'dim';
+                m.userData.mnemoBaseColor = m.color.clone();
+            } else {
+                m.userData.mnemoBrightKind = 'none';
+            }
+        }
+        var kind = m.userData.mnemoBrightKind;
+        if (kind === 'glow') {
+            // Scale the emissive intensity from its captured base.
+            m.emissiveIntensity = m.userData.mnemoBaseEmissive * b;
+        } else if (kind === 'fill') {
+            // Lift a dark model by emitting a share of its own base colour (so
+            // it never washes to white); dim it below 1 by scaling the albedo.
+            var fb = m.userData.mnemoFillBase;
+            m.color.copy(fb.color).multiplyScalar(Math.min(1, b));
+            m.emissive.copy(fb.emissive)
+                .add(fb.color.clone().multiplyScalar(Math.max(0, b - 1) * 0.6));
+            // A dark fill often ships with emissiveIntensity 0, which would hide
+            // the lift above; force a visible intensity when brightening past 1.
+            m.emissiveIntensity = b > 1 ? Math.max(fb.intensity, 1) : fb.intensity;
+        } else if (kind === 'dim') {
+            m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
+        }
     };
 
     /**

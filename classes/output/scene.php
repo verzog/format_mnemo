@@ -319,7 +319,7 @@ class scene implements renderable, templatable {
     protected function preload_building_rows(int $courseid): array {
         global $DB;
         $sql = "SELECT b.cmid, b.model, b.scale, b.scalex, b.scaley, b.scalez,
-                       b.offsetx, b.offsety, b.offsetz, b.rotation
+                       b.offsetx, b.offsety, b.offsetz, b.rotation, b.brightness
                   FROM {format_mnemo_building} b
                   JOIN {course_modules} cm ON cm.id = b.cmid
                  WHERE cm.course = :course";
@@ -620,14 +620,15 @@ class scene implements renderable, templatable {
         $y = (float)$row->offsety;
         $z = (float)$row->offsetz;
         $rot = (float)$row->rotation;
+        $brightness = isset($row->brightness) ? (float)$row->brightness : 1.0;
         if (
             $scale == 1.0 && $sx == 1.0 && $sy == 1.0 && $sz == 1.0 &&
-                $x == 0.0 && $y == 0.0 && $z == 0.0 && $rot == 0.0
+                $x == 0.0 && $y == 0.0 && $z == 0.0 && $rot == 0.0 && $brightness == 1.0
         ) {
             return null;
         }
         return ['scale' => $scale, 'sx' => $sx, 'sy' => $sy, 'sz' => $sz,
-            'x' => $x, 'y' => $y, 'z' => $z, 'rot' => $rot];
+            'x' => $x, 'y' => $y, 'z' => $z, 'rot' => $rot, 'brightness' => $brightness];
     }
 
     /**

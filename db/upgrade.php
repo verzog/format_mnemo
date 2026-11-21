@@ -211,5 +211,17 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026101000, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026112100) {
+        // Per-building brightness: a light multiplier set in the editor so a
+        // dark model can be lifted out of the night (and dimmed below 1).
+        $table = new xmldb_table('format_mnemo_building');
+        $field = new xmldb_field('brightness', XMLDB_TYPE_NUMBER, '10, 4', null, XMLDB_NOTNULL, null, '1', 'rotation');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026112100, 'format', 'mnemo');
+    }
+
     return true;
 }
