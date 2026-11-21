@@ -1093,6 +1093,39 @@ const scenarios = [
         }
     },
     {
+        name: 'cyberspace: the grassland is flat under the city and rolls into hills',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const hh = (x, z) => CS.prototype.hillHeight.call({}, x, z);
+            // Flat apron where the city sits, so buildings are never overtaken by
+            // rising ground: zero at the centre and out to the flat radius.
+            const flat = hh(0, 0) === 0 && hh(200, 200) === 0;
+            // Well beyond the apron the ground rolls (sample a ring so a single
+            // zero crossing does not fail it).
+            let maxFar = 0;
+            for (let a = 0; a < 8; a++) {
+                const ang = a / 8 * Math.PI * 2;
+                maxFar = Math.max(maxFar, Math.abs(hh(Math.cos(ang) * 900, Math.sin(ang) * 900)));
+            }
+            const rolls = maxFar > 2;
+            // buildHills makes a displaced, vertex-coloured, ground-oriented mesh.
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            const mesh = self.buildHills();
+            const pos = mesh.geometry.getAttribute('position');
+            let maxZ = 0;
+            for (let i = 0; i < pos.count; i++) {
+                maxZ = Math.max(maxZ, Math.abs(pos.getZ(i)));
+            }
+            const built = !!mesh.geometry.getAttribute('color') &&
+                mesh.material.vertexColors === true && maxZ > 5 &&
+                Math.abs(mesh.rotation.x + Math.PI / 2) < 1e-6;
+            const pass = flat && rolls && built;
+            return {pass, detail: `flat=${flat} rolls=${maxFar.toFixed(1)} maxZ=${maxZ.toFixed(1)}`};
+        }
+    },
+    {
         name: 'editor: anchorSignToModel re-anchors the sign to the model height/face',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

@@ -692,23 +692,31 @@ define('format_mnemo/vr', [], function() {
         this.buildLights();
 
         if (this.config.environment !== 'void') {
-            // Wet asphalt: a lit, slightly reflective ground that catches the
-            // sun by day and the neon by night.
-            var groundMat = new THREE.MeshStandardMaterial({
-                color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
-            });
-            this.makeWet(groundMat, 1400 / 10, 1400 / 10);
-            var ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.y = -0.02;
-            ground.receiveShadow = true;
-            this.scene.add(ground);
+            if (dense) {
+                // Cyberspace: a procedural grassland with distant rolling hills
+                // fading into the smog, instead of the flat wet-asphalt plane -
+                // so the background reads as landscape, not endless paving.
+                this.buildGrassland();
+            } else {
+                // Grid stays a clean, flat data-plane: wet asphalt that catches
+                // the sun by day and the neon by night, with the faint kerb grid.
+                var groundMat = new THREE.MeshStandardMaterial({
+                    color: 0x14161c, roughness: 0.35 + d.day * 0.4, metalness: 0.55
+                });
+                this.makeWet(groundMat, 1400 / 10, 1400 / 10);
+                var ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), groundMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -0.02;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
 
-            // Faint kerb grid; a neon accent, so it fades out in daylight.
-            var grid = new THREE.GridHelper(600, 240, primary, secondary);
-            grid.material.opacity = this.palette.gridGlow ? 0.18 + d.night * 0.3 : 0.05 + d.night * 0.14;
-            grid.material.transparent = true;
-            this.scene.add(grid);
+                // Faint kerb grid; a neon accent, so it fades out in daylight.
+                var grid = new THREE.GridHelper(600, 240, primary, secondary);
+                grid.material.opacity = this.palette.gridGlow
+                    ? 0.18 + d.night * 0.3 : 0.05 + d.night * 0.14;
+                grid.material.transparent = true;
+                this.scene.add(grid);
+            }
 
             // Falling glyph columns (Matrix-style palettes), in Grid as well as
             // Cyberspace.
@@ -763,6 +771,142 @@ define('format_mnemo/vr', [], function() {
         this.buildBeams();
         // Drifting daytime clouds over the city (fade out at night).
         this.buildClouds();
+    };
+
+    // Grassland geometry (world units): the landscape plane's size, the radius of
+    // the flat apron the city sits on before the hills start, and where the hills
+    // ramp to full height. Shared by the terrain and so props/streets are never
+    // overtaken by rising ground.
+    var GRASS_SIZE = 2600;
+    var GRASS_FLAT = 320;
+    var GRASS_RISE = 560;
+
+    /**
+     * The Cyberspace landscape: a procedural grassland that is flat under the
+     * city (so streets and buildings sit level) and rolls into low hills in the
+     * distance, dissolving into the smog fog. Replaces the flat wet-asphalt plane
+     * for Cyberspace only. A soft sky fill keeps the grass readable at night
+     * without washing out the neon, and faint electronic haze bands drift across
+     * the mid-distance so the background reads as vague, slightly-electronic mist.
+     */
+    Cyberspace.prototype.buildGrassland = function() {
+        var THREE = this.THREE;
+        var d = this.day;
+        // A gentle hemisphere fill (teal sky, deep-green ground) so the grass is
+        // lit at night too; kept low so the neon still dominates after dark.
+        var fill = new THREE.HemisphereLight(0x8fb9c9, 0x1f3a22, 0.35 + d.day * 0.5);
+        this.scene.add(fill);
+        this.scene.add(this.buildHills());
+        this.buildElectronicMist();
+    };
+
+    /**
+     * The rolling-hills grass mesh for the Cyberspace landscape: a large plane
+     * displaced by a smooth height field (flat to GRASS_FLAT, then rising), with
+     * per-vertex grass colour that lifts with height and a little jitter, so it
+     * reads as terrain rather than a flat sheet.
+     *
+     * @return {Object} A Three.Mesh, ground-oriented and ready to add.
+     */
+    Cyberspace.prototype.buildHills = function() {
+        var THREE = this.THREE;
+        var seg = 200;
+        var geo = new THREE.PlaneGeometry(GRASS_SIZE, GRASS_SIZE, seg, seg);
+        var pos = geo.attributes.position;
+        var lo = new THREE.Color(0x24401f);
+        var hi = new THREE.Color(0x4f7b3b);
+        var peak = new THREE.Color(0x6a7a52);
+        var col = [];
+        for (var i = 0; i < pos.count; i++) {
+            var x = pos.getX(i);
+            var y = pos.getY(i);
+            var h = this.hillHeight(x, y);
+            pos.setZ(i, h);
+            var t = Math.min(1, Math.max(0, h / 10));
+            var c = h > 9 ? peak : lo.clone().lerp(hi, t);
+            // A cheap hash of the position so the grass is not flatly uniform.
+            var j = 0.9 + (((Math.sin(x * 12.9 + y * 78.2) * 43758.5) % 1) + 1) % 1 * 0.16;
+            col.push(c.r * j, c.g * j, c.b * j);
+        }
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+        geo.computeVertexNormals();
+        var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+            vertexColors: true, roughness: 0.97, metalness: 0
+        }));
+        mesh.rotation.x = -Math.PI / 2;
+        // Just below street level so the roads, sidewalks and plazas (laid on top
+        // with their own small rise and polygon offset) still read over the grass.
+        mesh.position.y = -0.06;
+        mesh.receiveShadow = true;
+        return mesh;
+    };
+
+    /**
+     * The grassland height at a world (x, z): flat (0) out to GRASS_FLAT so the
+     * city sits level, then a smooth blend into rolling hills that ramp up to
+     * GRASS_RISE and beyond, so the hills are a distant backdrop only.
+     *
+     * @param {Number} x World x (plane local before the ground rotation).
+     * @param {Number} z World z (plane local before the ground rotation).
+     * @return {Number} The height in world units.
+     */
+    Cyberspace.prototype.hillHeight = function(x, z) {
+        var r = Math.sqrt(x * x + z * z);
+        if (r <= GRASS_FLAT) {
+            return 0;
+        }
+        // 0 at the apron edge, 1 by the rise distance: no hard step at the city.
+        var ramp = Math.min(1, (r - GRASS_FLAT) / (GRASS_RISE - GRASS_FLAT));
+        var roll = Math.sin(x * 0.010) * Math.cos(z * 0.012) * 7
+            + Math.sin(x * 0.024 + z * 0.018) * 3
+            + Math.cos(z * 0.040) * 1.8 + Math.sin(x * 0.055) * 1.1;
+        var rise = Math.max(0, r - GRASS_RISE) * 0.05;
+        return roll * ramp + rise * ramp;
+    };
+
+    /**
+     * Faint electronic haze: soft additive cyan/teal bands wrapped as horizon
+     * rings around the whole scene, so from anywhere in the city the far
+     * landscape and skyline sit behind a vague, slightly-electronic mist whatever
+     * way the viewer faces. Open cylinders seen from the inside; a shared
+     * soft-edged vertical gradient makes each a glowing band rather than a wall,
+     * and they are brighter after dark (the smog reads as lit haze at night).
+     */
+    Cyberspace.prototype.buildElectronicMist = function() {
+        var THREE = this.THREE;
+        var canvas = document.createElement('canvas');
+        canvas.width = 8;
+        canvas.height = 64;
+        var ctx = canvas.getContext('2d');
+        var g = ctx.createLinearGradient(0, 0, 0, 64);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(0.5, 'rgba(255,255,255,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 8, 64);
+        var tex = new THREE.CanvasTexture(canvas);
+        var night = this.day.night;
+        // Radius, centre height, band height, base opacity, tint.
+        var rings = [
+            {r: 430, y: 16, h: 70, o: 0.10, c: 0x2a93b0},
+            {r: 500, y: 30, h: 120, o: 0.08, c: 0x1d6f8c},
+            {r: 560, y: 50, h: 190, o: 0.06, c: 0x163f55}
+        ];
+        for (var i = 0; i < rings.length; i++) {
+            var ring = rings[i];
+            var geo = new THREE.CylinderGeometry(ring.r, ring.r, ring.h, 48, 1, true);
+            var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                map: tex, transparent: true, opacity: ring.o * (0.6 + night * 0.7),
+                depthWrite: false, side: THREE.BackSide,
+                blending: THREE.AdditiveBlending, color: new THREE.Color(ring.c), fog: false
+            }));
+            mesh.position.y = ring.y;
+            mesh.renderOrder = 5;
+            mesh.raycast = function() {
+                return;
+            };
+            this.scene.add(mesh);
+        }
     };
 
     /**
