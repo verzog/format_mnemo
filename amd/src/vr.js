@@ -7169,6 +7169,31 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Re-anchor an activity sign to an attached building model. The sign is first
+     * placed for the procedural building, so on a short model dropped into a tall
+     * slot it would float above the model. Move it to the model's front face and
+     * re-derive its height the same way makeStructure does (readable near the
+     * street, but never above the model's top), and keep the editor's stored
+     * sign-Z base in step so a later scale keeps the sign on the model's face.
+     *
+     * @param {Object} sign The activity sign group, or null (e.g. a video screen).
+     * @param {Object} mbox The fitted model's local Box3.
+     * @param {Object} editable The activity's editable record, or undefined.
+     */
+    Cyberspace.prototype.anchorSignToModel = function(sign, mbox, editable) {
+        if (!sign || !isFinite(mbox.max.z)) {
+            return;
+        }
+        sign.position.z = mbox.max.z + 0.2;
+        if (isFinite(mbox.max.y)) {
+            sign.position.y = Math.max(0.9, Math.min(mbox.max.y - 1.1, 2.6));
+        }
+        if (editable) {
+            editable.signBaseZ = sign.position.z;
+        }
+    };
+
+    /**
      * Attach an activity's building model, if any: load it, fit it to the
      * procedural building's footprint, hide the procedural mass (keeping the
      * sign), and drop it into the structure. A missing/failed model leaves the
@@ -7231,9 +7256,10 @@ define('format_mnemo/vr', [], function() {
             // and move the retained activity sign clear of its front face, so
             // the sign does not embed in the imported building.
             var mbox = new self.THREE.Box3().setFromObject(model);
-            if (built.sign && isFinite(mbox.max.z)) {
-                built.sign.position.z = mbox.max.z + 0.2;
-            }
+            // Re-anchor the activity sign to the attached model (it was placed
+            // for the procedural building), so it sits on the model's face and
+            // height rather than floating above a short model in a tall slot.
+            self.anchorSignToModel(built.sign, mbox, built.group.userData.mnemoEditable);
             built.body.visible = false;
             built.group.add(model);
             // Expose the attached model so the editor's selection box wraps it
