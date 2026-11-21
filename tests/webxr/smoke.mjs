@@ -1557,9 +1557,32 @@ const scenarios = [
             const afterTex = added.length;
             mk(null, 14).groundPatchAt(3, 5); // No texture: no patch.
             mk(tex, 0).groundPatchAt(3, 5); // Zero size: no patch.
-            const pass = afterTex === 1 && added.length === 1 &&
+            const square = afterTex === 1 && added.length === 1 &&
                 !!added[0].material.map && added[0].material.map.repeat.x === 2;
-            return {pass, detail: `count=${added.length} repeat=${added[0].material.map.repeat.x}`};
+            // Fitted to a building footprint (w along street, d facing it): the
+            // pad hugs the building (w+1.6, d+0.8) and turns with it, rather than
+            // a fixed square sprawling onto the road. gdiv = 7 here.
+            const fit = [];
+            const self2 = {...mk(tex, 40), scene: {add: (o) => fit.push(o)}, groundMeshes: [], surfaces: []};
+            self2.groundPatchAt(0, 0, 4, 6, Math.PI / 2);
+            const g = fit[0].geometry.parameters;
+            const fitted = fit.length === 1 && Math.abs(g.width - 5.6) < 1e-6 &&
+                Math.abs(g.height - 6.8) < 1e-6 && Math.abs(fit[0].rotation.y - Math.PI / 2) < 1e-6;
+            // The configured size caps the apron (here 6.5 < the 6+1.6 it would
+            // otherwise take), so an admin can rein the pad in.
+            const cap = [];
+            const self3 = {...mk(tex, 6.5), scene: {add: (o) => cap.push(o)}, groundMeshes: [], surfaces: []};
+            self3.groundPatchAt(0, 0, 6, 6, 0);
+            const capped = Math.abs(cap[0].geometry.parameters.width - 6.5) < 1e-6;
+            // The street-facing apron stays <= 0.8 even for a building bigger than
+            // the cap, so the pad never crosses onto the road.
+            const big = [];
+            const self4 = {...mk(tex, 10), scene: {add: (o) => big.push(o)}, groundMeshes: [], surfaces: []};
+            self4.groundPatchAt(0, 0, 20, 20, 0);
+            const roadSafe = big[0].geometry.parameters.height <= 20 + 0.8 + 1e-6;
+            const pass = square && fitted && capped && roadSafe;
+            return {pass, detail: `square=${square} fit=${g.width.toFixed(1)}x${g.height.toFixed(1)}` +
+                ` rot=${fit[0].rotation.y.toFixed(2)} capped=${capped} roadSafe=${roadSafe}`};
         }
     },
     {

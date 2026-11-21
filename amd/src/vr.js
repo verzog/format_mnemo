@@ -5715,9 +5715,6 @@ define('format_mnemo/vr', [], function() {
             // Face the street centreline so the signboard reads from the street.
             built.group.lookAt(bx, built.group.position.y, z);
             self.scene.add(built.group);
-            // A textured ground patch (plaza) under the building, then record
-            // its footprint so props avoid it.
-            self.groundPatchAt(bx, bz);
             // Record the footprint at the building's final placement (a stored
             // transform may move/scale it), so the later-scattered props avoid
             // where it actually stands rather than its default slot.
@@ -5731,9 +5728,14 @@ define('format_mnemo/vr', [], function() {
             var tsz = tf.sz > 0 ? tf.sz : 1;
             var tsy = tf.sy > 0 ? tf.sy : 1;
             var frot = built.group.rotation.y + (tf.rot || 0) * Math.PI / 180;
+            var fpw = built.w * ts * tsx;
+            var fpd = built.d * ts * tsz;
+            // A textured ground patch (plaza) fitted to the building's footprint
+            // and turned with it, so it hugs the building instead of sprawling
+            // across the street. Laid at the building's final placement.
+            self.groundPatchAt(bx + (tf.x || 0), bz + (tf.z || 0), fpw, fpd, frot);
             var footprint = self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
-                built.w * ts * tsx, built.d * ts * tsz,
-                (tf.y || 0) + built.h * ts * tsy, frot);
+                fpw, fpd, (tf.y || 0) + built.h * ts * tsy, frot);
             // Swap in an attached building model for this activity, if any.
             var modelp = self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
@@ -5893,35 +5895,54 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Lay a textured ground patch of a fixed size, centred on (cx, cz), when a
-     * site-wide ground texture is configured. Used to give each building a
-     * grounded plaza that reads against the dark floor. No-op without a texture
-     * or when the patch size is zero.
+     * Lay a textured ground patch (plaza) under a building, when a site-wide
+     * ground texture is configured. The patch is fitted to the building's
+     * footprint (width w along the street, depth d facing it) plus a small
+     * apron, and turned with the building (rot), so it hugs the building rather
+     * than sprawling across the street: the street-facing apron is kept smaller
+     * than the gap between the building front and the road, so the pad never
+     * overlaps the street. The configured groundpatchsize caps the pad, so an
+     * admin can still rein it in. With no size given (legacy/tests) it falls
+     * back to a square of the configured size. No-op without a texture or when
+     * the configured size is zero.
      *
      * @param {Number} cx Centre x.
      * @param {Number} cz Centre z.
+     * @param {Number} w Building footprint width (along the street); optional.
+     * @param {Number} d Building footprint depth (facing the street); optional.
+     * @param {Number} rot The building's Y rotation, so the pad turns with it.
      */
-    Cyberspace.prototype.groundPatchAt = function(cx, cz) {
+    Cyberspace.prototype.groundPatchAt = function(cx, cz, w, d, rot) {
         if (!this.groundTexture || this.groundPatch <= 0) {
             return;
         }
         var THREE = this.THREE;
-        var size = this.groundPatch;
+        var cap = this.groundPatch;
+        // Along the street: a wider apron is fine (it only meets the kerb or a
+        // neighbour's pad). Facing the street: keep the apron to 0.4 so the pad
+        // stops short of the road, since the building front already sits 0.4
+        // from the road edge. Fall back to a square of the configured size.
+        var pw = (w > 0) ? Math.max(w, Math.min(cap, w + 1.6)) : cap;
+        var pd = (d > 0) ? Math.max(d, Math.min(cap, d + 0.8)) : cap;
         var gdiv = this.groundScale * this.groundTexMult;
         // Bias the plaza patch further toward the camera than the road strips
         // (which use -1) so it wins over both the road and the base ground and
         // never z-fights them - the same strobe/one-eye-flicker fix as the road.
         var mat = new THREE.MeshStandardMaterial({roughness: 0.8, metalness: 0.2,
             polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2});
-        this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, size / gdiv, size / gdiv));
-        var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
-        patch.rotation.x = -Math.PI / 2;
+        this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, pw / gdiv, pd / gdiv));
+        // Bake the flat orientation into the geometry so the mesh's Y rotation
+        // spins the horizontal pad cleanly around the vertical.
+        var geo = new THREE.PlaneGeometry(pw, pd);
+        geo.rotateX(-Math.PI / 2);
+        var patch = new THREE.Mesh(geo, mat);
+        patch.rotation.y = rot || 0;
         // Just above the road strips (y+0.02) so the plaza reads over them.
         patch.position.set(cx, 0.035, cz);
         patch.receiveShadow = true;
         this.scene.add(patch);
         this.surfaces.push(patch);
-        this.registerSurfaceMesh('ground', patch, size, size);
+        this.registerSurfaceMesh('ground', patch, pw, pd);
     };
 
     /**
