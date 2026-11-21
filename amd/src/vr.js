@@ -9962,9 +9962,9 @@ define('format_mnemo/vr', [], function() {
                 self.retileSurface(self.selected);
             } else {
                 self.applyTransform(self.selected);
-                if (self.selected.emits) {
-                    self.applyBrightness(self.selected);
-                }
+                // Restore the model's light too (brightness is offered on every
+                // model now, not only light-emitting ones).
+                self.applyBrightness(self.selected);
             }
             self.fillEditor(self.selected);
         });
@@ -10283,12 +10283,13 @@ define('format_mnemo/vr', [], function() {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
         });
         // A surface editable offers only its texture-size control; every other
-        // object offers the transform sliders (and brightness only when it emits
-        // light). Toggle each row to match the selected object's kind.
+        // object offers the transform sliders plus a brightness control (which
+        // lifts a dark model out of the night, or dims it). Toggle each row to
+        // match the selected object's kind.
         var surface = editable.kind === 'surface';
         var rows = {scale: !surface, sx: !surface, sy: !surface, sz: !surface,
             x: !surface, y: !surface, z: !surface,
-            rot: !surface, brightness: !surface && editable.emits, texsize: surface};
+            rot: !surface, brightness: !surface, texsize: surface};
         Object.keys(rows).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
@@ -10431,7 +10432,8 @@ define('format_mnemo/vr', [], function() {
             args: {
                 cmid: editable.cmid, scale: t.scale,
                 scalex: one(t.sx), scaley: one(t.sy), scalez: one(t.sz),
-                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot
+                offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot,
+                brightness: t.brightness !== undefined ? t.brightness : 1
             }
         };
         return new Promise(function(resolve, reject) {
@@ -10974,13 +10976,18 @@ define('format_mnemo/vr', [], function() {
             transform: {
                 scale: t.scale > 0 ? t.scale : 1,
                 sx: t.sx > 0 ? t.sx : 1, sy: t.sy > 0 ? t.sy : 1, sz: t.sz > 0 ? t.sz : 1,
-                x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0
+                x: t.x || 0, y: t.y || 0, z: t.z || 0, rot: t.rot || 0,
+                brightness: t.brightness > 0 ? t.brightness : 1
             }
         };
         // Apply any stored transform so it renders from the first frame, for
         // every viewer.
         if (act.transform) {
             this.applyTransform(editable);
+            // A stored brightness lifts (or dims) the model from the first frame.
+            if (editable.transform.brightness !== 1) {
+                this.applyBrightness(editable);
+            }
         }
         // Record the activity (for every viewer, editable or not) with a
         // completion tick, so its state can be refreshed live.
@@ -11556,6 +11563,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.applyBrightness = function(editable) {
         var b = editable.transform.brightness;
+        var self = this;
         // The prop gets its own materials below, so it can no longer be drawn
         // by its model's shared instanced batch: show its own meshes again.
         this.releaseInstance(editable.group);
@@ -11589,21 +11597,60 @@ define('format_mnemo/vr', [], function() {
             }
             var mats = Array.isArray(o.material) ? o.material : [o.material];
             for (var i = 0; i < mats.length; i++) {
-                var m = mats[i];
-                if (typeof m.emissiveIntensity === 'number' && m.emissive &&
-                        (m.emissive.r || m.emissive.g || m.emissive.b)) {
-                    if (m.userData.mnemoBaseEmissive === undefined) {
-                        m.userData.mnemoBaseEmissive = m.emissiveIntensity;
-                    }
-                    m.emissiveIntensity = m.userData.mnemoBaseEmissive * b;
-                } else if (m.isMeshBasicMaterial && m.color) {
-                    if (!m.userData.mnemoBaseColor) {
-                        m.userData.mnemoBaseColor = m.color.clone();
-                    }
-                    m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
-                }
+                self.applyMaterialBrightness(mats[i], b);
             }
         });
+    };
+
+    /**
+     * Apply a brightness multiplier to one material, capturing its base values
+     * once so it stays reversible. A glowing material scales its emissive
+     * intensity; a lit non-glowing material (a dark building) is lifted by
+     * emitting a share of its own base colour, and dimmed below 1 by scaling the
+     * albedo down; an unlit basic material can only be dimmed by its colour.
+     *
+     * @param {Object} m The material.
+     * @param {Number} b The brightness multiplier.
+     */
+    Cyberspace.prototype.applyMaterialBrightness = function(m, b) {
+        // Classify the material once and remember it: a fill lifts a dark model
+        // by giving it a non-black emissive, so without a locked kind a later
+        // call would mistake it for an "already glowing" material and never
+        // reset it (the brightness would not be reversible).
+        if (m.userData.mnemoBrightKind === undefined) {
+            if (typeof m.emissiveIntensity === 'number' && m.emissive &&
+                    (m.emissive.r || m.emissive.g || m.emissive.b)) {
+                m.userData.mnemoBrightKind = 'glow';
+                m.userData.mnemoBaseEmissive = m.emissiveIntensity;
+            } else if (m.emissive && m.color && !m.isMeshBasicMaterial) {
+                m.userData.mnemoBrightKind = 'fill';
+                m.userData.mnemoFillBase = {
+                    color: m.color.clone(),
+                    emissive: m.emissive.clone(),
+                    intensity: typeof m.emissiveIntensity === 'number' ? m.emissiveIntensity : 1
+                };
+            } else if (m.isMeshBasicMaterial && m.color) {
+                m.userData.mnemoBrightKind = 'dim';
+                m.userData.mnemoBaseColor = m.color.clone();
+            } else {
+                m.userData.mnemoBrightKind = 'none';
+            }
+        }
+        var kind = m.userData.mnemoBrightKind;
+        if (kind === 'glow') {
+            // Scale the emissive intensity from its captured base.
+            m.emissiveIntensity = m.userData.mnemoBaseEmissive * b;
+        } else if (kind === 'fill') {
+            // Lift a dark model by emitting a share of its own base colour (so
+            // it never washes to white); dim it below 1 by scaling the albedo.
+            var fb = m.userData.mnemoFillBase;
+            m.color.copy(fb.color).multiplyScalar(Math.min(1, b));
+            m.emissive.copy(fb.emissive)
+                .add(fb.color.clone().multiplyScalar(Math.max(0, b - 1) * 0.6));
+            m.emissiveIntensity = fb.intensity;
+        } else if (kind === 'dim') {
+            m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
+        }
     };
 
     /**

@@ -54,6 +54,33 @@ final class set_transform_test extends \advanced_testcase {
     }
 
     /**
+     * The per-building brightness is stored, clamped to range, and defaults to
+     * 1 when a caller omits it.
+     */
+    public function test_brightness_saved(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course(['format' => 'mnemo']);
+        $page = $this->getDataGenerator()->create_module('page', ['course' => $course->id]);
+        $this->setUser($this->getDataGenerator()->create_and_enrol($course, 'editingteacher'));
+
+        set_transform::execute($page->cmid, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.5);
+        $row = $DB->get_record('format_mnemo_building', ['cmid' => $page->cmid], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(2.5, (float)$row->brightness, 1e-6);
+
+        // An out-of-range value is clamped (0-5).
+        set_transform::execute($page->cmid, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 99.0);
+        $row = $DB->get_record('format_mnemo_building', ['cmid' => $page->cmid], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(5.0, (float)$row->brightness, 1e-6);
+
+        // A caller that omits brightness leaves it at the default of 1.
+        set_transform::execute($page->cmid, 1.0, 0.0, 0.0, 0.0, 0.0);
+        $row = $DB->get_record('format_mnemo_building', ['cmid' => $page->cmid], '*', MUST_EXIST);
+        $this->assertEqualsWithDelta(1.0, (float)$row->brightness, 1e-6);
+    }
+
+    /**
      * The per-axis width/height/depth multipliers are stored (and default to 1
      * when a caller omits them).
      */
