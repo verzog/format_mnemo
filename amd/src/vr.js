@@ -7235,6 +7235,12 @@ define('format_mnemo/vr', [], function() {
             // (the visible structure) rather than the now-hidden procedural body
             // or the full-height click proxy.
             built.group.userData.mnemoModel = model;
+            // If this building is selected right now (a teacher selected it while
+            // the model was still loading), retarget its box from the procedural
+            // body to the model that just took over.
+            if (self.selected && self.selected.group === built.group) {
+                self.rebuildSelectionBox();
+            }
             showCredit(self.credits, name);
             // Refresh the wet-street reflection so it shows the model.
             self.scheduleWetCapture();
@@ -10196,6 +10202,33 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * (Re)draw the selection box around the current selection's visible target.
+     * Used on select, and again when a building's imported model attaches after
+     * selection, so a box bound to the procedural body is retargeted to the model
+     * (otherwise it keeps boxing the now-hidden body). Surface editables have no
+     * single group, so they get no box.
+     */
+    Cyberspace.prototype.rebuildSelectionBox = function() {
+        if (this.selBox) {
+            this.scene.remove(this.selBox);
+            this.selBox = null;
+        }
+        if (!this.selected) {
+            return;
+        }
+        // Box the visible structure (see selectionTarget) rather than the whole
+        // group, so the box hugs what is shown and excludes the sign and
+        // completion tick that float above it, and the invisible full-height
+        // click proxy - which otherwise made the box tower over a short imported
+        // model placed in a tall slot.
+        var boxed = this.selectionTarget(this.selected);
+        if (boxed) {
+            this.selBox = new this.THREE.BoxHelper(boxed, this.palette.primary);
+            this.scene.add(this.selBox);
+        }
+    };
+
+    /**
      * Select an editable object: show the panel populated with its transform and
      * draw a selection box around it.
      *
@@ -10203,21 +10236,7 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.selectEditable = function(editable) {
         this.selected = editable;
-        if (this.selBox) {
-            this.scene.remove(this.selBox);
-            this.selBox = null;
-        }
-        // Surface editables have no single group (they retile many meshes), so
-        // there is no bounding box to draw around them. Box the visible structure
-        // (see selectionTarget) rather than the whole group, so the box hugs what
-        // is shown and excludes the sign and completion tick that float above it,
-        // and the invisible full-height click proxy - which otherwise made the
-        // box tower over a short imported model placed in a tall slot.
-        var boxed = this.selectionTarget(editable);
-        if (boxed) {
-            this.selBox = new this.THREE.BoxHelper(boxed, this.palette.primary);
-            this.scene.add(this.selBox);
-        }
+        this.rebuildSelectionBox();
         // Float the object's name above it in the scene so it is unmistakable
         // which item is being edited (skipped for surfaces, which have no
         // anchor; their name still shows in the panel header).
@@ -11398,6 +11417,12 @@ define('format_mnemo/vr', [], function() {
                 editable.baseRotY + t.rot * Math.PI / 180);
         }
         if (this.selBox) {
+            // The box now tracks a child of the group (the body or model, see
+            // selectionTarget), and the bundled Three.js box calc reads each
+            // node's world matrix without refreshing its ancestors. Force the
+            // group's world matrices up to date first, or the box would lag one
+            // edit behind the move/rotate/scale just applied.
+            g.updateMatrixWorld(true);
             this.selBox.update();
         }
         // Keep the floating name label above the object as it moves/scales.

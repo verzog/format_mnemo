@@ -1806,6 +1806,65 @@ const scenarios = [
         }
     },
     {
+        name: 'editor: applyTransform refreshes world matrices before the box update',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            // The box tracks a child (the body); applyTransform must refresh the
+            // group's world matrices before selBox.update(), or the child's world
+            // position is stale and the box lags one edit behind.
+            const g = new THREE.Group();
+            const body = new THREE.Group();
+            body.add(new THREE.Mesh(new THREE.BoxGeometry(2, 4, 2), new THREE.MeshBasicMaterial()));
+            g.add(body);
+            let seen = null;
+            const self = {
+                THREE, renderer: null,
+                selBox: {update() { seen = body.getWorldPosition(new THREE.Vector3()).x; }}
+            };
+            const ed = {group: g, body, baseX: 10, baseY: 0, baseZ: 0, baseRotY: 0,
+                transform: {scale: 1, sx: 1, sy: 1, sz: 1, x: 5, y: 0, z: 0, rot: 0}};
+            CS.prototype.applyTransform.call(self, ed);
+            // Group moved to x=15; the body's world x must already read 15 when
+            // the box updates (fresh matrices), not the pre-move value.
+            const pass = Math.abs(seen - 15) < 1e-6;
+            return {pass, detail: `bodyWorldXAtUpdate=${seen}`};
+        }
+    },
+    {
+        name: 'editor: rebuildSelectionBox retargets to the model when it attaches',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.scene = {add() {}, remove() {}};
+            self.palette = {primary: 0x00e5ff};
+            const g = new THREE.Group();
+            const body = new THREE.Group();
+            body.add(new THREE.Mesh(new THREE.BoxGeometry(4, 5, 4), new THREE.MeshBasicMaterial()));
+            g.add(body);
+            self.selected = {group: g, body};
+            self.selBox = null;
+            // Selected while the model is still loading: the box tracks the body.
+            self.rebuildSelectionBox();
+            const boxesBody = self.selBox && self.selBox.object === body;
+            // The model attaches and becomes the visible structure.
+            const model = new THREE.Group();
+            model.add(new THREE.Mesh(new THREE.BoxGeometry(5, 4, 5), new THREE.MeshBasicMaterial()));
+            g.add(model);
+            g.userData.mnemoModel = model;
+            self.rebuildSelectionBox();
+            const boxesModel = self.selBox && self.selBox.object === model;
+            // With no selection it clears the box.
+            self.selected = null;
+            self.rebuildSelectionBox();
+            const cleared = self.selBox === null;
+            const pass = boxesBody && boxesModel && cleared;
+            return {pass, detail: `body=${boxesBody} model=${boxesModel} cleared=${cleared}`};
+        }
+    },
+    {
         name: 'editor: applyTransform counter-rotates the sign to keep it street-facing',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
