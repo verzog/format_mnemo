@@ -1056,6 +1056,80 @@ const scenarios = [
         }
     },
     {
+        name: 'video: the support post reaches the ground, not below it',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const obj = {
+                THREE, palette: {primary: 0x00ffff}, interactive: [], videos: [],
+                makePosterTexture: CS.prototype.makePosterTexture,
+                maxAnisotropy: CS.prototype.maxAnisotropy,
+                frameMaterial: CS.prototype.frameMaterial,
+                signFontStack: CS.prototype.signFontStack,
+                makeVideoScreen: CS.prototype.makeVideoScreen
+            };
+            const r = obj.makeVideoScreen(
+                {name: 'Clip', url: 'https://x', state: 'available', video: {kind: 'embed'}});
+            // Mount the screen where buildSideStreet does (centre 3.2 above the
+            // street) and measure the post's world extent.
+            r.group.position.set(0, 3.2, 0);
+            r.group.updateMatrixWorld(true);
+            // The post is the slim 0.16-wide upright; find it and box it.
+            let post = null;
+            r.group.traverse((o) => {
+                if (o.isMesh && o.geometry && o.geometry.parameters &&
+                        o.geometry.parameters.width === 0.16 &&
+                        o.geometry.parameters.height > 0.3) {
+                    post = o;
+                }
+            });
+            const box = post && new THREE.Box3().setFromObject(post);
+            // Its base sits on the ground (y=0), and it no longer plunges far
+            // below (the old fixed post reached about y=-23).
+            const reachesGround = box && Math.abs(box.min.y) < 0.05;
+            const notBelow = box && box.min.y > -0.5;
+            const pass = !!post && reachesGround && notBelow;
+            return {pass, detail: `postMinY=${box && box.min.y.toFixed(3)}`};
+        }
+    },
+    {
+        name: 'editor: anchorSignToModel re-anchors the sign to the model height/face',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const anchor = (sign, mbox, ed) => CS.prototype.anchorSignToModel.call({}, sign, mbox, ed);
+            const mk = () => ({position: {x: 0, y: 2.6, z: 1}});
+            // Short model in a tall slot: the sign drops to sit on the model
+            // (min(top-1.1, 2.6)), on the model's front face, and the editable's
+            // stored sign-Z base follows.
+            const s1 = mk(), ed1 = {signBaseZ: 1};
+            anchor(s1, {max: {y: 2.5, z: 3.0}}, ed1);
+            const shortOk = Math.abs(s1.position.y - 1.4) < 1e-6 &&
+                Math.abs(s1.position.z - 3.2) < 1e-6 && Math.abs(ed1.signBaseZ - 3.2) < 1e-6;
+            // Tall model: the sign stays at the readable street-level cap (2.6).
+            const s2 = mk();
+            anchor(s2, {max: {y: 20, z: 5.0}}, null);
+            const tallOk = Math.abs(s2.position.y - 2.6) < 1e-6 && Math.abs(s2.position.z - 5.2) < 1e-6;
+            // Very short model: clamped to a minimum so the sign never sinks.
+            const s3 = mk();
+            anchor(s3, {max: {y: 1.4, z: 2.0}}, null);
+            const floorOk = Math.abs(s3.position.y - 0.9) < 1e-6;
+            // No sign, or a non-finite box, is a safe no-op.
+            let threw = false;
+            let zUnchanged = false;
+            try {
+                anchor(null, {max: {y: 3, z: 3}}, null);
+                const s4 = mk();
+                anchor(s4, {max: {y: Infinity, z: Infinity}}, null);
+                zUnchanged = s4.position.z === 1;
+            } catch (e) {
+                threw = true;
+            }
+            const pass = shortOk && tallOk && floorOk && !threw && zUnchanged;
+            return {pass, detail: `short=${shortOk} tall=${tallOk} floor=${floorOk} ` +
+                `noop=${!threw && zUnchanged}`};
+        }
+    },
+    {
         name: 'video: a file activity defers the video until activation',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;
@@ -1224,6 +1298,7 @@ const scenarios = [
                 orientClone: CS.prototype.orientClone,
                 modelOrientation: CS.prototype.modelOrientation,
                 fitModel: CS.prototype.fitModel, setShadow: () => {},
+                anchorSignToModel: CS.prototype.anchorSignToModel,
                 buildingModelName: CS.prototype.buildingModelName, buildingSize: () => null,
                 wetMaterials: [], scheduleWetCapture: CS.prototype.scheduleWetCapture,
                 loadModel: () => Promise.resolve(tpl)
