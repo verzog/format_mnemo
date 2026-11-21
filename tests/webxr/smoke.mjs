@@ -1093,6 +1093,29 @@ const scenarios = [
         }
     },
     {
+        name: 'building: the facade material has relief and a subtle env sheen',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            const self = Object.create(CS.prototype);
+            self.THREE = THREE;
+            self.palette = {windows: null};
+            self.matCache = {};
+            self.texCache = {};
+            self.day = {windowEmissive: 1};
+            const style = {body: 0x889099, lit: 0xffcc88, rough: 0.5, metal: 0.2,
+                glow: 0x00e5ff, density: 0.3, wireframe: false};
+            const mat = self.facadeMaterial(style, 10, 20);
+            // Recessed windows need the normal-map relief, and the glass catches a
+            // subtle sky/city sheen from scene.environment (envMapIntensity > 0),
+            // without being a black mirror (metalness stays the style's own low).
+            const pass = !!mat.normalMap && !!mat.roughnessMap &&
+                mat.normalScale.x > 1 && mat.envMapIntensity > 0 && mat.metalness < 0.5;
+            return {pass, detail: `normal=${!!mat.normalMap} nScale=${mat.normalScale.x} ` +
+                `env=${mat.envMapIntensity} metalness=${mat.metalness}`};
+        }
+    },
+    {
         name: 'cyberspace: the grassland apron covers the city and rolls beyond it',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
