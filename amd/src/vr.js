@@ -5468,6 +5468,10 @@ define('format_mnemo/vr', [], function() {
         // laid only after the road-clearance pass below, so a pad sits under the
         // building's final position (not where it was before a road nudge).
         this.buildingPads = [];
+        // Start every distinct building model downloading now, before the
+        // CPU-bound build below, so the fetches overlap that work and each other
+        // rather than starting only as each building is reached.
+        this.prefetchBuildingModels();
 
         // Start at the mouth of the avenue, looking down it (-Z).
         this.player.position.set(0, 0, 12);
@@ -7574,6 +7578,37 @@ define('format_mnemo/vr', [], function() {
         if (editable) {
             editable.signBaseZ = sign.position.z;
         }
+    };
+
+    /**
+     * Warm the model cache for every distinct building model up front, so the
+     * downloads run concurrently with the CPU-bound city build (and each other)
+     * instead of starting only when each building is reached during placement.
+     * loadModel keeps one shared promise per URL, so the per-building
+     * applyBuildingModel below reuses these in-flight loads and nothing is
+     * fetched twice. Best-effort: a model that fails here is simply (re)loaded
+     * and its failure handled where the building is actually placed. The primary
+     * (lite-aware) URL is warmed, matching what applyBuildingModel requests
+     * first; the full-model fallback still loads on demand only if lite fails.
+     */
+    Cyberspace.prototype.prefetchBuildingModels = function() {
+        var self = this;
+        var seen = {};
+        (this.config.sections || []).forEach(function(section) {
+            (section.activities || []).forEach(function(act) {
+                if (act.video) {
+                    return;
+                }
+                var url = self.buildingModelUrl(act);
+                if (!url || seen[url]) {
+                    return;
+                }
+                seen[url] = true;
+                self.loadModel(url).catch(function() {
+                    return null; // Handled at placement; swallow the prefetch rejection.
+                });
+            });
+        });
     };
 
     /**
