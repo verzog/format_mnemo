@@ -464,7 +464,13 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
             return false;
         }
 
-        send_stored_file($file, DAYSECS, 0, $forcedownload, $options);
+        // The URL carries a cache-busting revision (discarded above), so a given
+        // URL's bytes never change: a changed upload bumps the revision and so
+        // the URL. Cache it hard and immutably, so a browser serves these assets
+        // (including large uploaded building models) from its own cache on a
+        // return visit instead of downloading them again.
+        $options['immutable'] = true;
+        send_stored_file($file, 365 * DAYSECS, 0, $forcedownload, $options);
         return true;
     }
 
@@ -505,7 +511,11 @@ function format_mnemo_pluginfile($course, $cm, $context, $filearea, $args, $forc
             return false;
         }
 
-        send_stored_file($file, DAYSECS, 0, $forcedownload, $options);
+        // Keyed by the source zip's content hash, so these bytes are immutable:
+        // a different bundle hashes differently and lands at a different URL.
+        // Cache hard and immutably, as for the revisioned assets above.
+        $options['immutable'] = true;
+        send_stored_file($file, 365 * DAYSECS, 0, $forcedownload, $options);
         return true;
     }
 
