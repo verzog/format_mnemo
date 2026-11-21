@@ -5461,6 +5461,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildCity = function() {
         var sections = this.config.sections || [];
         var self = this;
+        // Building ground-pad requests, collected as each building is placed and
+        // laid only after the road-clearance pass below, so a pad sits under the
+        // building's final position (not where it was before a road nudge).
+        this.buildingPads = [];
 
         // Start at the mouth of the avenue, looking down it (-Z).
         this.player.position.set(0, 0, 12);
@@ -5544,6 +5548,11 @@ define('format_mnemo/vr', [], function() {
                 self.applyTransform(ed);
             }
         });
+
+        // Now every building sits at its final, road-cleared position: lay each
+        // ground pad under it, so a pad can never be stranded over the asphalt by
+        // a road nudge it did not follow.
+        this.layBuildingPads();
 
         // With the streets and their footprints known, work out where the street
         // lamps go (even spacing along the avenue and each side street, plus the
@@ -5715,9 +5724,6 @@ define('format_mnemo/vr', [], function() {
             // Face the street centreline so the signboard reads from the street.
             built.group.lookAt(bx, built.group.position.y, z);
             self.scene.add(built.group);
-            // A textured ground patch (plaza) under the building, then record
-            // its footprint so props avoid it.
-            self.groundPatchAt(bx, bz);
             // Record the footprint at the building's final placement (a stored
             // transform may move/scale it), so the later-scattered props avoid
             // where it actually stands rather than its default slot.
@@ -5731,9 +5737,10 @@ define('format_mnemo/vr', [], function() {
             var tsz = tf.sz > 0 ? tf.sz : 1;
             var tsy = tf.sy > 0 ? tf.sy : 1;
             var frot = built.group.rotation.y + (tf.rot || 0) * Math.PI / 180;
+            var fpw = built.w * ts * tsx;
+            var fpd = built.d * ts * tsz;
             var footprint = self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
-                built.w * ts * tsx, built.d * ts * tsz,
-                (tf.y || 0) + built.h * ts * tsy, frot);
+                fpw, fpd, (tf.y || 0) + built.h * ts * tsy, frot);
             // Swap in an attached building model for this activity, if any.
             var modelp = self.applyBuildingModel(act, built);
             // Pass the signboard (kept street-facing) and the scale node, which
@@ -5751,10 +5758,29 @@ define('format_mnemo/vr', [], function() {
                 // attaches and takes over as the box target.
                 editable.body = built.body;
             }
+            // Queue the ground patch (plaza) fitted to this building's footprint;
+            // it is laid after buildCity's road-clearance pass so it sits under
+            // the building's final position, even if a road nudge moved it.
+            self.buildingPads.push({editable: editable, w: fpw, d: fpd});
             // Reapply stored brightness once the async model attaches, so the
             // model's own materials are lifted too, for every viewer.
             self.reapplyModelBrightness(modelp, editable);
         });
+    };
+
+    /**
+     * Lay each queued building ground pad at its building's final (road-cleared)
+     * centre and rotation, then clear the queue. Called once after buildCity's
+     * road-clearance pass, so a pad that would have spilled onto the asphalt
+     * follows the building out of the road instead of being left behind.
+     */
+    Cyberspace.prototype.layBuildingPads = function() {
+        var self = this;
+        (this.buildingPads || []).forEach(function(p) {
+            var g = p.editable.group;
+            self.groundPatchAt(g.position.x, g.position.z, p.w, p.d, g.rotation.y);
+        });
+        this.buildingPads = [];
     };
 
     /**
@@ -5893,35 +5919,54 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
-     * Lay a textured ground patch of a fixed size, centred on (cx, cz), when a
-     * site-wide ground texture is configured. Used to give each building a
-     * grounded plaza that reads against the dark floor. No-op without a texture
-     * or when the patch size is zero.
+     * Lay a textured ground patch (plaza) under a building, when a site-wide
+     * ground texture is configured. The patch is fitted to the building's
+     * footprint (width w along the street, depth d facing it) plus a small
+     * apron, and turned with the building (rot), so it hugs the building rather
+     * than sprawling across the street: the street-facing apron is kept smaller
+     * than the gap between the building front and the road, so the pad never
+     * overlaps the street. The configured groundpatchsize caps the pad, so an
+     * admin can still rein it in. With no size given (legacy/tests) it falls
+     * back to a square of the configured size. No-op without a texture or when
+     * the configured size is zero.
      *
      * @param {Number} cx Centre x.
      * @param {Number} cz Centre z.
+     * @param {Number} w Building footprint width (along the street); optional.
+     * @param {Number} d Building footprint depth (facing the street); optional.
+     * @param {Number} rot The building's Y rotation, so the pad turns with it.
      */
-    Cyberspace.prototype.groundPatchAt = function(cx, cz) {
+    Cyberspace.prototype.groundPatchAt = function(cx, cz, w, d, rot) {
         if (!this.groundTexture || this.groundPatch <= 0) {
             return;
         }
         var THREE = this.THREE;
-        var size = this.groundPatch;
+        var cap = this.groundPatch;
+        // Along the street: a wider apron is fine (it only meets the kerb or a
+        // neighbour's pad). Facing the street: keep the apron to 0.4 so the pad
+        // stops short of the road, since the building front already sits 0.4
+        // from the road edge. Fall back to a square of the configured size.
+        var pw = (w > 0) ? Math.max(w, Math.min(cap, w + 1.6)) : cap;
+        var pd = (d > 0) ? Math.max(d, Math.min(cap, d + 0.8)) : cap;
         var gdiv = this.groundScale * this.groundTexMult;
         // Bias the plaza patch further toward the camera than the road strips
         // (which use -1) so it wins over both the road and the base ground and
         // never z-fights them - the same strobe/one-eye-flicker fix as the road.
         var mat = new THREE.MeshStandardMaterial({roughness: 0.8, metalness: 0.2,
             polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2});
-        this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, size / gdiv, size / gdiv));
-        var patch = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
-        patch.rotation.x = -Math.PI / 2;
+        this.showSurfaceTexture(mat, this.tiledClone(this.groundTexture, pw / gdiv, pd / gdiv));
+        // Bake the flat orientation into the geometry so the mesh's Y rotation
+        // spins the horizontal pad cleanly around the vertical.
+        var geo = new THREE.PlaneGeometry(pw, pd);
+        geo.rotateX(-Math.PI / 2);
+        var patch = new THREE.Mesh(geo, mat);
+        patch.rotation.y = rot || 0;
         // Just above the road strips (y+0.02) so the plaza reads over them.
         patch.position.set(cx, 0.035, cz);
         patch.receiveShadow = true;
         this.scene.add(patch);
         this.surfaces.push(patch);
-        this.registerSurfaceMesh('ground', patch, size, size);
+        this.registerSurfaceMesh('ground', patch, pw, pd);
     };
 
     /**
