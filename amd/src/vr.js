@@ -527,6 +527,10 @@ define('format_mnemo/vr', [], function() {
         this.buildEnvironment();
         this.buildRaycaster();
         this.buildCity();
+        // A sky-only environment map first, so the buildings' metallic glass
+        // always has the sky to reflect (even in the Void, which has no wet
+        // capture); the city capture below then replaces it where it runs.
+        this.applySkyEnvironment();
         // Wet palettes: reflect the finished city in the puddles.
         this.applyWetReflections();
         // Original glTF props (lamps, kiosks, flying traffic); loads
@@ -1731,6 +1735,18 @@ define('format_mnemo/vr', [], function() {
                 g.closePath();
                 g.fill();
 
+                // Recess shadow: the frame above and to the sides casts into the
+                // set-back glass, so the top (and a sliver of each side) of the
+                // pane darkens - the main cue that the window is recessed.
+                var aog = g.createLinearGradient(wx, wy, wx, wy + wh * 0.5);
+                aog.addColorStop(0, 'rgba(0,0,0,0.55)');
+                aog.addColorStop(1, 'rgba(0,0,0,0)');
+                g.fillStyle = aog;
+                g.fillRect(wx, wy, ww, wh * 0.5);
+                g.fillStyle = 'rgba(0,0,0,0.32)';
+                g.fillRect(wx, wy, 2.5, wh);
+                g.fillRect(wx + ww - 2.5, wy, 2.5, wh);
+
                 // Mullion frame border around the glass (raised on the height map).
                 g.strokeStyle = '#' + mullion.getHexString();
                 g.lineWidth = 3;
@@ -1739,8 +1755,9 @@ define('format_mnemo/vr', [], function() {
                 b.lineWidth = 3;
                 b.strokeRect(wx - 1.5, wy - 1.5, ww + 3, wh + 3);
 
-                // Windows sit deeper (height) and read as glossy glass (rough).
-                b.fillStyle = 'rgb(70,70,70)';
+                // Windows sit well below the frame on the height map, so the
+                // normal map reads them as a real recess behind the mullions.
+                b.fillStyle = 'rgb(30,30,30)';
                 b.fillRect(wx, wy, ww, wh);
                 r.fillStyle = 'rgb(45,45,45)';
                 r.fillRect(wx, wy, ww, wh);
@@ -1840,7 +1857,7 @@ define('format_mnemo/vr', [], function() {
 
         var out = {
             map: this.canvasTexture(g.canvas, true),
-            normal: this.canvasTexture(this.heightToNormal(b.canvas, 2.2), false),
+            normal: this.canvasTexture(this.heightToNormal(b.canvas, 3.2), false),
             rough: this.canvasTexture(r.canvas, false),
             emissive: this.canvasTexture(e.canvas, true)
         };
@@ -1978,10 +1995,14 @@ define('format_mnemo/vr', [], function() {
             color: 0xffffff,
             map: map,
             normalMap: normal,
-            normalScale: new THREE.Vector2(0.8, 0.8),
+            normalScale: new THREE.Vector2(1.15, 1.15),
             roughnessMap: rough,
             roughness: 1,
             metalness: style.metal,
+            // The glass panes are low-roughness in the map, so with the scene
+            // environment set they catch a subtle sky/city sheen (a dielectric
+            // reflection) without turning into black mirrors.
+            envMapIntensity: 0.5,
             // Mixed window colours live in the emissive map itself.
             emissive: new THREE.Color(mix ? 0xffffff : style.lit),
             emissiveMap: emissive,
@@ -2555,10 +2576,49 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Bake a cheap sky-gradient environment map (horizon to zenith, for the
+     * current time) and set it as the scene environment, so metallic surfaces -
+     * chiefly the buildings' glass panes - always have the sky to reflect. The
+     * city wet-capture replaces it with a richer reflection where it runs.
+     */
+    Cyberspace.prototype.applySkyEnvironment = function() {
+        if (!this.renderer) {
+            return;
+        }
+        var THREE = this.THREE;
+        var d = this.day;
+        // The PMREM generator sizes its cube faces from the equirectangular
+        // width (roughly width / 4), so the canvas must be wide enough to give
+        // valid faces and finite blur weights - 4 px wide collapses to 1x1 faces
+        // and a broken env. The gradient is horizontally uniform, so the width is
+        // only there to satisfy the generator.
+        var canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        var ctx = canvas.getContext('2d');
+        var grd = ctx.createLinearGradient(0, 128, 0, 0);
+        grd.addColorStop(0, '#' + d.horizon.getHexString());
+        grd.addColorStop(1, '#' + d.skyTop.getHexString());
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, 256, 128);
+        var tex = new THREE.CanvasTexture(canvas);
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        var pmrem = new THREE.PMREMGenerator(this.renderer);
+        var env = pmrem.fromEquirectangular(tex);
+        pmrem.dispose();
+        tex.dispose();
+        this.scene.environment = env.texture;
+    };
+
+    /**
      * Give the wet surfaces a reflection of the city: render the finished
      * scene once into a prefiltered environment map from just above the street
-     * and set it on every wet material. One capture at load, so the per-frame
-     * cost is only the material's environment lookup (cheap enough for VR).
+     * and set it on every wet material (and the scene environment).
+     *
+     * @return {void}
      */
     Cyberspace.prototype.applyWetReflections = function() {
         if (!this.wetMaterials.length || !this.renderer) {
@@ -2591,6 +2651,10 @@ define('format_mnemo/vr', [], function() {
             this.wetMaterials[i].envMapIntensity = 1;
             this.wetMaterials[i].needsUpdate = true;
         }
+        // Also light the whole scene with this capture, so the buildings' glass
+        // panes (metallic in the facade map) mirror the city and sky rather than
+        // reading as flat dark panels - the reflective curtain-wall look.
+        this.scene.environment = target.texture;
     };
 
     /**
@@ -7186,6 +7250,40 @@ define('format_mnemo/vr', [], function() {
             rust.position.y = h / 2;
             body.add(rust);
         }
+
+        // A glazed ground-floor lobby: a brighter, reflective band with a warm
+        // interior glow, so the tower meets the street like a real office block.
+        var lobbyH = Math.min(2.4, h * 0.16);
+        var lobby = new THREE.Mesh(
+            new THREE.BoxGeometry(w * 1.006, lobbyH, d * 1.006),
+            new THREE.MeshStandardMaterial({
+                color: 0x0b0f15,
+                emissive: new THREE.Color(0xffdfa8),
+                emissiveIntensity: 0.3 + this.day.night * 0.6,
+                roughness: 0.25,
+                metalness: 0.15,
+                envMapIntensity: 0.7
+            })
+        );
+        lobby.position.y = lobbyH * 0.5 + 0.02;
+        body.add(lobby);
+
+        // A glowing crown band capping the tower, tinted to the palette so it
+        // reads as a neon corporate crest after dark.
+        var crownH = Math.min(0.9, h * 0.05);
+        var crownCol = this.palette.neonEdges ? this.accentColour() : style.glow;
+        var crown = new THREE.Mesh(
+            new THREE.BoxGeometry(w * 1.016, crownH, d * 1.016),
+            new THREE.MeshStandardMaterial({
+                color: 0x0a0d12,
+                emissive: new THREE.Color(crownCol),
+                emissiveIntensity: 0.55 + this.day.neon * 0.9,
+                roughness: 0.4,
+                metalness: 0.3
+            })
+        );
+        crown.position.y = h - crownH * 0.5 - 0.08;
+        body.add(crown);
 
         // Style-specific silhouette and roofline.
         this.dressRoof(body, style, w, d, h);
