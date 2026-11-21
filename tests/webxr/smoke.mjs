@@ -1586,6 +1586,40 @@ const scenarios = [
         }
     },
     {
+        name: 'ground: building pads are laid at the final (road-cleared) position',
+        fn: () => {
+            const THREE = window.__mnemoTest.THREE;
+            const CS = window.__mnemoModule._Cyberspace;
+            const tex = new THREE.Texture();
+            const added = [];
+            // A building whose group ended up moved (as the road-clearance pass
+            // would) and turned, after its pad was queued at the old slot.
+            const g = new THREE.Group();
+            g.position.set(10, 0, -27);
+            g.rotation.y = Math.PI / 2;
+            const self = {
+                THREE, groundTexture: tex, groundPatch: 40, groundScale: 7, groundTexMult: 1,
+                config: {canedit: false}, groundMeshes: [], surfaces: [],
+                buildingPads: [{editable: {group: g}, w: 4, d: 6}],
+                tiledClone: CS.prototype.tiledClone,
+                showSurfaceTexture: CS.prototype.showSurfaceTexture,
+                registerSurfaceMesh: CS.prototype.registerSurfaceMesh,
+                surfaceMeshList: CS.prototype.surfaceMeshList,
+                groundPatchAt: CS.prototype.groundPatchAt,
+                layBuildingPads: CS.prototype.layBuildingPads,
+                scene: {add: (o) => added.push(o)}
+            };
+            self.layBuildingPads();
+            const pad = added[0];
+            // Laid under the moved building, turned with it, and the queue drained.
+            const pass = added.length === 1 &&
+                Math.abs(pad.position.x - 10) < 1e-6 && Math.abs(pad.position.z + 27) < 1e-6 &&
+                Math.abs(pad.rotation.y - Math.PI / 2) < 1e-6 && self.buildingPads.length === 0;
+            return {pass, detail: `at=${pad.position.x},${pad.position.z} ` +
+                `rot=${pad.rotation.y.toFixed(2)} drained=${self.buildingPads.length === 0}`};
+        }
+    },
+    {
         name: 'editor: applyTransform moves, rotates and scales relative to base',
         fn: () => {
             const THREE = window.__mnemoTest.THREE;

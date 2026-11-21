@@ -5461,6 +5461,10 @@ define('format_mnemo/vr', [], function() {
     Cyberspace.prototype.buildCity = function() {
         var sections = this.config.sections || [];
         var self = this;
+        // Building ground-pad requests, collected as each building is placed and
+        // laid only after the road-clearance pass below, so a pad sits under the
+        // building's final position (not where it was before a road nudge).
+        this.buildingPads = [];
 
         // Start at the mouth of the avenue, looking down it (-Z).
         this.player.position.set(0, 0, 12);
@@ -5544,6 +5548,11 @@ define('format_mnemo/vr', [], function() {
                 self.applyTransform(ed);
             }
         });
+
+        // Now every building sits at its final, road-cleared position: lay each
+        // ground pad under it, so a pad can never be stranded over the asphalt by
+        // a road nudge it did not follow.
+        this.layBuildingPads();
 
         // With the streets and their footprints known, work out where the street
         // lamps go (even spacing along the avenue and each side street, plus the
@@ -5730,10 +5739,6 @@ define('format_mnemo/vr', [], function() {
             var frot = built.group.rotation.y + (tf.rot || 0) * Math.PI / 180;
             var fpw = built.w * ts * tsx;
             var fpd = built.d * ts * tsz;
-            // A textured ground patch (plaza) fitted to the building's footprint
-            // and turned with it, so it hugs the building instead of sprawling
-            // across the street. Laid at the building's final placement.
-            self.groundPatchAt(bx + (tf.x || 0), bz + (tf.z || 0), fpw, fpd, frot);
             var footprint = self.recordFootprint(bx + (tf.x || 0), bz + (tf.z || 0),
                 fpw, fpd, (tf.y || 0) + built.h * ts * tsy, frot);
             // Swap in an attached building model for this activity, if any.
@@ -5753,10 +5758,29 @@ define('format_mnemo/vr', [], function() {
                 // attaches and takes over as the box target.
                 editable.body = built.body;
             }
+            // Queue the ground patch (plaza) fitted to this building's footprint;
+            // it is laid after buildCity's road-clearance pass so it sits under
+            // the building's final position, even if a road nudge moved it.
+            self.buildingPads.push({editable: editable, w: fpw, d: fpd});
             // Reapply stored brightness once the async model attaches, so the
             // model's own materials are lifted too, for every viewer.
             self.reapplyModelBrightness(modelp, editable);
         });
+    };
+
+    /**
+     * Lay each queued building ground pad at its building's final (road-cleared)
+     * centre and rotation, then clear the queue. Called once after buildCity's
+     * road-clearance pass, so a pad that would have spilled onto the asphalt
+     * follows the building out of the road instead of being left behind.
+     */
+    Cyberspace.prototype.layBuildingPads = function() {
+        var self = this;
+        (this.buildingPads || []).forEach(function(p) {
+            var g = p.editable.group;
+            self.groundPatchAt(g.position.x, g.position.z, p.w, p.d, g.rotation.y);
+        });
+        this.buildingPads = [];
     };
 
     /**
