@@ -821,19 +821,68 @@ define('format_mnemo/vr', [], function() {
         var flat = this.cityRadius();
         var rise = flat + 220;
         var size = Math.max(2600, (rise + 420) * 2);
-        // A gentle hemisphere fill (teal sky, deep-green ground) so the grass is
-        // lit at night too; kept low so the neon still dominates after dark.
-        var fill = new THREE.HemisphereLight(0x8fb9c9, 0x1f3a22, 0.35 + d.day * 0.5);
+        // A hemisphere fill (teal sky, green ground) so the grass reads at night
+        // too, with a floor so it is never near-black; kept modest so the neon
+        // still dominates after dark.
+        var fill = new THREE.HemisphereLight(0x9fc6d4, 0x2c4a24, 0.5 + d.day * 0.45);
         this.scene.add(fill);
         this.scene.add(this.buildHills(flat, rise, size));
         this.buildElectronicMist(flat);
     };
 
     /**
+     * A tileable procedural grass texture: a mottled green base with scattered
+     * lighter/darker patches and a fine blade speckle, so the terrain reads as
+     * grass close up rather than a flat colour. Cached.
+     *
+     * @return {Object} A Three.CanvasTexture (RepeatWrapping).
+     */
+    Cyberspace.prototype.grassTexture = function() {
+        if (this.texCache.grass) {
+            return this.texCache.grass;
+        }
+        var THREE = this.THREE;
+        var size = 256;
+        var ctx = this.newCanvasCtx(size);
+        ctx.fillStyle = '#35512a';
+        ctx.fillRect(0, 0, size, size);
+        var greens = ['#2c4422', '#3f5f30', '#4a6d36', '#273c1e', '#436733'];
+        var i;
+        for (i = 0; i < 900; i++) {
+            ctx.globalAlpha = 0.1 + Math.random() * 0.18;
+            ctx.fillStyle = greens[Math.floor(Math.random() * greens.length)];
+            ctx.beginPath();
+            ctx.arc(Math.random() * size, Math.random() * size, 2 + Math.random() * 9, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 1;
+        for (i = 0; i < 2600; i++) {
+            ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(66,98,48,0.5)' : 'rgba(30,48,24,0.5)';
+            var sx = Math.random() * size;
+            var sy = Math.random() * size;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + (Math.random() - 0.5) * 3, sy - 2 - Math.random() * 3);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        var tex = new THREE.CanvasTexture(ctx.canvas);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        if (tex.colorSpace !== undefined) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+        }
+        this.texCache.grass = tex;
+        return tex;
+    };
+
+    /**
      * The rolling-hills grass mesh for the Cyberspace landscape: a large plane
      * displaced by a smooth height field (flat to the apron radius, then rising),
-     * with per-vertex grass colour that lifts with height and a little jitter, so
-     * it reads as terrain rather than a flat sheet.
+     * clad in a procedural grass texture and modulated by per-vertex brightness
+     * (large-scale light/dark meadow patches, lifting on the peaks), so it reads
+     * as living terrain rather than a flat sheet.
      *
      * @param {Number} flat Flat-apron radius (world units); the city sits on it.
      * @param {Number} rise Radius by which the hills reach full height.
@@ -845,25 +894,35 @@ define('format_mnemo/vr', [], function() {
         var seg = 200;
         var geo = new THREE.PlaneGeometry(size, size, seg, seg);
         var pos = geo.attributes.position;
-        var lo = new THREE.Color(0x24401f);
-        var hi = new THREE.Color(0x4f7b3b);
-        var peak = new THREE.Color(0x6a7a52);
         var col = [];
         for (var i = 0; i < pos.count; i++) {
             var x = pos.getX(i);
             var y = pos.getY(i);
             var h = this.hillHeight(x, y, flat, rise);
             pos.setZ(i, h);
-            var t = Math.min(1, Math.max(0, h / 10));
-            var c = h > 9 ? peak : lo.clone().lerp(hi, t);
-            // A cheap hash of the position so the grass is not flatly uniform.
-            var j = 0.9 + (((Math.sin(x * 12.9 + y * 78.2) * 43758.5) % 1) + 1) % 1 * 0.16;
-            col.push(c.r * j, c.g * j, c.b * j);
+            // The green comes from the tiled grass map; the vertex colour is a
+            // greyscale brightness that multiplies it: large-scale smooth meadow
+            // patches (light and dark), a lift towards the sunlit peaks, and a
+            // little fine jitter so no two blades of ground read identically.
+            var patch = Math.sin(x * 0.018) * Math.cos(y * 0.021)
+                + Math.sin(x * 0.047 + y * 0.033) * 0.5;
+            var b = 0.82 + patch * 0.12 + Math.min(0.22, h / 10 * 0.22);
+            var j = (((Math.sin(x * 12.9 + y * 78.2) * 43758.5) % 1) + 1) % 1 * 0.1 - 0.05;
+            b = Math.min(1.15, Math.max(0.6, b + j));
+            col.push(b, b, b);
         }
         geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
         geo.computeVertexNormals();
+        var grass = this.grassTexture();
+        grass.repeat.set(size / 12, size / 12);
         var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-            vertexColors: true, roughness: 0.97, metalness: 0
+            map: grass,
+            vertexColors: true,
+            roughness: 0.97,
+            metalness: 0,
+            // A faint green self-glow so the meadow does not go black at night.
+            emissive: new THREE.Color(0x0c1a0a),
+            emissiveIntensity: 1
         }));
         mesh.rotation.x = -Math.PI / 2;
         // Just below street level so the roads, sidewalks and plazas (laid on top

@@ -1143,18 +1143,26 @@ const scenarios = [
             // buildHills makes a displaced, vertex-coloured, ground-oriented mesh.
             const self = Object.create(CS.prototype);
             self.THREE = THREE;
+            self.texCache = {};
             const mesh = self.buildHills(320, 560, 2600);
             const pos = mesh.geometry.getAttribute('position');
             let maxZ = 0;
             for (let i = 0; i < pos.count; i++) {
                 maxZ = Math.max(maxZ, Math.abs(pos.getZ(i)));
             }
-            const built = !!mesh.geometry.getAttribute('color') &&
-                mesh.material.vertexColors === true && maxZ > 5 &&
-                Math.abs(mesh.rotation.x + Math.PI / 2) < 1e-6;
+            // Clad in a tiled grass map, with a faint emissive so night grass is
+            // not black; the vertex colour is a greyscale brightness (not green).
+            const textured = !!mesh.material.map && mesh.material.map.repeat.x > 1 &&
+                mesh.material.emissive.getHex() > 0;
+            const col = mesh.geometry.getAttribute('color');
+            const grey = Math.abs(col.getX(0) - col.getY(0)) < 1e-6 &&
+                Math.abs(col.getY(0) - col.getZ(0)) < 1e-6;
+            const built = !!col && mesh.material.vertexColors === true && maxZ > 5 &&
+                Math.abs(mesh.rotation.x + Math.PI / 2) < 1e-6 && textured && grey;
             const pass = flatOk && rolls && scales && farStreetLevel && built;
             return {pass, detail: `flat=${flatOk} rolls=${maxFar.toFixed(1)} ` +
-                `scales=${scales}(${small.toFixed(0)}->${large.toFixed(0)}) far=${farStreetLevel} maxZ=${maxZ.toFixed(1)}`};
+                `scales=${scales}(${small.toFixed(0)}->${large.toFixed(0)}) far=${farStreetLevel} ` +
+                `maxZ=${maxZ.toFixed(1)} map=${textured} grey=${grey}`};
         }
     },
     {
