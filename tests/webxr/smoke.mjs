@@ -6390,6 +6390,40 @@ const scenarios = [
         }
     },
     {
+        name: 'preview: prefetchBuildingModels warms each distinct model once, skipping video',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const loaded = [];
+            const self = {
+                loadModel: (u) => { loaded.push(u); return Promise.resolve(); },
+                // Stand-in resolver: a per-activity building name, else the module
+                // default; a video activity resolves to no model.
+                buildingModelUrl: function(act) {
+                    return act.video ? null : '/m/' + (act.building || act.modname) + '.glb';
+                },
+                config: {sections: [
+                    {activities: [
+                        {modname: 'quiz'},
+                        {modname: 'forum'},
+                        {modname: 'quiz'}, // Duplicate type -> same URL, warmed once.
+                        {modname: 'page', video: {kind: 'embed'}} // Video -> skipped.
+                    ]},
+                    {activities: [
+                        {modname: 'wiki', building: 'tower'}, // Per-activity override.
+                        {modname: 'forum'} // Same URL as section 1's forum.
+                    ]}
+                ]}
+            };
+            CS.prototype.prefetchBuildingModels.call(self);
+            const expected = ['/m/quiz.glb', '/m/forum.glb', '/m/tower.glb'];
+            const unique = loaded.length === new Set(loaded).size;
+            const pass = unique && loaded.length === 3 &&
+                expected.every((u) => loaded.includes(u)) &&
+                !loaded.some((u) => u.indexOf('page') !== -1);
+            return {pass, detail: `warmed=${loaded.join(',')} unique=${unique}`};
+        }
+    },
+    {
         name: 'preview: model loader uses the addon loader when present',
         fn: async () => {
             const THREE = window.__mnemoTest.THREE;
