@@ -165,17 +165,18 @@ define('format_mnemo/vr', [], function() {
         }
     };
 
-    // Which architectural style an activity's module speaks in. Assessment and
-    // "serious" tools read as cold corporate towers; social/communication tools
-    // as bright plastic kitsch shops; content/reference as elite neo-kitsch
-    // pavilions; anything else falls to survival-era entropism.
-    var MOD_STYLE = {
-        quiz: 'neomilitarism', assign: 'neomilitarism', workshop: 'neomilitarism',
-        lesson: 'neomilitarism', scorm: 'neomilitarism', bigbluebuttonbn: 'neomilitarism',
-        forum: 'kitsch', chat: 'kitsch', choice: 'kitsch', feedback: 'kitsch',
-        wiki: 'kitsch', glossary: 'kitsch', data: 'kitsch', survey: 'kitsch',
-        page: 'neokitsch', book: 'neokitsch', resource: 'neokitsch', url: 'neokitsch',
-        folder: 'neokitsch', imscp: 'neokitsch', h5pactivity: 'neokitsch', lti: 'neokitsch'
+    // A single uniform procedural building: every generated building uses this
+    // one recipe, so the city reads as a consistent set rather than a jumble of
+    // the four movements above at random heights. One square footprint, one
+    // fixed height (a mid-rise; floorHeight snaps 12 to a clean 7 storeys), one
+    // colour and lighting set. height[0] === height[1], so makeStructure's
+    // random roll is zero and every building is exactly the same height across
+    // reloads. Edge/crown colours still follow the course palette for neon
+    // environments. Imported building models keep their own look and size.
+    var UNIFORM_STYLE = {
+        edge: 0x3a4452, glow: 0x00e5ff, body: 0x8a9099, lit: 0xffd9a0,
+        rough: 0.5, metal: 0.25, density: 0.42, wireframe: false,
+        form: 'block', footprint: [4.4, 4.4], height: [12, 12]
     };
 
     /**
@@ -5699,7 +5700,10 @@ define('format_mnemo/vr', [], function() {
         activities.forEach(function(act, k) {
             var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
             var along = Math.floor(k / 2);
-            var basestyle = STYLES[MOD_STYLE[act.modname] || 'entropism'];
+            // Every procedural building uses the one uniform style, so the city
+            // is a consistent set (not the per-module-type movements at random
+            // heights). An imported model still overrides the footprint/height.
+            var basestyle = UNIFORM_STYLE;
             var style = basestyle;
             // A building model sized by its storeys gets a plot its own size.
             var size = act.video ? null : self.buildingSize(act);
