@@ -6390,6 +6390,47 @@ const scenarios = [
         }
     },
     {
+        name: 'kiosk: a larger kiosk is set back so it clears the avenue corner',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const run = (scale, stored) => {
+                const placed = [];
+                const self = {
+                    modelScale: () => scale,
+                    roadHalf: 5.5,
+                    // Avenue corridor (road + sidewalk) and one left side street.
+                    roads: [{xMin: -7.9, xMax: 7.9, zMin: -100, zMax: 12},
+                        {xMin: -40, xMax: -5.5, zMin: -24.5, zMax: -15.5, section: 1}],
+                    isHidden: () => false,
+                    footprintClear: () => true, // No buildings in the way for this test.
+                    snapBase: (v) => v,
+                    sceneObjects: stored ? {'kiosk:1': {x: -20}} : {},
+                    scene: {add: () => {}},
+                    orientClone: () => {}, animateClone: () => {}, setShadow: () => {},
+                    addPickProxy: () => {}, instanceClone: () => {},
+                    registerSceneEditable: (key, label, m, kx, ky, kz) => placed.push({kx: kx, kz: kz})
+                };
+                const tpl = {clone: () => ({position: {set: () => {}}, rotation: {}})};
+                CS.prototype.scatterKiosks.call(self, tpl);
+                return placed[0];
+            };
+            const small = run(1), big = run(2);
+            const avenueHalf = 7.9;
+            // The avenue-facing edge stays beyond the avenue + sidewalk at any size.
+            const smallClear = Math.abs(small.kx) - 1.6 >= avenueHalf - 1e-6;
+            const bigClear = Math.abs(big.kx) - 3.2 >= avenueHalf - 1e-6;
+            // A bigger kiosk is set further from the corner.
+            const scaledOut = Math.abs(big.kx) > Math.abs(small.kx);
+            // A teacher-positioned kiosk keeps the legacy base (mouth - 2), so its
+            // stored offset is not shifted by the new clearance placement.
+            const storedBase = run(1, true);
+            const legacyKept = Math.abs(storedBase.kx - (-5.5 - 2)) < 1e-6;
+            const pass = smallClear && bigClear && scaledOut && legacyKept;
+            return {pass, detail: `small=${small.kx.toFixed(1)} big=${big.kx.toFixed(1)} ` +
+                `clear=${smallClear}/${bigClear} scaledOut=${scaledOut} legacy=${storedBase.kx.toFixed(1)}`};
+        }
+    },
+    {
         name: 'preview: prefetchBuildingModels warms each distinct model once, skipping video',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
