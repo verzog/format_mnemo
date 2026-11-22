@@ -6393,7 +6393,7 @@ const scenarios = [
         name: 'kiosk: a larger kiosk is set back so it clears the avenue corner',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;
-            const run = (scale) => {
+            const run = (scale, stored) => {
                 const placed = [];
                 const self = {
                     modelScale: () => scale,
@@ -6404,7 +6404,7 @@ const scenarios = [
                     isHidden: () => false,
                     footprintClear: () => true, // No buildings in the way for this test.
                     snapBase: (v) => v,
-                    sceneObjects: {},
+                    sceneObjects: stored ? {'kiosk:1': {x: -20}} : {},
                     scene: {add: () => {}},
                     orientClone: () => {}, animateClone: () => {}, setShadow: () => {},
                     addPickProxy: () => {}, instanceClone: () => {},
@@ -6421,9 +6421,13 @@ const scenarios = [
             const bigClear = Math.abs(big.kx) - 3.2 >= avenueHalf - 1e-6;
             // A bigger kiosk is set further from the corner.
             const scaledOut = Math.abs(big.kx) > Math.abs(small.kx);
-            const pass = smallClear && bigClear && scaledOut;
+            // A teacher-positioned kiosk keeps the legacy base (mouth - 2), so its
+            // stored offset is not shifted by the new clearance placement.
+            const storedBase = run(1, true);
+            const legacyKept = Math.abs(storedBase.kx - (-5.5 - 2)) < 1e-6;
+            const pass = smallClear && bigClear && scaledOut && legacyKept;
             return {pass, detail: `small=${small.kx.toFixed(1)} big=${big.kx.toFixed(1)} ` +
-                `clear=${smallClear}/${bigClear} scaledOut=${scaledOut}`};
+                `clear=${smallClear}/${bigClear} scaledOut=${scaledOut} legacy=${storedBase.kx.toFixed(1)}`};
         }
     },
     {

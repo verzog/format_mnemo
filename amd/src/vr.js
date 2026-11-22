@@ -4925,12 +4925,23 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} tpl The kiosk template group.
      */
     Cyberspace.prototype.scatterKiosks = function(tpl) {
+        var self = this;
         var scale = this.modelScale('kiosk');
         // The kiosk's footprint half-extent grows with its configured size.
         var half = 1.6 * scale;
         // The avenue (road + flanking sidewalk) half-width, so the kiosk can be
         // kept clear of the whole corner, not just the carriageway.
         var avenueHalf = this.roads.length ? this.roads[0].xMax : this.roadHalf;
+        // Step a candidate z away from the mouth (along the near kerb) until it
+        // clears the nearby buildings; null when none within reach is clear.
+        var clearZ = function(cx, z0, step, margin, tries) {
+            for (var t = 0; t < tries; t++) {
+                if (self.footprintClear(cx, z0 - t * step, margin)) {
+                    return z0 - t * step;
+                }
+            }
+            return null;
+        };
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
             // A kiosk a teacher deleted stays gone.
@@ -4939,27 +4950,26 @@ define('format_mnemo/vr', [], function() {
             }
             var innerX = r.xMin < 0 ? r.xMax : r.xMin;
             var dir = r.xMin < 0 ? -1 : 1;
-            // Stand the kiosk off the avenue by its own size, so its avenue-facing
-            // edge clears the avenue and its sidewalk at the corner however large
-            // the kiosk is - a bigger kiosk sits further down the side street
-            // rather than overflowing the intersection.
-            var kx = innerX + dir * ((avenueHalf - this.roadHalf) + half + 0.4);
-            // Then step it off the mouth (along the near kerb, away from the
-            // avenue) until it clears the nearby buildings; skip if none is clear.
-            var kz0 = r.zMin - (half + 0.4);
-            var kz = kz0;
-            var placed = false;
-            for (var t = 0; t < 5; t++) {
-                if (this.footprintClear(kx, kz0 - t * (half + 0.6), half + 0.3)) {
-                    kz = kz0 - t * (half + 0.6);
-                    placed = true;
-                    break;
-                }
+            var kioskstored = this.sceneObjects['kiosk:' + r.section];
+            var kx, kz;
+            if (kioskstored) {
+                // A teacher-positioned kiosk keeps its original base, so its
+                // stored offset still lands where the teacher placed it rather
+                // than being shifted by the new clearance placement on upgrade.
+                kx = innerX + dir * 2;
+                kz = clearZ(kx, r.zMin - 2, 1.5, 1.6 * scale, 4);
+            } else {
+                // Fresh placement: stand the kiosk off the avenue by its own size,
+                // so its avenue-facing edge clears the avenue and its sidewalk at
+                // the corner however large the kiosk is - a bigger kiosk sits
+                // further down the side street rather than overflowing the
+                // intersection.
+                kx = innerX + dir * ((avenueHalf - this.roadHalf) + half + 0.4);
+                kz = clearZ(kx, r.zMin - (half + 0.4), half + 0.6, half + 0.3, 5);
             }
-            if (!placed) {
+            if (kz === null) {
                 continue; // No clear spot near this mouth; skip the kiosk.
             }
-            var kioskstored = this.sceneObjects['kiosk:' + r.section];
             kx = this.snapBase(kx, kioskstored);
             kz = this.snapBase(kz, kioskstored);
             var m = tpl.clone();
