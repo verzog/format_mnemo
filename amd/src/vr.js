@@ -142,41 +142,45 @@ define('format_mnemo/vr', [], function() {
     //   kitsch         - a faded hopeful era: bright neon, cheap plastic, busy.
     //   neomilitarism  - mega-corp power: cold black steel, titanium, imposing.
     //   neokitsch      - the wealthy elite: smooth curves, warm marble and wood.
+    // Each movement is one fixed "standard" per module type: a single footprint
+    // and a single height (height[0] === height[1]), so every building of a type
+    // is identical and stable across reloads (makeStructure's random roll is
+    // zero), while the four types still read differently from each other. An
+    // attached building model is fitted to its type's standard envelope too.
     var STYLES = {
         entropism: {
             edge: 0x8a5a2b, glow: 0xffa042, body: 0x9c8b72, lit: 0xffb454,
             rough: 0.95, metal: 0.05, density: 0.32, wireframe: true,
-            form: 'block', footprint: [4.2, 4.4], height: [5, 9]
+            form: 'block', footprint: [4.4, 4.4], height: [7, 7]
         },
         kitsch: {
             edge: 0xff3cc7, glow: 0x00e5ff, body: 0x7d6690, lit: 0xff7bd8,
             rough: 0.5, metal: 0.15, density: 0.62, wireframe: false,
-            form: 'shop', footprint: [5.2, 4.4], height: [4.5, 6.5]
+            form: 'shop', footprint: [5.2, 4.6], height: [5.5, 5.5]
         },
         neomilitarism: {
             edge: 0x394452, glow: 0xff2b4e, body: 0x6b727c, lit: 0xaec4dc,
             rough: 0.5, metal: 0.6, density: 0.14, wireframe: false,
-            form: 'tower', footprint: [3.2, 3.2], height: [15, 24]
+            form: 'tower', footprint: [3.6, 3.6], height: [18, 18]
         },
         neokitsch: {
             edge: 0xffe6a8, glow: 0xffcf7a, body: 0xb8ad96, lit: 0xfff2cf,
             rough: 0.3, metal: 0.35, density: 0.28, wireframe: false,
-            form: 'pavilion', footprint: [4.6, 4.4], height: [8, 12]
+            form: 'pavilion', footprint: [4.6, 4.6], height: [11, 11]
         }
     };
 
-    // A single uniform procedural building: every generated building uses this
-    // one recipe, so the city reads as a consistent set rather than a jumble of
-    // the four movements above at random heights. One square footprint, one
-    // fixed height (a mid-rise; floorHeight snaps 12 to a clean 7 storeys), one
-    // colour and lighting set. height[0] === height[1], so makeStructure's
-    // random roll is zero and every building is exactly the same height across
-    // reloads. Edge/crown colours still follow the course palette for neon
-    // environments. Imported building models keep their own look and size.
-    var UNIFORM_STYLE = {
-        edge: 0x3a4452, glow: 0x00e5ff, body: 0x8a9099, lit: 0xffd9a0,
-        rough: 0.5, metal: 0.25, density: 0.42, wireframe: false,
-        form: 'block', footprint: [4.4, 4.4], height: [12, 12]
+    // Which standard an activity's module speaks in. Assessment and "serious"
+    // tools read as cold corporate towers; social/communication tools as bright
+    // kitsch shops; content/reference as elite neo-kitsch pavilions; anything
+    // else falls to survival-era entropism blocks.
+    var MOD_STYLE = {
+        quiz: 'neomilitarism', assign: 'neomilitarism', workshop: 'neomilitarism',
+        lesson: 'neomilitarism', scorm: 'neomilitarism', bigbluebuttonbn: 'neomilitarism',
+        forum: 'kitsch', chat: 'kitsch', choice: 'kitsch', feedback: 'kitsch',
+        wiki: 'kitsch', glossary: 'kitsch', data: 'kitsch', survey: 'kitsch',
+        page: 'neokitsch', book: 'neokitsch', resource: 'neokitsch', url: 'neokitsch',
+        folder: 'neokitsch', imscp: 'neokitsch', h5pactivity: 'neokitsch', lti: 'neokitsch'
     };
 
     /**
@@ -5700,10 +5704,10 @@ define('format_mnemo/vr', [], function() {
         activities.forEach(function(act, k) {
             var zside = (k % 2 === 0) ? -1 : 1; // Near or far kerb.
             var along = Math.floor(k / 2);
-            // Every procedural building uses the one uniform style, so the city
-            // is a consistent set (not the per-module-type movements at random
-            // heights). An imported model still overrides the footprint/height.
-            var basestyle = UNIFORM_STYLE;
+            // Each module type has one fixed standard (same footprint and height
+            // for every building of that type), so a street of one type is an
+            // even row and the types still differ from each other.
+            var basestyle = STYLES[MOD_STYLE[act.modname] || 'entropism'];
             var style = basestyle;
             // A building model sized by its storeys gets a plot its own size.
             var size = act.video ? null : self.buildingSize(act);
