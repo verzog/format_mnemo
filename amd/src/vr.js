@@ -4926,6 +4926,11 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.scatterKiosks = function(tpl) {
         var scale = this.modelScale('kiosk');
+        // The kiosk's footprint half-extent grows with its configured size.
+        var half = 1.6 * scale;
+        // The avenue (road + flanking sidewalk) half-width, so the kiosk can be
+        // kept clear of the whole corner, not just the carriageway.
+        var avenueHalf = this.roads.length ? this.roads[0].xMax : this.roadHalf;
         for (var i = 1; i < this.roads.length; i++) {
             var r = this.roads[i];
             // A kiosk a teacher deleted stays gone.
@@ -4934,14 +4939,19 @@ define('format_mnemo/vr', [], function() {
             }
             var innerX = r.xMin < 0 ? r.xMax : r.xMin;
             var dir = r.xMin < 0 ? -1 : 1;
-            var kx = innerX + dir * 2;
-            // Nudge the kiosk further from the mouth until it clears the nearby
-            // buildings' footprints, so it no longer drops on top of one.
-            var kz = r.zMin - 2;
+            // Stand the kiosk off the avenue by its own size, so its avenue-facing
+            // edge clears the avenue and its sidewalk at the corner however large
+            // the kiosk is - a bigger kiosk sits further down the side street
+            // rather than overflowing the intersection.
+            var kx = innerX + dir * ((avenueHalf - this.roadHalf) + half + 0.4);
+            // Then step it off the mouth (along the near kerb, away from the
+            // avenue) until it clears the nearby buildings; skip if none is clear.
+            var kz0 = r.zMin - (half + 0.4);
+            var kz = kz0;
             var placed = false;
-            for (var t = 0; t < 4; t++) {
-                if (this.footprintClear(kx, kz - t * 1.5, 1.6 * scale)) {
-                    kz = kz - t * 1.5;
+            for (var t = 0; t < 5; t++) {
+                if (this.footprintClear(kx, kz0 - t * (half + 0.6), half + 0.3)) {
+                    kz = kz0 - t * (half + 0.6);
                     placed = true;
                     break;
                 }
