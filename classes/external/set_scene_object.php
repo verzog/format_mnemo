@@ -59,6 +59,12 @@ class set_scene_object extends external_api {
             'scalex' => new external_value(PARAM_FLOAT, 'Width (x) multiplier', VALUE_DEFAULT, 1.0),
             'scaley' => new external_value(PARAM_FLOAT, 'Height (y) multiplier', VALUE_DEFAULT, 1.0),
             'scalez' => new external_value(PARAM_FLOAT, 'Depth (z) multiplier', VALUE_DEFAULT, 1.0),
+            'colour' => new external_value(
+                PARAM_INT,
+                'Restyle colour as 0xRRGGBB, or -1 for the built-in colour (building-type styles only)',
+                VALUE_DEFAULT,
+                -1
+            ),
         ]);
     }
 
@@ -76,6 +82,7 @@ class set_scene_object extends external_api {
      * @param float $scalex Width (x) multiplier.
      * @param float $scaley Height (y) multiplier.
      * @param float $scalez Depth (z) multiplier.
+     * @param int $colour Restyle colour 0xRRGGBB, or -1 for the built-in colour.
      * @return array{status: bool}
      */
     public static function execute(
@@ -89,7 +96,8 @@ class set_scene_object extends external_api {
         float $brightness,
         float $scalex = 1.0,
         float $scaley = 1.0,
-        float $scalez = 1.0
+        float $scalez = 1.0,
+        int $colour = -1
     ): array {
         global $DB;
 
@@ -105,6 +113,7 @@ class set_scene_object extends external_api {
             'offsetz' => $offsetz,
             'rotation' => $rotation,
             'brightness' => $brightness,
+            'colour' => $colour,
         ]);
 
         if (!scene_values::valid_key($params['objkey'])) {
@@ -119,6 +128,7 @@ class set_scene_object extends external_api {
         // values, and normalise the rotation.
         $fields = scene_values::transform($params) + [
             'brightness' => scene_values::brightness($params['brightness']),
+            'colour' => scene_values::colour($params['colour']),
             'timemodified' => time(),
         ];
 

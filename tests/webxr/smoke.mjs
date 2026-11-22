@@ -6390,6 +6390,73 @@ const scenarios = [
         }
     },
     {
+        name: 'buildings: a per-type restyle applies size, brightness and colour, scoped by type',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const THREE = window.__mnemoTest.THREE;
+            // A tagged facade wall tints to the colour and back when cleared.
+            const m = new THREE.MeshStandardMaterial({color: 0x333333, emissive: 0x111111});
+            m.userData.mnemoFacade = true;
+            CS.prototype.applyMaterialBrightness.call({}, m, 1, new THREE.Color(0xff0000));
+            const tinted = m.color.getHexString() === 'ff0000';
+            CS.prototype.applyMaterialBrightness.call({}, m, 1); // No colour -> revert.
+            const reverted = m.color.getHexString() === '333333';
+            // applyBuildingStyle sets the composed factors and (re)applies, but
+            // only when the type override is non-default (so default types keep
+            // sharing materials untouched).
+            const calls = {t: 0, b: 0};
+            const self = {
+                THREE,
+                buildingStyles: [{size: 1.5, brightness: 2, colour: 0x00ff00},
+                    {size: 1, brightness: 1, colour: null}],
+                applyTransform: () => calls.t++,
+                applyBrightness: () => calls.b++
+            };
+            const ed = {styleIndex: 0};
+            CS.prototype.applyBuildingStyle.call(self, ed);
+            const applied = ed.styleSize === 1.5 && ed.styleBrightness === 2 &&
+                ed.styleColour && ed.styleColour.getHexString() === '00ff00' &&
+                calls.t === 1 && calls.b === 1 && ed.styled === true;
+            const ed2 = {styleIndex: 1};
+            const before = calls.t;
+            CS.prototype.applyBuildingStyle.call(self, ed2);
+            const scoped = ed2.styleSize === 1 && calls.t === before && ed2.styled === false;
+            const pass = tinted && reverted && applied && scoped;
+            return {pass, detail: `tint=${tinted} revert=${reverted} applied=${applied} scoped=${scoped}`};
+        }
+    },
+    {
+        name: 'editor: building-style control seeds from the override and writes it back',
+        fn: () => {
+            const CS = window.__mnemoModule._Cyberspace;
+            const restyled = [];
+            const self = {
+                config: {strings: {}},
+                buildingStyles: [{size: 1, brightness: 1, colour: null},
+                    {size: 1, brightness: 1, colour: null},
+                    {size: 1.3, brightness: 0.8, colour: 0x112233},
+                    {size: 1, brightness: 1, colour: null}],
+                restyleType: (i) => restyled.push(i)
+            };
+            const ed = CS.prototype.buildingStyleEditable.call(self, 2);
+            const seeded = ed.objkey === 'bstyle:2' && ed.kind === 'buildingstyle' &&
+                ed.styleTarget === 2 && ed.transform.scale === 1.3 &&
+                ed.transform.brightness === 0.8 && ed.transform.colour === 0x112233;
+            const singleton = CS.prototype.buildingStyleEditable.call(self, 2) === ed;
+            // Edit it: applyStyleEdit syncs the values back and restyles the type.
+            ed.transform.scale = 2;
+            ed.transform.brightness = 1.5;
+            ed.transform.colour = -1;
+            CS.prototype.applyStyleEdit.call(self, ed);
+            const wrote = self.buildingStyles[2].size === 2 &&
+                self.buildingStyles[2].brightness === 1.5 &&
+                self.buildingStyles[2].colour === null &&
+                restyled[restyled.length - 1] === 2;
+            const pass = seeded && singleton && wrote;
+            return {pass, detail: `seeded=${seeded} singleton=${singleton} wrote=${wrote}`};
+        }
+    },
+    {
         name: 'kiosk: a larger kiosk is set back so it clears the avenue corner',
         fn: () => {
             const CS = window.__mnemoModule._Cyberspace;

@@ -354,6 +354,7 @@ class scene implements renderable, templatable {
                 'z' => (float)$row->offsetz,
                 'rot' => (float)$row->rotation,
                 'brightness' => (float)$row->brightness,
+                'colour' => isset($row->colour) ? (int)$row->colour : -1,
                 'hidden' => !empty($row->hidden),
             ];
         }
@@ -1051,8 +1052,14 @@ class scene implements renderable, templatable {
                 'edit' => get_string('editlayout', 'format_mnemo'),
                 'editdone' => get_string('editdone', 'format_mnemo'),
                 'editbrightness' => get_string('editbrightness', 'format_mnemo'),
+                'editcolour' => get_string('editcolour', 'format_mnemo'),
                 'editediting' => get_string('editediting', 'format_mnemo'),
                 'edittexsize' => get_string('edittexsize', 'format_mnemo'),
+                'stylepick' => get_string('stylepick', 'format_mnemo'),
+                'styleblocks' => get_string('styleblocks', 'format_mnemo'),
+                'styleshops' => get_string('styleshops', 'format_mnemo'),
+                'styletowers' => get_string('styletowers', 'format_mnemo'),
+                'stylepavilions' => get_string('stylepavilions', 'format_mnemo'),
                 'editsnap' => get_string('editsnap', 'format_mnemo'),
                 'editsnapsurface' => get_string('editsnapsurface', 'format_mnemo'),
                 'editdelete' => get_string('editdelete', 'format_mnemo'),

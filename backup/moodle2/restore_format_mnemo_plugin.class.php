@@ -189,6 +189,7 @@ class restore_format_mnemo_plugin extends restore_format_plugin {
             'courseid' => $this->task->get_courseid(),
             'objkey' => $objkey,
             'brightness' => scene_values::brightness($data['brightness'] ?? 1.0),
+            'colour' => scene_values::colour($data['colour'] ?? -1),
             'hidden' => empty($data['hidden']) ? 0 : 1,
             'timemodified' => (int)($data['timemodified'] ?? 0),
         ]);

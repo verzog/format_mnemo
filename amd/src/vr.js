@@ -183,6 +183,41 @@ define('format_mnemo/vr', [], function() {
         folder: 'neokitsch', imscp: 'neokitsch', h5pactivity: 'neokitsch', lti: 'neokitsch'
     };
 
+    // A stable index for each building standard, so a per-type restyle (size,
+    // brightness, colour) can be stored and keyed by number ('bstyle:0'..':3')
+    // and applied to every building of that type. The order is the index.
+    var STYLE_ORDER = ['entropism', 'kitsch', 'neomilitarism', 'neokitsch'];
+
+    /**
+     * The building-standard index (0..3) an activity's module maps to, for the
+     * per-type restyle controls.
+     *
+     * @param {String} modname The activity module name.
+     * @return {Number} The style index in STYLE_ORDER.
+     */
+    function styleIndexOf(modname) {
+        var i = STYLE_ORDER.indexOf(MOD_STYLE[modname] || 'entropism');
+        return i < 0 ? 0 : i;
+    }
+
+    /**
+     * Tint a tagged facade wall material to a per-type restyle colour, captured
+     * once so clearing the override (colour omitted) restores the base wall.
+     * A module function so it needs no scene instance.
+     *
+     * @param {Object} m The material.
+     * @param {Object} [colour] A Three.Color, or omitted to restore the base.
+     */
+    function applyFacadeColour(m, colour) {
+        if (!m.userData.mnemoFacade || !m.color) {
+            return;
+        }
+        if (m.userData.mnemoWallBase === undefined) {
+            m.userData.mnemoWallBase = m.color.clone();
+        }
+        m.color.copy(colour || m.userData.mnemoWallBase);
+    }
+
     /**
      * The running scene instance. Encapsulates all Three.js state so multiple
      * inits (unlikely, but defensive) do not clash.
@@ -265,6 +300,19 @@ define('format_mnemo/vr', [], function() {
         // Stored per-course transforms for non-activity scene objects, keyed by
         // a course-stable slot key (section number, or a physical avenue slot).
         this.sceneObjects = config.sceneobjects || {};
+        // Per-building-type restyle overrides, one per building standard, seeded
+        // from the stored 'bstyle:<i>' scene objects: {size, brightness, colour}
+        // (colour is a 0xRRGGBB int, or null for the type's built-in colour).
+        // A single editor control edits one of these and restyles every building
+        // of that type (see applyBuildingStyle / restyleType).
+        this.buildingStyles = STYLE_ORDER.map(function(name, i) {
+            var o = (config.sceneobjects || {})['bstyle:' + i] || {};
+            return {
+                size: o.scale > 0 ? o.scale : 1,
+                brightness: typeof o.brightness === 'number' ? o.brightness : 1,
+                colour: (typeof o.colour === 'number' && o.colour >= 0) ? o.colour : null
+            };
+        });
         // Site-wide textures, tiling scales and the surface-mesh registries
         // (kept out of the constructor to keep its complexity in check).
         this.initSurfaces(config, assets);
@@ -5792,6 +5840,11 @@ define('format_mnemo/vr', [], function() {
                 // sign or the invisible full-height click proxy) until a model
                 // attaches and takes over as the box target.
                 editable.body = built.body;
+                // The building standard this activity belongs to, so the per-type
+                // restyle control can find and restyle all of its buildings, and
+                // apply any stored override from the first frame.
+                editable.styleIndex = styleIndexOf(act.modname);
+                self.applyBuildingStyle(editable);
             }
             // Queue the ground patch (plaza) fitted to this building's footprint;
             // it is laid after buildCity's road-clearance pass so it sits under
@@ -7359,6 +7412,9 @@ define('format_mnemo/vr', [], function() {
             new THREE.BoxGeometry(w, h, d),
             this.facadeMaterial(style, w, h)
         );
+        // Tag the wall material so a per-type colour restyle can tint the wall
+        // (between the glowing windows), whatever its brightness classification.
+        mass.material.userData.mnemoFacade = true;
         mass.position.y = h / 2;
         mass.castShadow = true;
         mass.receiveShadow = true;
@@ -10301,6 +10357,12 @@ define('format_mnemo/vr', [], function() {
             row.appendChild(el('output', {'data-mnemo-out': key}));
             return row;
         };
+        var colourRow = function(key) {
+            var row = el('label', {'class': 'format-mnemo__editor-row'});
+            row.appendChild(el('span', {}, s.editcolour || 'Colour'));
+            row.appendChild(el('input', {'type': 'color', 'data-mnemo-ed': key}));
+            return row;
+        };
         var check = function(rowattr, inputattr, label) {
             var row = el('label', {'class': 'format-mnemo__editor-snap'});
             row.setAttribute(rowattr, '');
@@ -10341,6 +10403,7 @@ define('format_mnemo/vr', [], function() {
             field('rot', s.editrotate || 'Rotate', 0, 360, 1),
             field('brightness', s.editbrightness || 'Brightness', 0, 3, 0.05),
             field('texsize', s.edittexsize || 'Texture size', 0.25, 4, 0.05),
+            colourRow('colour'),
             check('data-mnemo-ed-snaprow', 'data-mnemo-ed-snap', s.editsnap || 'Snap to grid'),
             check('data-mnemo-ed-snapsurfacerow', 'data-mnemo-ed-snapsurface', s.editsnapsurface || 'Snap to surface'),
             actions,
@@ -10357,115 +10420,22 @@ define('format_mnemo/vr', [], function() {
         keys.forEach(function(key) {
             var input = panel.querySelector('[data-mnemo-ed="' + key + '"]');
             input.addEventListener('input', function() {
-                if (!self.selected) {
-                    return;
-                }
-                // Texture size is a surface property; it reuses the transform's
-                // scale field for storage but retiles the surface rather than
-                // scaling a mesh.
-                if (key === 'texsize') {
-                    self.selected.transform.scale = parseFloat(input.value);
-                    self.retileSurface(self.selected);
-                    self.syncEditorOutputs();
-                    return;
-                }
-                var value = self.snapValue(key, parseFloat(input.value), self.selected);
-                input.value = value;
-                self.selected.transform[key] = value;
-                if (key === 'brightness') {
-                    self.applyBrightness(self.selected);
-                } else {
-                    // With snap-to-surface on, moving in the plane re-rests the
-                    // object on whatever surface it is now over (e.g. up onto a
-                    // sidewalk), and the resulting Move-Y is reflected below.
-                    if (self.snapSurface && (key === 'x' || key === 'z') &&
-                            self.propType(self.selected)) {
-                        self.dropToSurface(self.selected);
-                        var yInput = panel.querySelector('[data-mnemo-ed="y"]');
-                        yInput.value = self.selected.transform.y;
-                    }
-                    self.applyTransform(self.selected);
-                    // Moving or resizing a building up to the kerb is clamped by
-                    // applyTransform (so it never spills into the street); mirror
-                    // any correction back into the Move X/Z controls so the
-                    // sliders track the building's real position.
-                    if (self.selected.footprintBase) {
-                        var exi = panel.querySelector('[data-mnemo-ed="x"]');
-                        var ezi = panel.querySelector('[data-mnemo-ed="z"]');
-                        if (exi) {
-                            exi.value = self.selected.transform.x;
-                        }
-                        if (ezi) {
-                            ezi.value = self.selected.transform.z;
-                        }
-                        // Resizing or rotating a building slides its same-row
-                        // neighbours out of the way so a growing building never
-                        // overlaps the next. Move (x/z) is left alone, so a
-                        // deliberate drag does not bulldoze the whole row.
-                        if (key === 'scale' || key === 'sx' || key === 'sz' || key === 'rot') {
-                            self.pushNeighbours(self.selected);
-                        }
-                    }
-                }
-                self.syncEditorOutputs();
+                self.onEditorSlider(key, input, panel);
             });
         });
 
-        // Snap-to-grid toggle: remembered per viewer and applied on the next
-        // slider move (so it aligns objects without disturbing the current one).
-        var snapBox = panel.querySelector('[data-mnemo-ed-snap]');
-        snapBox.checked = this.snap;
-        snapBox.addEventListener('change', function() {
-            self.snap = snapBox.checked;
-            try {
-                window.localStorage.setItem('format_mnemo_snap', self.snap ? '1' : '0');
-            } catch (e) {
-                // Ignore storage being unavailable; the toggle still works.
-            }
-        });
+        // The colour picker is the per-building-type restyle colour (a native
+        // colour input, not a slider); changing it recolours every building of
+        // the selected type live.
+        this.wireStyleColourInput(panel);
 
-        // Snap-to-surface toggle: remembered per viewer. Turning it on drops the
-        // selected object onto the surface beneath it now (and each later move
-        // re-drops it); the Move-Y control is disabled while it is on, since the
-        // vertical position is then driven by the surface.
-        var surfBox = panel.querySelector('[data-mnemo-ed-snapsurface]');
-        surfBox.checked = this.snapSurface;
-        surfBox.addEventListener('change', function() {
-            self.snapSurface = surfBox.checked;
-            try {
-                window.localStorage.setItem('format_mnemo_snapsurface', self.snapSurface ? '1' : '0');
-            } catch (e) {
-                // Ignore storage being unavailable; the toggle still works.
-            }
-            if (self.snapSurface && self.selected && self.propType(self.selected)) {
-                self.dropToSurface(self.selected);
-                self.applyTransform(self.selected);
-            }
-            if (self.selected) {
-                self.fillEditor(self.selected);
-            } else {
-                self.updateSnapSurfaceUi();
-            }
-        });
+        this.wireSnapToggles(panel);
 
         panel.querySelector('[data-mnemo-ed-act="save"]').addEventListener('click', function() {
             self.saveTransform();
         });
         panel.querySelector('[data-mnemo-ed-act="reset"]').addEventListener('click', function() {
-            if (!self.selected) {
-                return;
-            }
-            self.selected.transform = {scale: 1, sx: 1, sy: 1, sz: 1,
-                x: 0, y: 0, z: 0, rot: 0, brightness: 1};
-            if (self.selected.kind === 'surface') {
-                self.retileSurface(self.selected);
-            } else {
-                self.applyTransform(self.selected);
-                // Restore the model's light too (brightness is offered on every
-                // model now, not only light-emitting ones).
-                self.applyBrightness(self.selected);
-            }
-            self.fillEditor(self.selected);
+            self.resetSelectedEdit();
         });
         panel.querySelector('[data-mnemo-ed-act="close"]').addEventListener('click', function() {
             self.deselectEditable();
@@ -10483,12 +10453,17 @@ define('format_mnemo/vr', [], function() {
             } else {
                 self.deselectEditable();
             }
+            // Offer the per-type restyle buttons only while editing the layout.
+            if (self.stylePanel) {
+                self.stylePanel.hidden = !self.editMode;
+            }
             // The alignment grid is shown throughout the editor (edit or place
             // mode) so buildings and objects can be lined up against it.
             self.showGroundGrid(self.editMode || self.placeMode);
         });
 
         this.buildPlacer();
+        this.buildStyleSelector();
     };
 
     /**
@@ -10581,6 +10556,208 @@ define('format_mnemo/vr', [], function() {
     };
 
     /**
+     * Apply one editor slider's live change to the selected object: texture size
+     * retiles a surface, a building-type style control restyles the whole type,
+     * and any other key moves/scales/rotates the object (clamping a building out
+     * of the street and nudging its row neighbours).
+     *
+     * @param {String} key The slider key.
+     * @param {Object} input The slider input element.
+     * @param {Object} panel The editor panel element.
+     */
+    Cyberspace.prototype.onEditorSlider = function(key, input, panel) {
+        if (!this.selected) {
+            return;
+        }
+        // Texture size is a surface property; it reuses the transform's scale
+        // field for storage but retiles the surface rather than scaling a mesh.
+        if (key === 'texsize') {
+            this.selected.transform.scale = parseFloat(input.value);
+            this.retileSurface(this.selected);
+            this.syncEditorOutputs();
+            return;
+        }
+        var value = this.snapValue(key, parseFloat(input.value), this.selected);
+        input.value = value;
+        this.selected.transform[key] = value;
+        // A per-building-type style control: 'scale' is the type's size and
+        // 'brightness' its brightness; writing either restyles the whole type.
+        if (this.selected.kind === 'buildingstyle') {
+            this.applyStyleEdit(this.selected);
+        } else if (key === 'brightness') {
+            this.applyBrightness(this.selected);
+        } else {
+            this.moveOrScaleSelected(key, panel);
+        }
+        this.syncEditorOutputs();
+    };
+
+    /**
+     * Apply a move/scale/rotate slider change to the selected object: with
+     * snap-to-surface on, re-rest a prop on the surface it is now over; clamp a
+     * building out of the street and mirror the clamp back into the Move X/Z
+     * sliders; and push its row neighbours aside when it grows or turns.
+     *
+     * @param {String} key The slider key.
+     * @param {Object} panel The editor panel element.
+     */
+    Cyberspace.prototype.moveOrScaleSelected = function(key, panel) {
+        if (this.snapSurface && (key === 'x' || key === 'z') && this.propType(this.selected)) {
+            this.dropToSurface(this.selected);
+            panel.querySelector('[data-mnemo-ed="y"]').value = this.selected.transform.y;
+        }
+        this.applyTransform(this.selected);
+        if (!this.selected.footprintBase) {
+            return;
+        }
+        var exi = panel.querySelector('[data-mnemo-ed="x"]');
+        var ezi = panel.querySelector('[data-mnemo-ed="z"]');
+        if (exi) {
+            exi.value = this.selected.transform.x;
+        }
+        if (ezi) {
+            ezi.value = this.selected.transform.z;
+        }
+        // Resizing or rotating a building slides its same-row neighbours out of
+        // the way; move (x/z) is left alone so a deliberate drag does not
+        // bulldoze the whole row.
+        if (key === 'scale' || key === 'sx' || key === 'sz' || key === 'rot') {
+            this.pushNeighbours(this.selected);
+        }
+    };
+
+    /**
+     * Wire the editor's snap-to-grid and snap-to-surface checkboxes (each
+     * remembered per viewer in localStorage). Snap-to-surface, when turned on,
+     * drops the selected prop onto the surface beneath it and locks Move-Y.
+     *
+     * @param {Object} panel The editor panel element.
+     */
+    Cyberspace.prototype.wireSnapToggles = function(panel) {
+        var self = this;
+        var snapBox = panel.querySelector('[data-mnemo-ed-snap]');
+        snapBox.checked = this.snap;
+        snapBox.addEventListener('change', function() {
+            self.snap = snapBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_snap', self.snap ? '1' : '0');
+            } catch (e) {
+                // Ignore storage being unavailable; the toggle still works.
+            }
+        });
+        var surfBox = panel.querySelector('[data-mnemo-ed-snapsurface]');
+        surfBox.checked = this.snapSurface;
+        surfBox.addEventListener('change', function() {
+            self.snapSurface = surfBox.checked;
+            try {
+                window.localStorage.setItem('format_mnemo_snapsurface', self.snapSurface ? '1' : '0');
+            } catch (e) {
+                // Ignore storage being unavailable; the toggle still works.
+            }
+            if (self.snapSurface && self.selected && self.propType(self.selected)) {
+                self.dropToSurface(self.selected);
+                self.applyTransform(self.selected);
+            }
+            if (self.selected) {
+                self.fillEditor(self.selected);
+            } else {
+                self.updateSnapSurfaceUi();
+            }
+        });
+    };
+
+    /**
+     * Wire the editor's colour picker to the selected building-type style
+     * control: picking a colour recolours every building of that type live.
+     *
+     * @param {Object} panel The editor panel element.
+     */
+    Cyberspace.prototype.wireStyleColourInput = function(panel) {
+        var self = this;
+        var colourInput = panel.querySelector('[data-mnemo-ed="colour"]');
+        if (!colourInput) {
+            return;
+        }
+        colourInput.addEventListener('input', function() {
+            if (!self.selected || self.selected.kind !== 'buildingstyle') {
+                return;
+            }
+            self.selected.transform.colour = parseInt(colourInput.value.slice(1), 16);
+            self.applyStyleEdit(self.selected);
+        });
+    };
+
+    /**
+     * Reset the selected object's edit to the defaults: a building-type style
+     * control clears its type override, a surface retiles at the base texture
+     * size, and any other object returns to its base transform and brightness.
+     */
+    Cyberspace.prototype.resetSelectedEdit = function() {
+        if (!this.selected) {
+            return;
+        }
+        this.selected.transform = {scale: 1, sx: 1, sy: 1, sz: 1,
+            x: 0, y: 0, z: 0, rot: 0, brightness: 1, colour: -1};
+        if (this.selected.kind === 'buildingstyle') {
+            this.applyStyleEdit(this.selected);
+        } else if (this.selected.kind === 'surface') {
+            this.retileSurface(this.selected);
+        } else {
+            this.applyTransform(this.selected);
+            // Restore the model's light too (brightness is offered on every model
+            // now, not only light-emitting ones).
+            this.applyBrightness(this.selected);
+        }
+        this.fillEditor(this.selected);
+    };
+
+    /**
+     * Build the per-building-type restyle selector: a small panel, shown while
+     * editing the layout, with one button per building standard present in the
+     * course. Clicking a type selects its shared style control (size, brightness
+     * and colour for every building of that type). No-op without procedural
+     * buildings to restyle.
+     */
+    Cyberspace.prototype.buildStyleSelector = function() {
+        var self = this;
+        var s = this.config.strings || {};
+        var labels = [s.styleblocks || 'Blocks', s.styleshops || 'Shops',
+            s.styletowers || 'Towers', s.stylepavilions || 'Pavilions'];
+        var present = {};
+        (this.editables || []).forEach(function(ed) {
+            if (ed.styleIndex !== undefined && ed.styleIndex !== null) {
+                present[ed.styleIndex] = true;
+            }
+        });
+        var indices = Object.keys(present).map(Number).sort();
+        if (!indices.length) {
+            return;
+        }
+        var panel = document.createElement('div');
+        panel.className = 'format-mnemo__placer format-mnemo__styles';
+        panel.hidden = true;
+        var hint = document.createElement('div');
+        hint.className = 'format-mnemo__placer-hint';
+        hint.textContent = s.stylepick || 'Restyle all buildings of a type:';
+        panel.appendChild(hint);
+        var wrap = document.createElement('div');
+        wrap.className = 'format-mnemo__placer-types';
+        indices.forEach(function(i) {
+            var tb = document.createElement('button');
+            tb.type = 'button';
+            tb.className = 'format-mnemo__placer-type';
+            tb.textContent = labels[i];
+            tb.addEventListener('click', function() {
+                self.selectEditable(self.buildingStyleEditable(i));
+            });
+            wrap.appendChild(tb);
+        });
+        panel.appendChild(wrap);
+        this.root.appendChild(panel);
+        this.stylePanel = panel;
+    };
+
+    /**
      * Turn placement mode on or off, toggling the palette, the ground grid and
      * the button label. Entering placement leaves edit mode (they are
      * mutually exclusive and share the click handler).
@@ -10612,6 +10789,9 @@ define('format_mnemo/vr', [], function() {
                 this.editButton.textContent = s.edit || 'Edit layout';
             }
             this.deselectEditable();
+        }
+        if (this.stylePanel && this.placeMode) {
+            this.stylePanel.hidden = true; // The restyle buttons are edit-mode only.
         }
     };
 
@@ -10827,18 +11007,27 @@ define('format_mnemo/vr', [], function() {
         Object.keys(map).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]').value = map[key];
         });
-        // A surface editable offers only its texture-size control; every other
-        // object offers the transform sliders plus a brightness control (which
-        // lifts a dark model out of the night, or dims it). Toggle each row to
-        // match the selected object's kind.
+        // A surface editable offers only its texture-size control; a per-building
+        // -type style control offers size (the scale row), brightness and colour,
+        // but not the per-instance move/rotate/stretch; every other object offers
+        // the transform sliders plus brightness. Toggle each row to match.
         var surface = editable.kind === 'surface';
-        var rows = {scale: !surface, sx: !surface, sy: !surface, sz: !surface,
-            x: !surface, y: !surface, z: !surface,
-            rot: !surface, brightness: !surface, texsize: surface};
+        var bstyle = editable.kind === 'buildingstyle';
+        var inst = !surface && !bstyle;
+        var rows = {scale: !surface, sx: inst, sy: inst, sz: inst,
+            x: inst, y: inst, z: inst,
+            rot: inst, brightness: !surface, texsize: surface, colour: bstyle};
         Object.keys(rows).forEach(function(key) {
             panel.querySelector('[data-mnemo-ed="' + key + '"]')
                 .closest('.format-mnemo__editor-row').hidden = !rows[key];
         });
+        // Seed the colour picker: the type's override colour, else a neutral so a
+        // first pick starts from grey rather than an arbitrary value.
+        var colourInput = panel.querySelector('[data-mnemo-ed="colour"]');
+        if (colourInput) {
+            var cv = (bstyle && t.colour >= 0) ? t.colour : 0xcccccc;
+            colourInput.value = '#' + ('000000' + Math.max(0, cv).toString(16)).slice(-6);
+        }
         // Deletable objects: teacher-placed props, and generated decorative
         // props (a street lamp or kiosk) which are hidden per course.
         panel.querySelector('[data-mnemo-ed-act="delete"]').hidden = !this.isDeletable(editable);
@@ -10970,7 +11159,11 @@ define('format_mnemo/vr', [], function() {
                 courseid: this.config.courseid, objkey: editable.objkey, scale: t.scale,
                 scalex: one(t.sx), scaley: one(t.sy), scalez: one(t.sz),
                 offsetx: t.x, offsety: t.y, offsetz: t.z, rotation: t.rot,
-                brightness: t.brightness !== undefined ? t.brightness : 1
+                brightness: t.brightness !== undefined ? t.brightness : 1,
+                // A per-building-type style control carries a restyle colour
+                // (0xRRGGBB, or -1 for the built-in colour); other scene objects
+                // have no colour, so it defaults to -1.
+                colour: typeof t.colour === 'number' ? t.colour : -1
             }
         } : {
             methodname: 'format_mnemo_set_transform',
@@ -11870,6 +12063,11 @@ define('format_mnemo/vr', [], function() {
         // prop) is a base the teacher's edit scale multiplies, so a configured
         // prop size and a hand-scaled instance compose instead of overriding.
         var bs = editable.baseScale > 0 ? editable.baseScale : 1;
+        // A per-building-type size override (from the restyle control) multiplies
+        // the base too, so restyling a type resizes all of its buildings while a
+        // teacher's own per-building scale still composes on top.
+        var ss = editable.styleSize > 0 ? editable.styleSize : 1;
+        bs = bs * ss;
         var node = editable.scaleNode || g;
         if (node !== g) {
             // The group carries only the uniform scale (and rotation), so the
@@ -11894,8 +12092,8 @@ define('format_mnemo/vr', [], function() {
             var fb = editable.footprintBase;
             this.setFootprintBounds(editable.footprint,
                 editable.baseX + t.x, editable.baseZ + t.z,
-                fb.w * t.scale * sx, fb.d * t.scale * sz,
-                (editable.baseY + t.y) + fb.h * t.scale * sy,
+                fb.w * t.scale * sx * ss, fb.d * t.scale * sz * ss,
+                (editable.baseY + t.y) + fb.h * t.scale * sy * ss,
                 editable.baseRotY + t.rot * Math.PI / 180);
         }
         if (this.selBox) {
@@ -12138,8 +12336,114 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Object} editable The editable record.
      */
+    /**
+     * Apply a building's type restyle override (size, brightness, colour) to it,
+     * composing with any per-building transform/brightness the teacher set. Size
+     * rides applyTransform (a base-scale factor); brightness and colour ride
+     * applyBrightness. The scene is touched only when the override is non-default
+     * (or when reverting one that was), so a default type leaves its buildings
+     * sharing materials untouched. A no-op for non-building editables.
+     *
+     * @param {Object} editable The building's editable record.
+     */
+    Cyberspace.prototype.applyBuildingStyle = function(editable) {
+        if (editable.styleIndex === undefined || editable.styleIndex === null ||
+                !this.buildingStyles) {
+            return;
+        }
+        var s = this.buildingStyles[editable.styleIndex] || {};
+        editable.styleSize = s.size > 0 ? s.size : 1;
+        editable.styleBrightness = s.brightness > 0 ? s.brightness : 1;
+        editable.styleColour = (typeof s.colour === 'number' && s.colour >= 0)
+            ? new this.THREE.Color(s.colour) : null;
+        var active = editable.styleSize !== 1 || editable.styleBrightness !== 1 ||
+            !!editable.styleColour;
+        if (active || editable.styled) {
+            this.applyTransform(editable);
+            this.applyBrightness(editable);
+        }
+        editable.styled = active;
+    };
+
+    /**
+     * Restyle every building of one standard (0..3) live, after its stored
+     * override changes, so the whole type updates together like the shared
+     * surface controls.
+     *
+     * @param {Number} index The building-standard index.
+     */
+    Cyberspace.prototype.restyleType = function(index) {
+        var self = this;
+        (this.editables || []).forEach(function(ed) {
+            if (ed.styleIndex === index) {
+                self.applyBuildingStyle(ed);
+            }
+        });
+    };
+
+    /**
+     * The shared "building style" editable for one standard (0..3): a non-
+     * instance control (like a surface editable) the teacher selects to restyle
+     * every building of that type. Get-or-create singleton; its transform holds
+     * the type's size (scale), brightness and colour (a 0xRRGGBB int, -1 = none).
+     *
+     * @param {Number} index The building-standard index.
+     * @return {Object} The shared editable record.
+     */
+    Cyberspace.prototype.buildingStyleEditable = function(index) {
+        if (!this.styleEditables) {
+            this.styleEditables = {};
+        }
+        if (this.styleEditables[index]) {
+            return this.styleEditables[index];
+        }
+        var s = this.config.strings || {};
+        var labels = [s.styleblocks || 'Blocks', s.styleshops || 'Shops',
+            s.styletowers || 'Towers', s.stylepavilions || 'Pavilions'];
+        var bs = this.buildingStyles[index] || {};
+        var ed = {
+            objkey: 'bstyle:' + index,
+            kind: 'buildingstyle',
+            styleTarget: index,
+            name: labels[index],
+            group: null,
+            cmid: null,
+            emits: false,
+            transform: {
+                scale: bs.size > 0 ? bs.size : 1,
+                sx: 1, sy: 1, sz: 1, x: 0, y: 0, z: 0, rot: 0,
+                brightness: typeof bs.brightness === 'number' ? bs.brightness : 1,
+                colour: typeof bs.colour === 'number' ? bs.colour : -1
+            }
+        };
+        this.styleEditables[index] = ed;
+        return ed;
+    };
+
+    /**
+     * Sync a building-style control's edited values back into the type override
+     * and restyle every building of the type live.
+     *
+     * @param {Object} editable The 'buildingstyle' editable.
+     */
+    Cyberspace.prototype.applyStyleEdit = function(editable) {
+        var t = editable.transform;
+        var bs = this.buildingStyles[editable.styleTarget];
+        bs.size = t.scale > 0 ? t.scale : 1;
+        bs.brightness = typeof t.brightness === 'number' ? t.brightness : 1;
+        bs.colour = (typeof t.colour === 'number' && t.colour >= 0) ? t.colour : null;
+        this.restyleType(editable.styleTarget);
+    };
+
     Cyberspace.prototype.applyBrightness = function(editable) {
-        var b = editable.transform.brightness;
+        // Compose the building's own brightness with its type's restyle override,
+        // so a per-type brightness change lifts (or dims) every building of the
+        // type while a teacher's per-building brightness still composes on top.
+        var sb = editable.styleBrightness > 0 ? editable.styleBrightness : 1;
+        var b = editable.transform.brightness * sb;
+        // A per-type colour override tints the building body (the "fill" wall
+        // material); null leaves the type's built-in colour.
+        var colour = editable.styleColour || null;
         var self = this;
         // Old-to-new pairs for every material cloned below, so the live
         // references other code holds (a sign's frame colour, a video screen's
@@ -12169,7 +12473,7 @@ define('format_mnemo/vr', [], function() {
             self.ownBrightnessMaterial(o, remap);
             var mats = Array.isArray(o.material) ? o.material : [o.material];
             for (var i = 0; i < mats.length; i++) {
-                self.applyMaterialBrightness(mats[i], b);
+                self.applyMaterialBrightness(mats[i], b, colour);
             }
         });
         // Repoint any live material reference (frame colour, screen poster) at
@@ -12261,8 +12565,10 @@ define('format_mnemo/vr', [], function() {
      *
      * @param {Object} m The material.
      * @param {Number} b The brightness multiplier.
+     * @param {Object} [colour] A Three.Color to tint the facade wall (and any
+     *     dark "fill" body) to, for a per-type restyle; omitted keeps the base.
      */
-    Cyberspace.prototype.applyMaterialBrightness = function(m, b) {
+    Cyberspace.prototype.applyMaterialBrightness = function(m, b, colour) {
         // Classify the material once and remember it: a fill lifts a dark model
         // by giving it a non-black emissive, so without a locked kind a later
         // call would mistake it for an "already glowing" material and never
@@ -12293,15 +12599,25 @@ define('format_mnemo/vr', [], function() {
         } else if (kind === 'fill') {
             // Lift a dark model by emitting a share of its own base colour (so
             // it never washes to white); dim it below 1 by scaling the albedo.
+            // A per-type colour override replaces the base wall colour (kept
+            // reversible: the override is applied from the captured base each
+            // call, never accumulated).
             var fb = m.userData.mnemoFillBase;
-            m.color.copy(fb.color).multiplyScalar(Math.min(1, b));
+            var base = colour || fb.color;
+            m.color.copy(base).multiplyScalar(Math.min(1, b));
             m.emissive.copy(fb.emissive)
-                .add(fb.color.clone().multiplyScalar(Math.max(0, b - 1) * 0.6));
+                .add(base.clone().multiplyScalar(Math.max(0, b - 1) * 0.6));
             // A dark fill often ships with emissiveIntensity 0, which would hide
             // the lift above; force a visible intensity when brightening past 1.
             m.emissiveIntensity = b > 1 ? Math.max(fb.intensity, 1) : fb.intensity;
         } else if (kind === 'dim') {
             m.color.copy(m.userData.mnemoBaseColor).multiplyScalar(b);
+        }
+        // The glow branch leaves the wall colour (between the windows) alone, so
+        // a per-type colour restyle tints the tagged facade wall separately; the
+        // fill branch already honours the colour, so skip it there.
+        if (kind !== 'fill') {
+            applyFacadeColour(m, colour);
         }
     };
 
