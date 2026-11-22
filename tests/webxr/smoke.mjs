@@ -6421,8 +6421,17 @@ const scenarios = [
             const before = calls.t;
             CS.prototype.applyBuildingStyle.call(self, ed2);
             const scoped = ed2.styleSize === 1 && calls.t === before && ed2.styled === false;
-            const pass = tinted && reverted && applied && scoped;
-            return {pass, detail: `tint=${tinted} revert=${reverted} applied=${applied} scoped=${scoped}`};
+            // A type brightness of 0 (fully dark) is honoured, not reset to 1.
+            const self0 = {
+                THREE, buildingStyles: [{size: 1, brightness: 0, colour: null}],
+                applyTransform: () => {}, applyBrightness: () => {}
+            };
+            const edDark = {styleIndex: 0};
+            CS.prototype.applyBuildingStyle.call(self0, edDark);
+            const darkKept = edDark.styleBrightness === 0 && edDark.styled === true;
+            const pass = tinted && reverted && applied && scoped && darkKept;
+            return {pass, detail: `tint=${tinted} revert=${reverted} applied=${applied} ` +
+                `scoped=${scoped} darkKept=${darkKept}`};
         }
     },
     {

@@ -10898,6 +10898,12 @@ define('format_mnemo/vr', [], function() {
      */
     Cyberspace.prototype.selectEditable = function(editable) {
         this.selected = editable;
+        // Hide the building-style type buttons while the editor panel is open, so
+        // the selector never paints over (and intercepts clicks on) the editor's
+        // controls; it returns when the selection is closed (see deselectEditable).
+        if (this.stylePanel) {
+            this.stylePanel.hidden = true;
+        }
         this.rebuildSelectionBox();
         // Float the object's name above it in the scene so it is unmistakable
         // which item is being edited (skipped for surfaces, which have no
@@ -10921,6 +10927,11 @@ define('format_mnemo/vr', [], function() {
         this.showSelectionLabel({}); // Clear the floating name label.
         if (this.editorPanel) {
             this.editorPanel.hidden = true;
+        }
+        // Closing the editor while still editing the layout brings the building-
+        // style type buttons back, so another type can be picked.
+        if (this.stylePanel && this.editMode) {
+            this.stylePanel.hidden = false;
         }
     };
 
@@ -11921,8 +11932,11 @@ define('format_mnemo/vr', [], function() {
         var rot = editable.baseRotY + t.rot * Math.PI / 180;
         var c = Math.abs(Math.cos(rot));
         var s = Math.abs(Math.sin(rot));
-        var hw = fb.w * t.scale * sx / 2;
-        var hd = fb.d * t.scale * sz / 2;
+        // Include the per-building-type size override, so an enlarged type is
+        // clamped out of the road by its real extent, not just its own scale.
+        var ss = editable.styleSize > 0 ? editable.styleSize : 1;
+        var hw = fb.w * t.scale * sx * ss / 2;
+        var hd = fb.d * t.scale * sz * ss / 2;
         var hx = hw * c + hd * s;
         var hz = hw * s + hd * c;
         var cx = editable.baseX + t.x;
@@ -12316,7 +12330,16 @@ define('format_mnemo/vr', [], function() {
      * @param {Object} editable The activity's editable record.
      */
     Cyberspace.prototype.reapplyModelBrightness = function(modelp, editable) {
-        if (!modelp || !editable || editable.transform.brightness === 1) {
+        if (!modelp || !editable) {
+            return;
+        }
+        // Reapply once the model attaches when the per-building brightness is set
+        // OR the building's type carries a brightness/colour restyle override, so
+        // those survive on the imported model (not just the procedural
+        // placeholder it replaces). applyBrightness composes both.
+        var typed = (typeof editable.styleBrightness === 'number' && editable.styleBrightness !== 1) ||
+            !!editable.styleColour;
+        if (editable.transform.brightness === 1 && !typed) {
             return;
         }
         var self = this;
@@ -12353,7 +12376,9 @@ define('format_mnemo/vr', [], function() {
         }
         var s = this.buildingStyles[editable.styleIndex] || {};
         editable.styleSize = s.size > 0 ? s.size : 1;
-        editable.styleBrightness = s.brightness > 0 ? s.brightness : 1;
+        // Preserve a stored 0 (fully dark); default to 1 only when absent/invalid.
+        editable.styleBrightness = (typeof s.brightness === 'number' && s.brightness >= 0)
+            ? s.brightness : 1;
         editable.styleColour = (typeof s.colour === 'number' && s.colour >= 0)
             ? new this.THREE.Color(s.colour) : null;
         var active = editable.styleSize !== 1 || editable.styleBrightness !== 1 ||
@@ -12439,7 +12464,9 @@ define('format_mnemo/vr', [], function() {
         // Compose the building's own brightness with its type's restyle override,
         // so a per-type brightness change lifts (or dims) every building of the
         // type while a teacher's per-building brightness still composes on top.
-        var sb = editable.styleBrightness > 0 ? editable.styleBrightness : 1;
+        // A stored 0 (fully dark) is honoured; only absent/invalid defaults to 1.
+        var sb = (typeof editable.styleBrightness === 'number' && editable.styleBrightness >= 0)
+            ? editable.styleBrightness : 1;
         var b = editable.transform.brightness * sb;
         // A per-type colour override tints the building body (the "fill" wall
         // material); null leaves the type's built-in colour.
