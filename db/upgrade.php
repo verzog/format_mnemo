@@ -223,5 +223,17 @@ function xmldb_format_mnemo_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026112100, 'format', 'mnemo');
     }
 
+    if ($oldversion < 2026112114) {
+        // Per-building-type restyle: a colour set in the editor to recolour every
+        // building of a type (stored as a 0xRRGGBB integer, -1 = built-in colour).
+        $table = new xmldb_table('format_mnemo_sceneobj');
+        $field = new xmldb_field('colour', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '-1', 'brightness');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026112114, 'format', 'mnemo');
+    }
+
     return true;
 }

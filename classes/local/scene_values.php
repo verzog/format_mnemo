@@ -119,6 +119,25 @@ class scene_values {
     }
 
     /**
+     * A per-building-type restyle colour as a 0xRRGGBB integer, or -1 for "no
+     * override" (the type's built-in colour). A non-integer or out-of-range
+     * value falls back to -1.
+     *
+     * @param mixed $value The raw colour.
+     * @return int The colour 0..0xFFFFFF, or -1 for none.
+     */
+    public static function colour($value): int {
+        if (!is_numeric($value)) {
+            return -1;
+        }
+        $value = (int)$value;
+        if ($value < 0 || $value > 0xFFFFFF) {
+            return -1;
+        }
+        return $value;
+    }
+
+    /**
      * Snap a placed prop's coordinate to the grid and clamp it to the world.
      *
      * @param mixed $value The raw coordinate.
